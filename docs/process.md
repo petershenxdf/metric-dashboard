@@ -246,6 +246,7 @@ algorithm_adapters
 clustering adapter
 outlier adapter
 adapter Flask page
+default-analysis workflow page
 ```
 
 Why:
@@ -261,6 +262,18 @@ Tasks:
 5. Add `/modules/algorithm-adapters/`.
 6. Add APIs for cluster and outlier output.
 7. Show adapter diagnostics in Flask.
+8. Add `/workflows/default-analysis/`.
+9. Keep algorithm implementation behind a provider boundary so future algorithms can replace the current default.
+
+Current implementation:
+
+1. Local Outlier Factor runs first.
+2. Detected outliers are excluded from clustering.
+3. deterministic KMeans runs on the remaining non-outlier points.
+4. `n_clusters` can be adjusted through the Flask page or query string.
+5. The current provider is `SequentialLofThenKMeansProvider`.
+6. A future SSDBCODI provider can replace the current provider while preserving dashboard-facing schemas.
+7. The debug fixture is `default_analysis_outlier_debug`, which intentionally contains visible outlier candidates.
 
 Unit tests:
 
@@ -268,6 +281,8 @@ Unit tests:
 2. Cluster assignments map to known point IDs.
 3. Outlier scores map to known point IDs.
 4. Invalid algorithm output is rejected.
+5. Outliers are excluded before clustering.
+6. `n_clusters` changes the requested cluster count.
 
 Flask visual check:
 
@@ -276,7 +291,15 @@ Open `/modules/algorithm-adapters/` and confirm:
 1. cluster assignments are visible.
 2. outlier scores are visible.
 3. diagnostics show which algorithm is being called.
-4. page clearly marks mock outputs if real algorithms are not connected yet.
+4. execution order is clearly shown as outlier detection before clustering.
+5. changing `n_clusters` updates KMeans output.
+6. the page explains the current provider and future algorithm slot.
+
+Open `/workflows/default-analysis/` and confirm:
+
+1. projection, outliers, and clusters are visible together.
+2. outliers are visually distinct.
+3. JSON payloads for outliers and clusters are inspectable.
 
 Completion:
 
@@ -675,6 +698,12 @@ Flask app runs and lists all modules under `/modules/`.
 Goal:
 
 Data workspace and projection can be opened in Flask, and `/workflows/data-projection/` shows their interaction.
+
+### Milestone 2.5: Default Analysis Visible
+
+Goal:
+
+Algorithm adapters can be opened in Flask, Local Outlier Factor and KMeans outputs are visible, and `/workflows/default-analysis/` shows data, projection, outliers, and clusters together.
 
 ### Milestone 3: Selection and Labeling
 

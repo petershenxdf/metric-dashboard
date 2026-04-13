@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Default Analysis Workflow{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Workflow Demo</p>
+    <h1>Default Analysis</h1>
+    <p>
+      Checks the current sequence: Data Workspace -> Projection ->
+      Local Outlier Factor -> KMeans on non-outliers.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Workflow Controls</h2>
+    <form class="debug-form" method="get">
+      <label>
+        Clusters
+        <input type="number" name="n_clusters" min="1" value="{{ n_clusters }}">
+      </label>
+      <button class="button" type="submit">Run Workflow</button>
+    </form>
+    {% if error %}
+      <p class="error-text">{{ error }} Reverted to the default cluster count.</p>
+    {% endif %}
+    <dl class="details">
+      <dt>Dataset</dt>
+      <dd>{{ dataset.dataset_id }}</dd>
+      <dt>Fixture shape</dt>
+      <dd>three compact clusters plus three distant outlier candidates</dd>
+      <dt>Projection</dt>
+      <dd>{{ projection.method }}</dd>
+      <dt>Outlier algorithm</dt>
+      <dd>{{ analysis.outlier_result.algorithm }}</dd>
+      <dt>Cluster algorithm</dt>
+      <dd>{{ analysis.cluster_result.algorithm }}</dd>
+      <dt>Execution order</dt>
+      <dd>{{ analysis.diagnostics.execution_order | join(" -> ") }}</dd>
+    </dl>
+  </section>
+
+  <section class="panel">
+    <h2>Projection With Default Analysis</h2>
+    <svg class="debug-plot" viewBox="0 0 860 520" role="img" aria-label="Default analysis projection plot">
+      <line x1="56" y1="260" x2="804" y2="260" stroke="#dadce0"></line>
+      <line x1="430" y1="56" x2="430" y2="464" stroke="#dadce0"></line>
+      {% for point in scaled_points %}
+        <g>
+          <circle
+            cx="{{ '%.2f'|format(point.screen_x) }}"
+            cy="{{ '%.2f'|format(point.screen_y) }}"
+            r="{{ 10 if point.point_id in outlier_ids else 7 }}"
+            fill="{{ '#d6336c' if point.point_id in outlier_ids else point.color }}"
+            stroke="#202124"
+            stroke-width="{{ 2.5 if point.point_id in outlier_ids else 1.5 }}"
+          >
+            <title>
+              {{ point.point_id }}
+              {% if point.point_id in outlier_ids %}
+                (outlier)
+              {% elif point.label %}
+                ({{ point.label }})
+              {% endif %}
+            </title>
+          </circle>
+          <text
+            x="{{ '%.2f'|format(point.screen_x + 10) }}"
+            y="{{ '%.2f'|format(point.screen_y - 8) }}"
+          >{{ point.point_id }}</text>
+        </g>
+      {% endfor %}
+    </svg>
+    <p class="small">Pink larger points are LOF outliers. Other colors are KMeans clusters.</p>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Outliers</h2>
+      <p>{{ analysis.outlier_result.outlier_point_ids | join(", ") or "none" }}</p>
+      <pre>{{ analysis.outlier_result.to_dict() | tojson(indent=2) }}</pre>
+    </article>
+
+    <article>
+      <h2>Clusters</h2>
+      <p>{{ analysis.cluster_result.assignments | length }} non-outlier points clustered.</p>
+      <pre>{{ analysis.cluster_result.to_dict() | tojson(indent=2) }}</pre>
+    </article>
+  </section>
+{% endblock %}

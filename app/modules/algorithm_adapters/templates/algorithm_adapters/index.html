@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Algorithm Adapters{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Module Debug Page</p>
+    <h1>Algorithm Adapters</h1>
+    <p>
+      Runs Local Outlier Factor first, removes detected outliers, then runs
+      KMeans on the remaining points. Current algorithms are intentionally
+      wrapped behind adapter boundaries for future replacement.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Adapter Controls</h2>
+    <form class="debug-form" method="get">
+      <label>
+        Clusters
+        <input type="number" name="n_clusters" min="1" value="{{ params.n_clusters }}">
+      </label>
+      <label>
+        LOF neighbors
+        <input type="number" name="outlier_n_neighbors" min="1" value="{{ params.outlier_n_neighbors }}">
+      </label>
+      <label>
+        LOF contamination
+        <input
+          type="number"
+          name="outlier_contamination"
+          min="0.01"
+          max="0.49"
+          step="0.01"
+          value="{{ params.outlier_contamination }}"
+        >
+      </label>
+      <button class="button" type="submit">Run Analysis</button>
+    </form>
+
+    {% if error %}
+      <p class="error-text">{{ error }}</p>
+    {% endif %}
+
+    <dl class="details">
+      <dt>Dataset</dt>
+      <dd>default_analysis_outlier_debug</dd>
+      <dt>Dependency mode</dt>
+      <dd>{{ dependency_mode }}</dd>
+      <dt>Fixture shape</dt>
+      <dd>three compact clusters plus three distant outlier candidates</dd>
+      <dt>Current provider</dt>
+      <dd>sequential_lof_then_kmeans</dd>
+      <dt>Execution order</dt>
+      <dd>Local Outlier Factor -> KMeans on non-outliers</dd>
+      <dt>Future provider slot</dt>
+      <dd>SSDBCODI or another integrated clustering/outlier algorithm</dd>
+    </dl>
+
+    <div class="actions">
+      <a href="{{ url_for('algorithm_adapters.outliers_api', n_clusters=params.n_clusters, outlier_n_neighbors=params.outlier_n_neighbors, outlier_contamination=params.outlier_contamination) }}">Outliers API</a>
+      <a href="{{ url_for('algorithm_adapters.clusters_api', n_clusters=params.n_clusters, outlier_n_neighbors=params.outlier_n_neighbors, outlier_contamination=params.outlier_contamination) }}">Clusters API</a>
+      <a href="{{ url_for('algorithm_adapters.analysis_api', n_clusters=params.n_clusters, outlier_n_neighbors=params.outlier_n_neighbors, outlier_contamination=params.outlier_contamination) }}">Analysis API</a>
+      <a href="{{ url_for('algorithm_adapters.state_api', n_clusters=params.n_clusters, outlier_n_neighbors=params.outlier_n_neighbors, outlier_contamination=params.outlier_contamination) }}">State API</a>
+    </div>
+  </section>
+
+  {% if analysis %}
+    <section class="split">
+      <article>
+        <h2>Outlier Detection</h2>
+        <dl>
+          <dt>Algorithm</dt>
+          <dd>{{ analysis.outlier_result.algorithm }}</dd>
+          <dt>Outliers</dt>
+          <dd>{{ analysis.outlier_result.outlier_point_ids | join(", ") or "none" }}</dd>
+        </dl>
+      </article>
+
+      <article>
+        <h2>Clustering</h2>
+        <dl>
+          <dt>Algorithm</dt>
+          <dd>{{ analysis.cluster_result.algorithm }}</dd>
+          <dt>Requested clusters</dt>
+          <dd>{{ analysis.cluster_result.n_clusters }}</dd>
+          <dt>Clustered points</dt>
+          <dd>{{ analysis.cluster_result.assignments | length }}</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="panel">
+      <h2>Cluster Counts</h2>
+      <div class="chip-row">
+        {% for cluster_id, count in cluster_counts.items() %}
+          <span>{{ cluster_id }}: {{ count }}</span>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Outlier Scores</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Point ID</th>
+              <th>LOF Score</th>
+              <th>Outlier?</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for score in analysis.outlier_result.scores %}
+              <tr>
+                <td>{{ score.point_id }}</td>
+                <td>{{ "%.4f"|format(score.score) }}</td>
+                <td>{{ "yes" if score.is_outlier else "no" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Cluster Assignments</h2>
+      <p class="small">Outliers are intentionally excluded before KMeans runs.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Point ID</th>
+              <th>Cluster ID</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for assignment in analysis.cluster_result.assignments %}
+              <tr>
+                <td>{{ assignment.point_id }}</td>
+                <td>{{ assignment.cluster_id }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Analysis Payload</h2>
+      <pre>{{ analysis.to_dict() | tojson(indent=2) }}</pre>
+    </section>
+  {% endif %}
+{% endblock %}

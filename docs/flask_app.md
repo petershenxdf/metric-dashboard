@@ -31,7 +31,7 @@ def create_app(enabled_modules=None):
     app = Flask(__name__)
     register_core_routes(app)
     register_modules(app, enabled_modules)
-    register_workflows(app)
+    register_workflows(app, enabled_modules)
     return app
 ```
 
@@ -42,13 +42,14 @@ The app factory should make it easy to enable a single module, a group of module
 Use a central module registry:
 
 ```python
-MODULES = {
-    "data-workspace": data_workspace.create_blueprint,
-    "projection": projection.create_blueprint,
-    "labeling": labeling.create_blueprint,
-    "scatterplot": scatterplot.create_blueprint,
-    "chatbox": chatbox.create_blueprint,
-}
+ModuleInfo(
+    slug="data-workspace",
+    package_name="data_workspace",
+    title="Data Workspace",
+    purpose="Dataset loading, point IDs, metadata, and feature matrix.",
+    status="working",
+    blueprint_factory=data_workspace.create_blueprint,
+)
 ```
 
 The dashboard shell should register modules through this registry. Modules should not import the dashboard shell.
@@ -76,10 +77,14 @@ Workflow routes:
 
 ```text
 /workflows/data-projection/
+/workflows/default-analysis/
+/workflows/selection-context/
 /workflows/selection-labeling/
 /workflows/scatter-selection/
 /workflows/scatter-labeling/
+/workflows/chat-selection/
 /workflows/chat-intent/
+/workflows/instruction-constraints/
 /workflows/refinement-loop/
 ```
 

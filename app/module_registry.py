@@ -1,7 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Optional, Tuple
+from typing import Callable, Iterable, Optional, Tuple, TYPE_CHECKING
+
+from .modules.algorithm_adapters import create_blueprint as create_algorithm_adapters_blueprint
+from .modules.data_workspace import create_blueprint as create_data_workspace_blueprint
+from .modules.projection import create_blueprint as create_projection_blueprint
+from .workflows.default_analysis import create_blueprint as create_default_analysis_blueprint
+from .workflows.data_projection import create_blueprint as create_data_projection_blueprint
+
+if TYPE_CHECKING:
+    from flask import Blueprint, Flask
+
+
+BlueprintFactory = Callable[[], "Blueprint"]
 
 
 @dataclass(frozen=True)
@@ -11,6 +23,7 @@ class ModuleInfo:
     title: str
     purpose: str
     status: str = "planned"
+    blueprint_factory: Optional[BlueprintFactory] = None
 
 
 @dataclass(frozen=True)
@@ -20,6 +33,7 @@ class WorkflowInfo:
     purpose: str
     modules: Tuple[str, ...]
     status: str = "planned"
+    blueprint_factory: Optional[BlueprintFactory] = None
 
 
 MODULES: Tuple[ModuleInfo, ...] = (
@@ -29,6 +43,7 @@ MODULES: Tuple[ModuleInfo, ...] = (
         title="Data Workspace",
         purpose="Dataset loading, point IDs, metadata, and feature matrix.",
         status="working",
+        blueprint_factory=create_data_workspace_blueprint,
     ),
     ModuleInfo(
         slug="projection",
@@ -36,12 +51,15 @@ MODULES: Tuple[ModuleInfo, ...] = (
         title="Projection",
         purpose="MDS projection into 2D coordinates.",
         status="working",
+        blueprint_factory=create_projection_blueprint,
     ),
     ModuleInfo(
         slug="algorithm-adapters",
         package_name="algorithm_adapters",
         title="Algorithm Adapters",
         purpose="Wrappers for existing clustering and outlier algorithms.",
+        status="working",
+        blueprint_factory=create_algorithm_adapters_blueprint,
     ),
     ModuleInfo(
         slug="selection",
@@ -93,12 +111,16 @@ WORKFLOWS: Tuple[WorkflowInfo, ...] = (
         title="Data and Projection",
         purpose="Inspect dataset output beside MDS projection output.",
         modules=("data-workspace", "projection"),
+        status="working",
+        blueprint_factory=create_data_projection_blueprint,
     ),
     WorkflowInfo(
         slug="default-analysis",
         title="Default Analysis",
         purpose="Inspect projection with default clusters and outliers.",
         modules=("data-workspace", "projection", "algorithm-adapters"),
+        status="working",
+        blueprint_factory=create_default_analysis_blueprint,
     ),
     WorkflowInfo(
         slug="selection-context",
@@ -168,9 +190,25 @@ def get_module(slug: str) -> Optional[ModuleInfo]:
     return next((module for module in MODULES if module.slug == slug), None)
 
 
-def list_workflows() -> Tuple[WorkflowInfo, ...]:
-    return WORKFLOWS
+def list_workflows(enabled_modules: Optional[Iterable[str]] = None) -> Tuple[WorkflowInfo, ...]:
+    if enabled_modules is None:
+        return WORKFLOWS
+
+    enabled = {module.slug for module in list_modules(enabled_modules)}
+    return tuple(workflow for workflow in WORKFLOWS if set(workflow.modules).issubset(enabled))
 
 
 def get_workflow(slug: str) -> Optional[WorkflowInfo]:
     return next((workflow for workflow in WORKFLOWS if workflow.slug == slug), None)
+
+
+def register_modules(app: "Flask", enabled_modules: Optional[Iterable[str]] = None) -> None:
+    for module in list_modules(enabled_modules):
+        if module.blueprint_factory is not None:
+            app.register_blueprint(module.blueprint_factory())
+
+
+def register_workflows(app: "Flask", enabled_modules: Optional[Iterable[str]] = None) -> None:
+    for workflow in list_workflows(enabled_modules):
+        if workflow.blueprint_factory is not None:
+            app.register_blueprint(workflow.blueprint_factory())

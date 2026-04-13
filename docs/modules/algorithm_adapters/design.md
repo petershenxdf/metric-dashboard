@@ -42,6 +42,32 @@ tests/modules/algorithm_adapters/
   test_routes.py
 ```
 
+## Current Status
+
+Status: `working`
+
+Step 3 implementation is complete enough for local inspection:
+
+1. Local Outlier Factor runs first over the feature matrix.
+2. Detected outliers are excluded from clustering.
+3. deterministic KMeans runs on the remaining non-outlier points.
+4. Flask debug page exposes adjustable `n_clusters`.
+5. cluster, outlier, analysis, and state APIs exist.
+6. `/workflows/default-analysis/` combines data, projection, outliers, and clusters.
+
+The current algorithms are intentionally wrapped as replaceable adapters. The future
+algorithm slot is reserved for integrated algorithms such as
+[SSDBCODI](https://arxiv.org/abs/2208.05561), but SSDBCODI is not used in the
+current implementation.
+
+The service exposes an `AnalysisProvider` boundary. The current provider is
+`SequentialLofThenKMeansProvider`; a future SSDBCODI provider should implement
+the same boundary and return the same dashboard-facing result schemas.
+
+The default Flask fixture is `default_analysis_outlier_debug`, not Iris. It uses
+three compact two-dimensional clusters plus three distant outlier candidates so
+the debug page reliably shows both clustering and outlier-detection behavior.
+
 ## Output Contracts
 
 Cluster assignment:
@@ -80,6 +106,9 @@ Outlier result:
 /modules/algorithm-adapters/health            module health
 /modules/algorithm-adapters/api/clusters      cluster assignments JSON
 /modules/algorithm-adapters/api/outliers      outlier scores JSON
+/modules/algorithm-adapters/api/analysis      combined outlier and cluster JSON
+/modules/algorithm-adapters/api/state         module summary JSON
+/workflows/default-analysis/                  projection plus default analysis
 ```
 
 ## Flask Debug Page Requirements

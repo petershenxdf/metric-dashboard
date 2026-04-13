@@ -8,7 +8,8 @@
     <h1>Metric Dashboard</h1>
     <p>
       Module-first dashboard for human-in-the-loop metric learning.
-      Step 0 provides the Flask shell, module lab, and workflow placeholders.
+      Current build includes the Flask shell, Data Workspace, Projection,
+      and the Data Projection workflow.
     </p>
   </section>
 
@@ -46,7 +47,7 @@
           <p class="status">{{ module.status }}</p>
           <h3>{{ module.title }}</h3>
           <p>{{ module.purpose }}</p>
-          <a href="{{ url_for('core.module_placeholder', module_slug=module.slug) }}">Debug page</a>
+          <a href="/modules/{{ module.slug }}/">Debug page</a>
         </article>
       {% endfor %}
     </div>

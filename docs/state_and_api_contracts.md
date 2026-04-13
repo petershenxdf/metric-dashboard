@@ -121,6 +121,9 @@ Each module should expose at least one state or primary data API, such as:
 ```text
 /modules/data-workspace/api/dataset
 /modules/projection/api/projection
+/modules/algorithm-adapters/api/outliers
+/modules/algorithm-adapters/api/clusters
+/modules/algorithm-adapters/api/analysis
 /modules/selection/api/state
 /modules/labeling/api/state
 /modules/chatbox/api/context
@@ -145,6 +148,53 @@ Labeling action payloads should use selected point IDs and produce structured fe
   "target_label": "cluster_2"
 }
 ```
+
+Algorithm adapter APIs should expose point-ID-based outputs.
+
+Outlier result:
+
+```json
+{
+  "outlier_run_id": "outlier_001",
+  "algorithm": "local_outlier_factor_numpy",
+  "scores": [
+    {
+      "point_id": "p1",
+      "score": 1.42,
+      "is_outlier": true
+    }
+  ],
+  "outlier_point_ids": ["p1"],
+  "diagnostics": {}
+}
+```
+
+Cluster result:
+
+```json
+{
+  "cluster_run_id": "cluster_001",
+  "algorithm": "kmeans_numpy_deterministic",
+  "n_clusters": 3,
+  "assignments": [
+    {
+      "point_id": "p2",
+      "cluster_id": "cluster_1"
+    }
+  ],
+  "excluded_outlier_point_ids": ["p1"],
+  "diagnostics": {}
+}
+```
+
+The current default analysis order is:
+
+```text
+local_outlier_factor -> kmeans_on_non_outliers
+```
+
+Future integrated algorithms should return the same dashboard-facing result shape,
+even if they compute clusters and outliers in one combined pass.
 
 ## 7. Reset Rule
 
@@ -175,8 +225,8 @@ Example:
 
 ```json
 {
-  "fixture_name": "iris_projection_debug",
-  "real_inputs": ["data_workspace", "projection"],
-  "mocked_inputs": ["cluster_result", "outlier_result"]
+  "fixture_name": "default_analysis_outlier_debug",
+  "real_inputs": ["data_workspace", "projection", "algorithm_adapters"],
+  "mocked_inputs": []
 }
 ```

@@ -87,6 +87,19 @@ p {
   line-height: 1.5;
 }
 
+pre {
+  max-height: 420px;
+  margin: 12px 0 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #202124;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .split {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -149,6 +162,48 @@ th {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 16px;
+}
+
+.debug-form,
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+
+.debug-form label {
+  display: grid;
+  gap: 6px;
+  color: #5f6368;
+  font-size: 14px;
+}
+
+.debug-form input {
+  min-height: 36px;
+  width: 150px;
+  padding: 6px 8px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  color: #202124;
+  font: inherit;
+}
+
+.chip-row span {
+  min-height: 30px;
+  padding: 6px 9px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 14px;
+}
+
+.error-text {
+  padding: 10px 12px;
+  border: 1px solid #f4b4ac;
+  border-radius: 8px;
+  background: #fce8e6;
+  color: #a50e0e;
 }
 
 .button {

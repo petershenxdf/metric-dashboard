@@ -53,6 +53,8 @@ class ProjectionRouteTests(unittest.TestCase):
         self.assertIn(b"Data and Projection", response.data)
         self.assertIn(b"Projection Plot", response.data)
         self.assertIn(b"15 rows by 4 columns", response.data)
+        self.assertIn(b"FeatureMatrix Payload", response.data)
+        self.assertIn(b"ProjectionResult Payload", response.data)
 
 
 if __name__ == "__main__":

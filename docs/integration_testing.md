@@ -50,6 +50,18 @@ For every module, use four testing levels:
 
 Not every workflow needs to be polished. A workflow page can be simple and diagnostic as long as it shows the interaction clearly.
 
+Step 3 currently uses a dedicated `default_analysis_outlier_debug` fixture for
+the algorithm-adapter page and `/workflows/default-analysis/`. This fixture is
+not Iris; it is intentionally shaped with compact clusters and distant outlier
+candidates so Local Outlier Factor and KMeans can both be visually checked.
+
+For Step 3 browser checks, confirm:
+
+1. `/modules/algorithm-adapters/` shows Local Outlier Factor output.
+2. KMeans assignments exclude detected outliers.
+3. changing `n_clusters` changes the requested cluster count.
+4. `/workflows/default-analysis/` shows projection, outliers, and clusters together.
+
 ## 4. Allowed Alternate Build Path
 
 The recommended order is safe, but it is not mandatory.

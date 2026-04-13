@@ -112,6 +112,30 @@ The module lab is important. It lets the developer open one module at a time and
 | `metric_learning_adapter` | Structured instruction to metric-learning constraints | `/modules/metric-learning-adapter/` |
 | `refinement_orchestrator` | Coordinates full refinement loop | `/modules/refinement-orchestrator/` |
 
+## Current Implementation Status
+
+The current working modules are:
+
+1. `dashboard_shell`
+   - app factory, registry-driven module/workflow registration, module lab, workflow lab, and placeholders.
+
+2. `data_workspace`
+   - fixture dataset, stable point IDs, feature matrix API, and debug page.
+
+3. `projection`
+   - MDS projection, projection API, SVG debug plot, and `/workflows/data-projection/`.
+
+4. `algorithm_adapters`
+   - Local Outlier Factor runs first.
+   - detected outliers are excluded.
+   - deterministic KMeans runs on the remaining non-outlier points.
+   - `n_clusters` can be adjusted from the module page, workflow page, or API query string.
+   - `/workflows/default-analysis/` shows data, projection, outliers, and clusters together.
+
+The default algorithm-adapter fixture is `default_analysis_outlier_debug`, not Iris. It intentionally contains three compact clusters plus three distant outlier candidates so Step 3 is visually inspectable.
+
+Future algorithms should be added behind the `algorithm_adapters` provider boundary. The current provider is `SequentialLofThenKMeansProvider`; a future SSDBCODI provider can replace it while returning the same dashboard-facing schemas.
+
 ## Module Boundary Rules
 
 1. Scatterplot does not parse chat text.
@@ -179,7 +203,8 @@ Current planned order:
    - make MDS output visible as an SVG/table in Flask.
 
 4. `algorithm_adapters`
-   - make clustering and outlier outputs visible.
+   - make Local Outlier Factor and KMeans adapter outputs visible.
+   - keep the provider boundary open for future integrated algorithms.
 
 5. `selection`
    - make selected/unselected state interactive in Flask.

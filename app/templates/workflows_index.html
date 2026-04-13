@@ -16,7 +16,7 @@
         <h2>{{ workflow.title }}</h2>
         <p>{{ workflow.purpose }}</p>
         <p class="small">Modules: {{ workflow.modules | join(", ") }}</p>
-        <a class="button" href="{{ url_for('core.workflow_placeholder', workflow_slug=workflow.slug) }}">Open</a>
+        <a class="button" href="/workflows/{{ workflow.slug }}/">Open</a>
       </article>
     {% endfor %}
   </div>

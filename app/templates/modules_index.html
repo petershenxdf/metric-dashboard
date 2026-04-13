@@ -22,9 +22,9 @@
           <dd>/modules/{{ module.slug }}/</dd>
         </dl>
         <div class="actions">
-          <a class="button" href="{{ url_for('core.module_placeholder', module_slug=module.slug) }}">Open</a>
-          <a href="{{ url_for('core.module_health', module_slug=module.slug) }}">Health</a>
-          <a href="{{ url_for('core.module_state', module_slug=module.slug) }}">State API</a>
+          <a class="button" href="/modules/{{ module.slug }}/">Open</a>
+          <a href="/modules/{{ module.slug }}/health">Health</a>
+          <a href="/modules/{{ module.slug }}/api/state">State API</a>
         </div>
       </article>
     {% endfor %}

@@ -1,7 +1,7 @@
 import unittest
 
 from app import create_app
-from app.module_registry import MODULES, WORKFLOWS, list_modules
+from app.module_registry import MODULES, WORKFLOWS, list_modules, list_workflows
 
 
 class FlaskShellRouteTests(unittest.TestCase):
@@ -93,9 +93,44 @@ class FlaskShellRouteTests(unittest.TestCase):
 
         self.assertEqual([module.slug for module in modules], ["chatbox", "intent-instruction"])
 
+    def test_enabled_workflow_filter(self):
+        workflows = list_workflows(["data-workspace", "projection"])
+
+        self.assertEqual([workflow.slug for workflow in workflows], ["data-projection"])
+
+    def test_app_factory_mounts_only_enabled_module_pages(self):
+        app = create_app(enabled_modules=["data-workspace"])
+        client = app.test_client()
+
+        data_workspace_response = client.get("/modules/data-workspace/")
+        projection_response = client.get("/modules/projection/")
+
+        self.assertEqual(data_workspace_response.status_code, 200)
+        self.assertEqual(projection_response.status_code, 404)
+
+    def test_app_factory_mounts_workflow_when_required_modules_are_enabled(self):
+        app = create_app(enabled_modules=["data-workspace", "projection"])
+        client = app.test_client()
+
+        response = client.get("/workflows/data-projection/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Data and Projection", response.data)
+
+    def test_app_factory_hides_workflow_when_required_modules_are_disabled(self):
+        app = create_app(enabled_modules=["projection"])
+        client = app.test_client()
+
+        response = client.get("/workflows/data-projection/")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_unknown_enabled_module_is_rejected(self):
         with self.assertRaises(ValueError):
             list_modules(["not-real"])
+
+        with self.assertRaises(ValueError):
+            create_app(enabled_modules=["not-real"])
 
 
 if __name__ == "__main__":

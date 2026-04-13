@@ -69,7 +69,9 @@ Detailed flow:
 
 1. Data workspace creates a dataset with stable point IDs.
 2. Projection computes 2D coordinates with MDS.
-3. Algorithm adapters call existing clustering and outlier detection.
+3. Algorithm adapters call existing clustering and outlier detection through replaceable providers.
+   The current provider runs Local Outlier Factor first, excludes detected outliers,
+   and then runs deterministic KMeans on the remaining points.
 4. Scatterplot renders points with cluster colors and outlier markers.
 5. User selects points.
 6. Selection module stores selected/unselected state.
@@ -209,6 +211,7 @@ metric-dashboard/
 
     workflows/
       data_projection.py
+      default_analysis.py
       selection_labeling.py
       scatter_selection.py
       scatter_labeling.py
@@ -275,7 +278,7 @@ Each module should expose these boundaries where applicable:
 | Dashboard Shell | App factory, module registry, integrated pages | `/`, `/modules/`, `/workflows/` |
 | Data Workspace | Dataset identity and feature matrix | `/modules/data-workspace/` |
 | Projection | MDS 2D coordinates | `/modules/projection/` |
-| Algorithm Adapters | Existing clustering/outlier wrappers | `/modules/algorithm-adapters/` |
+| Algorithm Adapters | LOF outlier detection, KMeans clustering, and future algorithm providers | `/modules/algorithm-adapters/` |
 | Selection | Selected/unselected point state | `/modules/selection/` |
 | Labeling | Manual point annotations, cluster labels, and outlier labels | `/modules/labeling/` |
 | Scatterplot | Visual point rendering and selection UI | `/modules/scatterplot/` |
@@ -329,3 +332,27 @@ Each step should add:
 5. A small integration or workflow page when the module has a neighbor to interact with.
 
 The final dashboard should be built by composing already visible modules.
+
+## 11. Current Working Slice
+
+The currently implemented working slice is:
+
+```text
+data_workspace
+  -> projection
+  -> algorithm_adapters
+```
+
+Browser checks:
+
+```text
+/modules/data-workspace/
+/modules/projection/
+/modules/algorithm-adapters/
+/workflows/data-projection/
+/workflows/default-analysis/
+```
+
+`/workflows/default-analysis/` uses the `default_analysis_outlier_debug` fixture
+so outliers are visible during local debugging. It should not be interpreted as
+the final user dataset flow.

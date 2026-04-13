@@ -67,4 +67,18 @@
     <h2>Feature Matrix Shape</h2>
     <p>{{ feature_matrix.values | length }} rows by {{ feature_matrix.feature_names | length }} columns.</p>
   </section>
+
+  <section class="split">
+    <article>
+      <h2>FeatureMatrix Payload</h2>
+      <p class="small">Data Workspace output passed into Projection.</p>
+      <pre>{{ feature_matrix.to_dict() | tojson(indent=2) }}</pre>
+    </article>
+
+    <article>
+      <h2>ProjectionResult Payload</h2>
+      <p class="small">Projection output returned to downstream visualization modules.</p>
+      <pre>{{ projection.to_dict() | tojson(indent=2) }}</pre>
+    </article>
+  </section>
 {% endblock %}
