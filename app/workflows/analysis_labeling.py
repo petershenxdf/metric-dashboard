@@ -4,6 +4,15 @@ from flask import Blueprint, jsonify, render_template, request
 
 from app.modules.algorithm_adapters.service import DEFAULT_N_CLUSTERS, run_default_analysis
 from app.modules.data_workspace.service import create_feature_matrix
+from app.modules.labeling.service import (
+    apply_labeling_action,
+    clear_annotations,
+    get_labeling_state,
+)
+from app.modules.labeling.state import (
+    get_debug_store_for_context as get_labeling_store_for_context,
+    reset_debug_store_for_context as reset_labeling_store_for_context,
+)
 from app.modules.projection.service import project_feature_matrix, scaled_projection_points
 from app.modules.selection.http_helpers import (
     optional_point_ids_from_payload,
@@ -21,6 +30,7 @@ from app.modules.selection.service import (
 )
 from app.modules.selection.state import get_debug_store_for_dataset, reset_debug_store_for_dataset
 from app.shared.flask_helpers import api_error, api_success
+from .effective_analysis import apply_manual_labels_to_analysis
 from .fixtures import (
     ANALYSIS_SELECTION_DATASET_OPTIONS,
     DEFAULT_WORKFLOW_DATASET_ID,
@@ -29,19 +39,22 @@ from .fixtures import (
     is_analysis_selection_dataset_id,
 )
 
+WORKFLOW_NAME = "analysis-labeling"
+DEPENDENCY_MODE = "real Step 1-5 workflow fixture"
+
 
 def create_blueprint() -> Blueprint:
     blueprint = Blueprint(
-        "analysis_selection_workflow",
+        "analysis_labeling_workflow",
         __name__,
         template_folder="templates",
-        url_prefix="/workflows/analysis-selection",
+        url_prefix="/workflows/analysis-labeling",
     )
 
     @blueprint.get("/")
     def index():
         view_model = _build_view_model(_n_clusters_from_request(), _dataset_id_from_request())
-        return render_template("workflows/analysis_selection.html", **view_model)
+        return render_template("workflows/analysis_labeling.html", **view_model)
 
     @blueprint.get("/api/state")
     def state_api():
@@ -49,7 +62,7 @@ def create_blueprint() -> Blueprint:
         return jsonify(
             api_success(
                 _state_payload(view_model),
-                diagnostics={"dependency_mode": "real Step 1-4 workflow fixture"},
+                diagnostics={"dependency_mode": DEPENDENCY_MODE},
             )
         )
 
@@ -57,24 +70,12 @@ def create_blueprint() -> Blueprint:
     def select_api():
         return _selection_action_response("select")
 
-    @blueprint.post("/api/deselect")
-    def deselect_api():
-        return _selection_action_response("deselect")
-
-    @blueprint.post("/api/replace")
-    def replace_api():
-        return _selection_action_response("replace")
-
-    @blueprint.post("/api/toggle")
-    def toggle_api():
-        return _selection_action_response("toggle")
-
     @blueprint.post("/api/clear")
     def clear_api():
         return _selection_action_response("clear")
 
-    @blueprint.post("/api/reset")
-    def reset_api():
+    @blueprint.post("/api/reset-selection")
+    def reset_selection_api():
         dataset = _workflow_dataset(_dataset_id_from_request())
         store = reset_debug_store_for_dataset(
             dataset,
@@ -84,7 +85,7 @@ def create_blueprint() -> Blueprint:
         return jsonify(
             api_success(
                 {"state": state.to_dict(), "groups": []},
-                diagnostics={"dependency_mode": "real Step 1-4 workflow fixture"},
+                diagnostics={"dependency_mode": DEPENDENCY_MODE},
             )
         )
 
@@ -94,7 +95,7 @@ def create_blueprint() -> Blueprint:
         return jsonify(
             api_success(
                 {"groups": groups, "group_count": len(groups)},
-                diagnostics={"dependency_mode": "real Step 1-4 workflow fixture"},
+                diagnostics={"dependency_mode": DEPENDENCY_MODE},
             )
         )
 
@@ -106,7 +107,7 @@ def create_blueprint() -> Blueprint:
                 _workflow_store(),
                 group_name=payload.get("group_name", ""),
                 point_ids=optional_point_ids_from_payload(payload),
-                metadata={"workflow": "analysis-selection"},
+                metadata={"workflow": WORKFLOW_NAME},
             )
         except ValueError as exc:
             return jsonify(api_error("invalid_selection_group", str(exc))), 400
@@ -114,7 +115,7 @@ def create_blueprint() -> Blueprint:
         return jsonify(
             api_success(
                 {"group": group.to_dict(), "groups": _selection_groups_payload()},
-                diagnostics={"dependency_mode": "real Step 1-4 workflow fixture"},
+                diagnostics={"dependency_mode": DEPENDENCY_MODE},
             )
         )
 
@@ -128,7 +129,7 @@ def create_blueprint() -> Blueprint:
         return jsonify(
             api_success(
                 {"selection": result.to_dict(), "groups": _selection_groups_payload()},
-                diagnostics={"dependency_mode": "real Step 1-4 workflow fixture"},
+                diagnostics={"dependency_mode": DEPENDENCY_MODE},
             )
         )
 
@@ -142,7 +143,63 @@ def create_blueprint() -> Blueprint:
         return jsonify(
             api_success(
                 {"deleted_group": group.to_dict(), "groups": _selection_groups_payload()},
-                diagnostics={"dependency_mode": "real Step 1-4 workflow fixture"},
+                diagnostics={"dependency_mode": DEPENDENCY_MODE},
+            )
+        )
+
+    @blueprint.post("/api/label")
+    def label_api():
+        payload = request_payload(request)
+        context = get_selection_context(_workflow_store())
+        store = get_labeling_store_for_context(context)
+        n_clusters = _n_clusters_from_request()
+        try:
+            action = str(payload.get("action", ""))
+            label_value = payload.get("label_value")
+            _validate_workflow_label(action, label_value, n_clusters)
+            annotation = apply_labeling_action(
+                store,
+                context,
+                action=action,
+                label_value=label_value,
+                point_ids=optional_point_ids_from_payload(payload),
+            )
+            view_model = _build_view_model(n_clusters, _dataset_id_from_request())
+        except ValueError as exc:
+            return jsonify(api_error("invalid_labeling_action", str(exc))), 400
+
+        return jsonify(
+            api_success(
+                {
+                    "annotation": annotation.to_dict(),
+                    "state": _state_payload(view_model),
+                },
+                diagnostics={"dependency_mode": DEPENDENCY_MODE},
+            )
+        )
+
+    @blueprint.post("/api/clear-labels")
+    def clear_labels_api():
+        context = get_selection_context(_workflow_store())
+        store = get_labeling_store_for_context(context)
+        clear_annotations(store)
+        view_model = _build_view_model(_n_clusters_from_request(), _dataset_id_from_request())
+        return jsonify(
+            api_success(
+                {"state": _state_payload(view_model)},
+                diagnostics={"dependency_mode": DEPENDENCY_MODE},
+            )
+        )
+
+    @blueprint.post("/api/reset-labels")
+    def reset_labels_api():
+        context = get_selection_context(_workflow_store())
+        reset_labeling_store_for_context(context)
+        view_model = _build_view_model(_n_clusters_from_request(), _dataset_id_from_request())
+        return jsonify(
+            api_success(
+                {"state": _state_payload(view_model)},
+                diagnostics={"dependency_mode": DEPENDENCY_MODE},
             )
         )
 
@@ -156,20 +213,23 @@ def _build_view_model(n_clusters: int, dataset_id: str):
     error = None
 
     try:
-        analysis = run_default_analysis(matrix, n_clusters=n_clusters)
+        raw_analysis = run_default_analysis(matrix, n_clusters=n_clusters)
     except ValueError as exc:
         error = str(exc)
         n_clusters = DEFAULT_N_CLUSTERS
-        analysis = run_default_analysis(matrix, n_clusters=n_clusters)
+        raw_analysis = run_default_analysis(matrix, n_clusters=n_clusters)
 
+    selection_store = _workflow_store_for_dataset(dataset)
+    selection_state = get_selection_state(selection_store)
+    context = get_selection_context(selection_store)
+    labeling_state = get_labeling_state(get_labeling_store_for_context(context))
+    analysis = apply_manual_labels_to_analysis(dataset, raw_analysis, labeling_state)
     cluster_labels = {
         assignment.point_id: assignment.cluster_id
         for assignment in analysis.cluster_result.assignments
     }
     outlier_ids = set(analysis.outlier_result.outlier_point_ids)
-    store = _workflow_store_for_dataset(dataset)
-    state = get_selection_state(store)
-    selected_ids = set(state.selected_point_ids)
+    selected_ids = set(selection_state.selected_point_ids)
     point_by_id = {point.point_id: point for point in dataset.points}
 
     plot_points = []
@@ -183,6 +243,7 @@ def _build_view_model(n_clusters: int, dataset_id: str):
                 "cluster_id": cluster_labels.get(point["point_id"], ""),
                 "is_outlier": point["point_id"] in outlier_ids,
                 "is_selected": point["point_id"] in selected_ids,
+                "manual_labels": _manual_labels_for_point(labeling_state, point["point_id"]),
             }
         )
 
@@ -191,10 +252,13 @@ def _build_view_model(n_clusters: int, dataset_id: str):
         "matrix": matrix,
         "projection": projection,
         "analysis": analysis,
+        "raw_analysis": raw_analysis,
         "plot_points": plot_points,
-        "state": state,
-        "context": get_selection_context(store),
-        "selection_groups": list_selection_groups(store),
+        "selection_state": selection_state,
+        "context": context,
+        "selection_groups": list_selection_groups(selection_store),
+        "labeling_state": labeling_state,
+        "allowed_labels": _allowed_labels(n_clusters),
         "n_clusters": n_clusters,
         "dataset_options": ANALYSIS_SELECTION_DATASET_OPTIONS,
         "selected_dataset_id": dataset.dataset_id,
@@ -224,7 +288,7 @@ def _selection_action_response(action_name: str):
         action = selection_action_from_payload(
             action_name,
             payload,
-            metadata={"workflow": "analysis-selection"},
+            metadata={"workflow": WORKFLOW_NAME},
         )
         result = apply_selection_action(_workflow_store(), action)
     except ValueError as exc:
@@ -233,7 +297,7 @@ def _selection_action_response(action_name: str):
     return jsonify(
         api_success(
             result.to_dict(),
-            diagnostics={"dependency_mode": "real Step 1-4 workflow fixture"},
+            diagnostics={"dependency_mode": DEPENDENCY_MODE},
         )
     )
 
@@ -245,14 +309,64 @@ def _state_payload(view_model):
         "projection": view_model["projection"].to_dict(),
         "outliers": view_model["analysis"].outlier_result.to_dict(),
         "clusters": view_model["analysis"].cluster_result.to_dict(),
-        "selection": view_model["state"].to_dict(),
+        "raw_outliers": view_model["raw_analysis"].outlier_result.to_dict(),
+        "raw_clusters": view_model["raw_analysis"].cluster_result.to_dict(),
+        "selection": view_model["selection_state"].to_dict(),
         "selection_context": view_model["context"].to_dict(),
         "selection_groups": [group.to_dict() for group in view_model["selection_groups"]],
+        "labeling": view_model["labeling_state"].to_dict(),
     }
 
 
+def _manual_labels_for_point(labeling_state, point_id: str):
+    labels = []
+    for annotation in labeling_state.annotations:
+        if point_id in annotation.point_ids:
+            labels.append(
+                {
+                    "annotation_id": annotation.annotation_id,
+                    "label_type": annotation.label_type,
+                    "label_value": annotation.label_value,
+                    "display_label": _annotation_display_label(annotation),
+                }
+            )
+    return labels
+
+
+def _annotation_display_label(annotation):
+    if annotation.label_type == "outlier" and annotation.label_value is True:
+        return "outlier"
+    return annotation.label_value
+
+
+def _validate_workflow_label(action: str, label_value, n_clusters: int) -> None:
+    if action == "assign_cluster":
+        allowed_clusters = set(_allowed_cluster_labels(n_clusters))
+        if label_value not in allowed_clusters:
+            allowed = ", ".join([*sorted(allowed_clusters), "outlier"])
+            raise ValueError(f"label_value must be one of: {allowed}")
+        return
+
+    if action == "mark_outlier":
+        return
+
+    raise ValueError("analysis-labeling only supports cluster_N labels and outlier")
+
+
+def _allowed_cluster_labels(n_clusters: int):
+    return [f"cluster_{index}" for index in range(1, n_clusters + 1)]
+
+
+def _allowed_labels(n_clusters: int):
+    return [*_allowed_cluster_labels(n_clusters), "outlier"]
+
+
 def _n_clusters_from_request() -> int:
-    raw_value = request.args.get("n_clusters")
+    payload = {}
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+
+    raw_value = payload.get("n_clusters") or request.args.get("n_clusters") or request.form.get("n_clusters")
     if raw_value is None:
         return DEFAULT_N_CLUSTERS
 

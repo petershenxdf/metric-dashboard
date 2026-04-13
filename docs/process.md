@@ -377,7 +377,7 @@ Open `/workflows/analysis-selection/` and confirm:
 
 1. data, projection, algorithm results, and selection use the same point IDs.
 2. the dataset dropdown can switch between a sparse selection-friendly fixture and the original outlier debug fixture.
-3. clicking projected points adds them to the active selection and shows thin selected-point rings.
+3. clicking projected points adds them to the active selection and shows black center dots.
 4. rectangle selection adds all points inside the region to the active selection.
 5. outliers remain visually distinct from selected points.
 6. changing `n_clusters` reruns clustering without breaking selection.
@@ -414,7 +414,17 @@ Tasks:
 7. Add `/modules/labeling/api/state`.
 8. Add `/modules/labeling/api/apply`.
 9. Add `/workflows/selection-labeling/`.
-10. Show annotation history and structured feedback JSON in Flask.
+10. Add `/workflows/analysis-labeling/` to test Steps 1-5 on one visual layer.
+11. Show annotation history and structured feedback JSON in Flask.
+
+Current implementation:
+
+1. Uses real selection debug state as input.
+2. Stores local manual annotation history in memory.
+3. Supports `assign_cluster`, `assign_new_class`, `mark_outlier`, and `mark_not_outlier`.
+4. Converts manual annotations into structured feedback instructions.
+5. `/workflows/selection-labeling/` shows selection context and labeling output together.
+6. `/workflows/analysis-labeling/` shows data, projection, outliers, clusters, selection, and labeling together.
 
 Unit tests:
 
@@ -423,6 +433,7 @@ Unit tests:
 3. empty selection is rejected.
 4. unknown point IDs are rejected.
 5. reset clears annotation state.
+6. unselected explicit point IDs are rejected.
 
 Flask visual check:
 
@@ -433,6 +444,22 @@ Open `/modules/labeling/` and confirm:
 3. marking outliers creates an annotation.
 4. structured feedback JSON is visible.
 5. dependency mode clearly says mock or real selection.
+
+Open `/workflows/selection-labeling/` and confirm:
+
+1. selection context JSON is visible.
+2. structured feedback JSON is visible.
+3. annotation history matches labels created in `/modules/labeling/`.
+
+Open `/workflows/analysis-labeling/` and confirm:
+
+1. one SVG shows projected points, cluster colors, LOF outliers, and selected points.
+2. click selection and rectangle selection add points to the active selection.
+3. labeling controls only allow `cluster_1...cluster_n` and `outlier`.
+4. assigning `cluster_N` updates effective cluster state and frontend point colors.
+5. assigning `outlier` updates effective outlier state and frontend outlier markers.
+6. structured feedback JSON updates on the same page.
+7. `/workflows/analysis-labeling/api/state` includes Step 1-5 state in one payload.
 
 Completion:
 
@@ -749,9 +776,9 @@ Goal:
 
 Selection and labeling work in Flask, and selected points can become manual cluster/outlier annotations.
 
-Current first half:
+Current status:
 
-Selection works in Flask, supports named selection groups, `/workflows/selection-context/` exposes reusable selected/unselected context, and `/workflows/analysis-selection/` connects Steps 1-4 on one visual testing page. Labeling is the next module.
+Selection works in Flask, supports named selection groups, `/workflows/selection-context/` exposes reusable selected/unselected context, `/workflows/analysis-selection/` connects Steps 1-4 on one visual testing page, and `/workflows/analysis-labeling/` connects Steps 1-5 for full select-and-label testing.
 
 ### Milestone 4: Scatterplot Labeling
 

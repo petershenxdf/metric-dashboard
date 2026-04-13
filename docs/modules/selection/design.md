@@ -44,7 +44,7 @@ app/modules/selection/
   fixtures.py
   routes.py
   templates/selection/index.html
-  static/selection/selection.js
+  static/selection/selection.js optional if interactions outgrow inline debug scripts
 
 tests/modules/selection/
   test_service.py
@@ -66,6 +66,8 @@ Step 4 implementation is complete enough for local inspection:
 7. users can save the current selection as a named selection group, click that group later to replace the active selection, and delete saved groups.
 8. `/workflows/analysis-selection/` overlays selection onto the Step 1-3 data/projection/analysis output for combined testing.
 9. the combined workflow supports a dataset dropdown, click selection, and rectangle selection without exposing mode choices to the user.
+10. selected points in combined workflow SVGs use small black center dots instead of large outer rings.
+11. `/workflows/analysis-labeling/` is the Step 1-5 visual integration page where selected points can be labeled.
 
 ## State Contract
 
@@ -141,6 +143,8 @@ Downstream modules should consume this context instead of reading selection inte
 /modules/selection/api/groups/<id>        delete a saved group
 /workflows/selection-context/             data workspace plus selection context
 /workflows/analysis-selection/            data, projection, analysis, and selection visual test
+/workflows/selection-labeling/            minimal selection-to-labeling boundary test
+/workflows/analysis-labeling/             Step 1-5 visual select-and-label test
 ```
 
 Action payload:
@@ -228,9 +232,14 @@ Manual browser check:
 9. open `/workflows/selection-context/` and confirm selection context is visible.
 10. open `/workflows/analysis-selection/` and confirm projected point clicks update selection on the combined plot.
 11. drag a rectangle and confirm points inside the region are added to the active selection.
+12. open `/workflows/analysis-labeling/` and confirm selected points can be labeled without changing selection ownership.
 
 ## Completion Criteria
 
 This module is complete when selection state can be tested in code and manipulated visibly through Flask.
 
-The first downstream integration should be `/workflows/selection-labeling/`, where selected points are converted into manual annotations.
+Downstream integrations are split by purpose:
+
+1. `/workflows/selection-labeling/` is the minimal selection-to-labeling boundary test.
+2. `/workflows/analysis-selection/` is the Step 1-4 visual analysis plus selection test.
+3. `/workflows/analysis-labeling/` is the Step 1-5 visual select-and-label test.

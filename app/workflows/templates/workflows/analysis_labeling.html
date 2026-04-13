@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 
-{% block title %}Step 1-4 Analysis Selection Workflow{% endblock %}
+{% block title %}Step 1-5 Analysis Labeling Workflow{% endblock %}
 
 {% block content %}
   <section class="intro">
     <p class="eyebrow">Workflow Demo</p>
-    <h1>Step 1-4 Visual Test</h1>
+    <h1>Step 1-5 Visual Test</h1>
     <p>
-      Connects Data Workspace -> Projection -> Algorithm Adapters -> Selection
-      on one shared point-ID fixture, so clicks, outliers, clusters, and saved
-      selection groups can be tested together.
+      Connects Data Workspace -> Projection -> Algorithm Adapters -> Selection -> Labeling
+      on one shared point-ID fixture, so the full select-and-label path can be tested
+      from one screen.
     </p>
   </section>
 
@@ -30,7 +30,7 @@
         KMeans clusters
         <input type="number" name="n_clusters" min="1" value="{{ n_clusters }}">
       </label>
-      <button class="button" type="submit">Run Step 1-4</button>
+      <button class="button" type="submit">Run Step 1-5</button>
     </form>
     {% if error %}
       <p class="error-text">{{ error }} Reverted to the default cluster count.</p>
@@ -54,28 +54,34 @@
       <dd>{{ analysis.outlier_result.algorithm }}</dd>
       <dt>Cluster algorithm</dt>
       <dd>{{ analysis.cluster_result.algorithm }}</dd>
+      <dt>Analysis state</dt>
+      <dd>effective output with manual labels applied over raw algorithm results</dd>
       <dt>Selection</dt>
-      <dd>{{ state.selected_point_ids | length }} selected, {{ state.unselected_point_ids | length }} unselected</dd>
+      <dd>{{ selection_state.selected_point_ids | length }} selected, {{ selection_state.unselected_point_ids | length }} unselected</dd>
+      <dt>Labels</dt>
+      <dd>{{ labeling_state.annotations | length }} annotations</dd>
     </dl>
     <div class="actions">
-      <a href="{{ url_for('analysis_selection_workflow.state_api', dataset_id=selected_dataset_id, n_clusters=n_clusters) }}">Combined State API</a>
+      <a href="{{ url_for('analysis_labeling_workflow.state_api', dataset_id=selected_dataset_id, n_clusters=n_clusters) }}">Combined State API</a>
       <button type="button" data-workflow-action="clear">Clear Selection</button>
-      <button type="button" data-workflow-action="reset">Reset Workflow Selection</button>
+      <button type="button" data-workflow-action="reset-selection">Reset Selection</button>
+      <button type="button" data-label-action="reset-labels">Reset Labels</button>
     </div>
   </section>
 
   <section class="panel">
     <h2>Shared Visual Layer</h2>
     <p class="small">
-      Click points to select them, or drag a rectangle across the plot to add every point
-      inside the region. Pink points are LOF outliers, colors are KMeans clusters,
-      and black center dots mark selected points.
+      Click points to add them to the active selection, or drag a rectangle to add every
+      point inside the region. Pink points are LOF outliers, colors are KMeans clusters,
+      and black center dots mark selected points. Manual cluster/outlier labels update
+      the effective state, so point colors and outlier markers change after labeling.
     </p>
     <svg
       class="debug-plot workflow-selection-plot"
       viewBox="0 0 860 520"
       role="img"
-      aria-label="Step 1-4 analysis and selection plot"
+      aria-label="Step 1-5 analysis, selection, and labeling plot"
       data-selection-plot
     >
       <line x1="56" y1="260" x2="804" y2="260" stroke="#dadce0"></line>
@@ -137,13 +143,47 @@
 
   <section class="split">
     <article>
-      <h2>Selected Points</h2>
-      <pre>{{ state.selected_point_ids | list | tojson(indent=2) }}</pre>
+      <h2>Label Selected Points</h2>
+      <p class="small">
+        Labeling uses the current selection by default. Select one or more points on the plot,
+        then apply one valid label. This workflow only accepts current cluster labels
+        and `outlier`.
+      </p>
+      <form class="debug-form" data-label-form>
+        <label>
+          Label
+          <select name="label_value">
+            {% for label in allowed_labels %}
+              <option value="{{ label }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button class="button" type="submit">Apply Label to Selection</button>
+      </form>
+      <div class="actions">
+        <button type="button" data-label-action="clear-labels">Clear Labels</button>
+      </div>
+    </article>
+    <article>
+      <h2>Current Selection</h2>
+      <pre>{{ selection_state.selected_point_ids | list | tojson(indent=2) }}</pre>
+    </article>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Structured Feedback</h2>
+      <pre>{{ labeling_state.to_dict().structured_feedback | tojson(indent=2) }}</pre>
     </article>
     <article>
       <h2>Selection Context</h2>
       <pre>{{ context.to_dict() | tojson(indent=2) }}</pre>
     </article>
+  </section>
+
+  <section class="panel">
+    <h2>Annotation History</h2>
+    <pre>{{ labeling_state.to_dict().annotations | tojson(indent=2) }}</pre>
   </section>
 
   <section class="panel">
@@ -180,19 +220,6 @@
     {% endif %}
   </section>
 
-  <section class="split">
-    <article>
-      <h2>Outlier Result</h2>
-      <p>{{ analysis.outlier_result.outlier_point_ids | join(", ") or "none" }}</p>
-      <pre>{{ analysis.outlier_result.to_dict() | tojson(indent=2) }}</pre>
-    </article>
-    <article>
-      <h2>Cluster Result</h2>
-      <p>{{ analysis.cluster_result.assignments | length }} non-outlier points clustered.</p>
-      <pre>{{ analysis.cluster_result.to_dict() | tojson(indent=2) }}</pre>
-    </article>
-  </section>
-
   <section class="panel">
     <h2>Data Workspace Preview</h2>
     <div class="table-wrap">
@@ -202,9 +229,10 @@
             <th>Point ID</th>
             <th>Features</th>
             <th>Fixture Label</th>
-            <th>Cluster</th>
-            <th>Outlier</th>
+            <th>Effective Cluster</th>
+            <th>Effective Outlier</th>
             <th>Selected</th>
+            <th>Manual Labels</th>
           </tr>
         </thead>
         <tbody>
@@ -216,6 +244,15 @@
               <td>{{ point.cluster_id or "excluded" }}</td>
               <td>{{ "yes" if point.is_outlier else "no" }}</td>
               <td>{{ "yes" if point.is_selected else "no" }}</td>
+              <td>
+                {% if point.manual_labels %}
+                  {% for label in point.manual_labels %}
+                    <code>{{ label.display_label }}</code>
+                  {% endfor %}
+                {% else %}
+                  none
+                {% endif %}
+              </td>
             </tr>
           {% endfor %}
         </tbody>
@@ -225,16 +262,18 @@
 
   <script>
     const workflowDatasetId = "{{ selected_dataset_id }}";
+    const workflowBasePath = "/workflows/analysis-labeling";
+    const workflowNClusters = "{{ n_clusters }}";
     const workflowQuery = new URLSearchParams({
       dataset_id: workflowDatasetId,
-      n_clusters: "{{ n_clusters }}"
+      n_clusters: workflowNClusters
     });
 
     const postWorkflowJson = async (url, body = {}, method = "POST") => {
       return fetch(url, {
         method,
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({dataset_id: workflowDatasetId, ...body})
+        body: JSON.stringify({dataset_id: workflowDatasetId, n_clusters: workflowNClusters, ...body})
       });
     };
 
@@ -253,7 +292,7 @@
         return;
       }
       const response = await postWorkflowJson(
-        "/workflows/analysis-selection/api/select",
+        `${workflowBasePath}/api/select`,
         {point_ids: pointIds, source, mode: "additive"}
       );
       handleWorkflowResponse(response);
@@ -263,7 +302,31 @@
       button.addEventListener("click", async () => {
         const action = button.dataset.workflowAction;
         const response = await postWorkflowJson(
-          `/workflows/analysis-selection/api/${action}?${workflowQuery.toString()}`
+          `${workflowBasePath}/api/${action}?${workflowQuery.toString()}`
+        );
+        handleWorkflowResponse(response);
+      });
+    });
+
+    document.querySelectorAll("[data-label-action]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const action = button.dataset.labelAction;
+        const response = await postWorkflowJson(`${workflowBasePath}/api/${action}`);
+        handleWorkflowResponse(response);
+      });
+    });
+
+    document.querySelectorAll("[data-label-form]").forEach((form) => {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        const labelValue = formData.get("label_value");
+        const response = await postWorkflowJson(
+          `${workflowBasePath}/api/label`,
+          {
+            action: labelValue === "outlier" ? "mark_outlier" : "assign_cluster",
+            label_value: labelValue
+          }
         );
         handleWorkflowResponse(response);
       });
@@ -273,7 +336,7 @@
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       const response = await postWorkflowJson(
-        "/workflows/analysis-selection/api/groups",
+        `${workflowBasePath}/api/groups`,
         {group_name: form.get("group_name")}
       );
       handleWorkflowResponse(response);
@@ -283,7 +346,7 @@
       button.addEventListener("click", async () => {
         const action = button.dataset.groupAction;
         const groupId = button.dataset.groupId;
-        const url = `/workflows/analysis-selection/api/groups/${groupId}${action === "select" ? "/select" : ""}`;
+        const url = `${workflowBasePath}/api/groups/${groupId}${action === "select" ? "/select" : ""}`;
         const response = action === "delete"
           ? await postWorkflowJson(url, {}, "DELETE")
           : await postWorkflowJson(url, {});

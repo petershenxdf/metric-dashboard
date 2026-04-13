@@ -142,9 +142,28 @@ Interactive modules should expose action APIs:
 /modules/selection/api/groups
 /modules/selection/api/groups/<id>/select
 /modules/labeling/api/apply
+/workflows/analysis-labeling/api/select
+/workflows/analysis-labeling/api/label
+/workflows/analysis-labeling/api/clear-labels
 /modules/chatbox/api/messages
 /modules/intent-instruction/api/compile
 ```
+
+Every module-level state route should include module identity fields in the
+standard JSON envelope:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "module": "selection",
+    "status": "working"
+  }
+}
+```
+
+Module-specific state fields should live beside `module` and `status`, not in a
+separate nested object, unless that module already documents a nested contract.
 
 Selection action payloads should be action-route based and extensible:
 
@@ -221,6 +240,55 @@ Labeling action payloads should use selected point IDs and produce structured fe
   "target_label": "cluster_2"
 }
 ```
+
+Current labeling apply payload:
+
+```json
+{
+  "action": "assign_cluster",
+  "label_value": "cluster_2",
+  "point_ids": ["p1", "p7"]
+}
+```
+
+If `point_ids` is omitted, labeling applies to all current selected points.
+Explicit `point_ids` must be selected in the current selection context.
+
+Supported labeling actions:
+
+```text
+assign_cluster
+assign_new_class
+mark_outlier
+mark_not_outlier
+```
+
+The Step 1-5 workflow exposes a combined state payload at:
+
+```text
+/workflows/analysis-labeling/api/state
+```
+
+That payload includes dataset, feature matrix, projection, outliers, clusters,
+selection state, selection context, selection groups, and labeling state.
+
+For `/workflows/analysis-labeling/`, `clusters` and `outliers` are effective
+analysis state after manual labels are applied. The raw algorithm outputs remain
+available as `raw_clusters` and `raw_outliers`.
+
+Allowed labels in this workflow are:
+
+```text
+cluster_1
+cluster_2
+cluster_3
+...
+outlier
+```
+
+The available cluster labels are determined by the current `n_clusters` value.
+`cluster_N` makes the target points non-outliers in effective state. `outlier`
+removes the target points from effective cluster assignments.
 
 Algorithm adapter APIs should expose point-ID-based outputs.
 

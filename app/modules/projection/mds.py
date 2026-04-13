@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import sqrt
+
 import numpy as np
 
 
@@ -9,10 +11,9 @@ def classical_mds(values, n_components: int = 2) -> np.ndarray:
 
     distances_squared = _pairwise_squared_distances(matrix)
     n_points = matrix.shape[0]
-    centering = np.eye(n_points) - np.ones((n_points, n_points)) / n_points
-    gram = -0.5 * centering @ distances_squared @ centering
+    gram = _double_center_distances(distances_squared)
 
-    eigenvalues, eigenvectors = np.linalg.eigh(gram)
+    eigenvalues, eigenvectors = _symmetric_eigh(gram)
     order = np.argsort(eigenvalues)[::-1]
     eigenvalues = eigenvalues[order]
     eigenvectors = eigenvectors[:, order]
@@ -48,6 +49,18 @@ def _pairwise_squared_distances(matrix: np.ndarray) -> np.ndarray:
     return np.sum(diff * diff, axis=2)
 
 
+def _double_center_distances(distances_squared: np.ndarray) -> np.ndarray:
+    row_means = np.mean(distances_squared, axis=1)
+    column_means = np.mean(distances_squared, axis=0)
+    total_mean = float(np.mean(distances_squared))
+    return -0.5 * (
+        distances_squared
+        - row_means[:, None]
+        - column_means[None, :]
+        + total_mean
+    )
+
+
 def _orient_components(coordinates: np.ndarray) -> np.ndarray:
     oriented = coordinates.copy()
 
@@ -58,3 +71,74 @@ def _orient_components(coordinates: np.ndarray) -> np.ndarray:
             oriented[:, column_index] = -column
 
     return oriented
+
+
+def _symmetric_eigh(matrix: np.ndarray):
+    """Small Jacobi eigensolver to avoid platform-specific native linalg issues."""
+    values = np.asarray(matrix, dtype=float).copy()
+    if values.ndim != 2 or values.shape[0] != values.shape[1]:
+        raise ValueError("matrix must be square")
+
+    size = values.shape[0]
+    vectors = np.eye(size, dtype=float)
+    tolerance = 1e-10
+    max_iterations = max(1, 100 * size * size)
+
+    for _ in range(max_iterations):
+        pivot_row, pivot_col, pivot_value = _largest_off_diagonal(values)
+        if pivot_value < tolerance:
+            break
+
+        app = values[pivot_row, pivot_row]
+        aqq = values[pivot_col, pivot_col]
+        apq = values[pivot_row, pivot_col]
+        tau = (aqq - app) / (2.0 * apq)
+        sign = 1.0 if tau >= 0 else -1.0
+        tangent = sign / (abs(tau) + sqrt(1.0 + tau * tau))
+        cosine = 1.0 / sqrt(1.0 + tangent * tangent)
+        sine = tangent * cosine
+
+        for index in range(size):
+            if index in (pivot_row, pivot_col):
+                continue
+            aip = values[index, pivot_row]
+            aiq = values[index, pivot_col]
+            values[index, pivot_row] = values[pivot_row, index] = cosine * aip - sine * aiq
+            values[index, pivot_col] = values[pivot_col, index] = sine * aip + cosine * aiq
+
+        values[pivot_row, pivot_row] = (
+            cosine * cosine * app
+            - 2.0 * sine * cosine * apq
+            + sine * sine * aqq
+        )
+        values[pivot_col, pivot_col] = (
+            sine * sine * app
+            + 2.0 * sine * cosine * apq
+            + cosine * cosine * aqq
+        )
+        values[pivot_row, pivot_col] = values[pivot_col, pivot_row] = 0.0
+
+        for index in range(size):
+            vip = vectors[index, pivot_row]
+            viq = vectors[index, pivot_col]
+            vectors[index, pivot_row] = cosine * vip - sine * viq
+            vectors[index, pivot_col] = sine * vip + cosine * viq
+
+    return np.diag(values), vectors
+
+
+def _largest_off_diagonal(matrix: np.ndarray):
+    size = matrix.shape[0]
+    pivot_row = 0
+    pivot_col = 1 if size > 1 else 0
+    pivot_value = 0.0
+
+    for row in range(size):
+        for col in range(row + 1, size):
+            value = abs(matrix[row, col])
+            if value > pivot_value:
+                pivot_row = row
+                pivot_col = col
+                pivot_value = value
+
+    return pivot_row, pivot_col, pivot_value

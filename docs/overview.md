@@ -161,7 +161,7 @@ metric-dashboard/
         fixtures.py
         routes.py
         templates/selection/
-        static/selection/
+        static/selection/ optional for larger debug-page interactions
 
       labeling/
         schemas.py
@@ -169,7 +169,7 @@ metric-dashboard/
         fixtures.py
         routes.py
         templates/labeling/
-        static/labeling/
+        static/labeling/ optional for larger debug-page interactions
 
       scatterplot/
         schemas.py
@@ -213,7 +213,9 @@ metric-dashboard/
       data_projection.py
       default_analysis.py
       selection_context.py
+      analysis_selection.py
       selection_labeling.py
+      analysis_labeling.py
       scatter_selection.py
       scatter_labeling.py
       chat_intent.py
@@ -356,6 +358,8 @@ Browser checks:
 /workflows/default-analysis/
 /workflows/selection-context/
 /workflows/analysis-selection/
+/workflows/selection-labeling/
+/workflows/analysis-labeling/
 ```
 
 `/workflows/default-analysis/` uses the `default_analysis_outlier_debug` fixture
@@ -376,3 +380,14 @@ coordinates, Algorithm Adapters mark clusters/outliers, and Selection overlays
 active and saved selections on the same SVG plot. It includes a dataset dropdown,
 click selection, and rectangle selection. New clicks or rectangle selections are
 added to the active selection so the user does not need to choose a selection mode.
+
+`/workflows/selection-labeling/` shows the Step 5 boundary: selection context
+is consumed by labeling, and manual annotations are converted into structured
+feedback instructions without involving chatbox or metric learning.
+
+`/workflows/analysis-labeling/` is the full Step 1-5 visual test page. It uses
+the same projection, LOF outlier detection, KMeans clustering, additive
+click/rectangle selection, saved selection groups, and labeling controls on one
+shared point-ID fixture. Manual labels are limited to `cluster_1...cluster_n`
+and `outlier`; they update the effective cluster/outlier state used by the
+frontend while raw algorithm outputs remain available in the state API.

@@ -37,12 +37,28 @@ app/modules/labeling/
   fixtures.py
   routes.py
   templates/labeling/index.html
-  static/labeling/labeling.js
+  static/labeling/labeling.js optional if interactions outgrow inline debug scripts
 
 tests/modules/labeling/
   test_service.py
   test_routes.py
 ```
+
+## Current Status
+
+Status: `working`
+
+Step 5 implementation is complete enough for local inspection:
+
+1. labeling consumes real selection debug context.
+2. selected points can become cluster, class, outlier, or not-outlier annotations.
+3. annotation history is kept in local in-memory state.
+4. annotations are converted into structured feedback instructions.
+5. `/modules/labeling/` exposes controls, annotation history, and structured feedback JSON.
+6. `/workflows/selection-labeling/` shows selection context beside labeling output.
+7. `/workflows/analysis-labeling/` connects data, projection, outliers, clusters, selection, and labeling on one visual test page.
+8. On `/workflows/analysis-labeling/`, labels are restricted to the active `cluster_1...cluster_n` set plus `outlier`.
+9. The Step 1-5 workflow applies manual labels as effective analysis-state overrides while preserving raw algorithm output for debugging.
 
 ## Annotation Contract
 
@@ -134,8 +150,22 @@ annotation_to_instruction(annotation)
 /modules/labeling/api/apply              create annotation from selected points
 /modules/labeling/api/annotations        list annotations
 /modules/labeling/api/reset              clear local annotations
+/modules/labeling/api/clear              clear local annotations
 /workflows/selection-labeling/           selection plus labeling workflow
+/workflows/analysis-labeling/            Step 1-5 analysis, selection, and labeling workflow
 ```
+
+Step 1-5 effective-state behavior:
+
+1. assigning selected points to `cluster_N` updates effective cluster assignments and clears effective outlier status for those points.
+2. assigning selected points to `outlier` updates effective outlier status and removes those points from effective cluster assignments.
+3. `/workflows/analysis-labeling/api/state` returns effective `clusters` and `outliers` plus raw `raw_clusters` and `raw_outliers`.
+
+Standalone `/modules/labeling/` remains more general than the Step 1-5
+workflow. It supports `assign_cluster`, `assign_new_class`, `mark_outlier`,
+and `mark_not_outlier`. The `/workflows/analysis-labeling/` page intentionally
+uses a stricter UI and API contract: only `cluster_1...cluster_n` and `outlier`
+are accepted so the visual analysis state can update predictably.
 
 ## Flask Debug Page Requirements
 
@@ -183,6 +213,7 @@ Manual browser check:
 4. mark a second selection as outliers.
 5. confirm annotation history and structured feedback JSON update.
 6. open `/workflows/selection-labeling/` to check interaction with real selection when available.
+7. open `/workflows/analysis-labeling/` to test selecting projected points and immediately labeling them.
 
 ## Completion Criteria
 

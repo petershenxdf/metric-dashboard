@@ -81,6 +81,7 @@ Workflow routes:
 /workflows/selection-context/
 /workflows/analysis-selection/
 /workflows/selection-labeling/
+/workflows/analysis-labeling/
 /workflows/scatter-selection/
 /workflows/scatter-labeling/
 /workflows/chat-selection/
@@ -106,7 +107,8 @@ For example:
 2. `projection` shows an SVG MDS plot and coordinate table.
 3. `selection` shows clickable points and selected/unselected JSON.
 4. `labeling` shows selected points converted into cluster/outlier annotations.
-5. `chatbox` shows a chat UI with mock or real selection and label context.
+5. `analysis-labeling` shows Steps 1-5 together on one visual debug page.
+6. `chatbox` shows a chat UI with mock or real selection and label context.
 
 ## 7. Testing Layers
 

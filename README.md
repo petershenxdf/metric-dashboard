@@ -140,6 +140,16 @@ The current working modules are:
    - `/workflows/selection-context/` shows Data Workspace point IDs converted into reusable selection context.
    - `/workflows/analysis-selection/` connects Steps 1-4 on one shared visual layer with dataset switching, click selection, and rectangle selection.
 
+6. `labeling`
+   - owns manual point annotations derived from selected points.
+   - supports assigning selected points to a cluster or new class.
+   - supports marking selected points as outliers or not outliers.
+   - converts annotations into structured feedback instructions.
+   - `/workflows/selection-labeling/` shows selection context beside annotation output.
+   - `/workflows/analysis-labeling/` connects Steps 1-5 on one shared visual layer: data, projection, LOF outliers, KMeans clusters, selection, and labeling.
+   - in the Step 1-5 workflow, labels are limited to `cluster_1...cluster_n` and `outlier`; those labels update the effective cluster/outlier state and the frontend colors/markers.
+   - `/workflows/analysis-labeling/` is the current main manual browser test page for the completed Step 1-5 path.
+
 The default algorithm-adapter fixture is `default_analysis_outlier_debug`, not Iris. It intentionally contains three compact clusters plus three distant outlier candidates so Step 3 is visually inspectable.
 
 Future algorithms should be added behind the `algorithm_adapters` provider boundary. The current provider is `SequentialLofThenKMeansProvider`; a future SSDBCODI provider can replace it while returning the same dashboard-facing schemas.

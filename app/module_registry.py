@@ -5,12 +5,15 @@ from typing import Callable, Iterable, Optional, Tuple, TYPE_CHECKING
 
 from .modules.algorithm_adapters import create_blueprint as create_algorithm_adapters_blueprint
 from .modules.data_workspace import create_blueprint as create_data_workspace_blueprint
+from .modules.labeling import create_blueprint as create_labeling_blueprint
 from .modules.projection import create_blueprint as create_projection_blueprint
 from .modules.selection import create_blueprint as create_selection_blueprint
 from .workflows.analysis_selection import create_blueprint as create_analysis_selection_blueprint
+from .workflows.analysis_labeling import create_blueprint as create_analysis_labeling_blueprint
 from .workflows.default_analysis import create_blueprint as create_default_analysis_blueprint
 from .workflows.data_projection import create_blueprint as create_data_projection_blueprint
 from .workflows.selection_context import create_blueprint as create_selection_context_blueprint
+from .workflows.selection_labeling import create_blueprint as create_selection_labeling_blueprint
 
 if TYPE_CHECKING:
     from flask import Blueprint, Flask
@@ -77,6 +80,8 @@ MODULES: Tuple[ModuleInfo, ...] = (
         package_name="labeling",
         title="Labeling",
         purpose="Manual point annotations, cluster labels, and outlier labels.",
+        status="working",
+        blueprint_factory=create_labeling_blueprint,
     ),
     ModuleInfo(
         slug="scatterplot",
@@ -148,6 +153,16 @@ WORKFLOWS: Tuple[WorkflowInfo, ...] = (
         title="Selection and Labeling",
         purpose="Inspect selected points converted into manual label instructions.",
         modules=("data-workspace", "selection", "labeling"),
+        status="working",
+        blueprint_factory=create_selection_labeling_blueprint,
+    ),
+    WorkflowInfo(
+        slug="analysis-labeling",
+        title="Step 1-5 Analysis Labeling",
+        purpose="Inspect data, projection, outliers, clusters, selection, and labeling on one shared visual layer.",
+        modules=("data-workspace", "projection", "algorithm-adapters", "selection", "labeling"),
+        status="working",
+        blueprint_factory=create_analysis_labeling_blueprint,
     ),
     WorkflowInfo(
         slug="scatter-selection",

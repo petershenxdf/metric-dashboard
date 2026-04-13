@@ -12,7 +12,7 @@ class AlgorithmAdapterServiceTests(unittest.TestCase):
     def test_outlier_detection_preserves_point_ids(self):
         matrix = _outlier_feature_matrix()
 
-        result = detect_outliers(matrix, n_neighbors=2, contamination=0.2)
+        result = detect_outliers(matrix, n_neighbors=2, contamination=0.1)
 
         self.assertEqual([score.point_id for score in result.scores], list(matrix.point_ids))
         self.assertIn("p_outlier", result.outlier_point_ids)
@@ -24,7 +24,7 @@ class AlgorithmAdapterServiceTests(unittest.TestCase):
             matrix,
             n_clusters=2,
             outlier_n_neighbors=2,
-            outlier_contamination=0.2,
+            outlier_contamination=0.1,
         )
         assigned_point_ids = {
             assignment.point_id
@@ -81,6 +81,7 @@ def _outlier_feature_matrix():
             {"point_id": "p3", "features": [0, 0.1]},
             {"point_id": "p4", "features": [5, 5]},
             {"point_id": "p5", "features": [5.1, 5]},
+            {"point_id": "p6", "features": [5, 5.1]},
             {"point_id": "p_outlier", "features": [20, 20]},
         ],
         dataset_id="outlier_fixture",

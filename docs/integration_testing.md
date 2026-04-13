@@ -40,7 +40,7 @@ For every module, use four testing levels:
 | 2 | `projection` | `/modules/projection/` | `/workflows/data-projection/` |
 | 3 | `algorithm_adapters` | `/modules/algorithm-adapters/` | `/workflows/default-analysis/` |
 | 4 | `selection` | `/modules/selection/` | `/workflows/selection-context/`, `/workflows/analysis-selection/` |
-| 5 | `labeling` | `/modules/labeling/` | `/workflows/selection-labeling/` |
+| 5 | `labeling` | `/modules/labeling/` | `/workflows/selection-labeling/`, `/workflows/analysis-labeling/` |
 | 6 | `scatterplot` | `/modules/scatterplot/` | `/workflows/scatter-selection/` and `/workflows/scatter-labeling/` |
 | 7 | `chatbox` | `/modules/chatbox/` | `/workflows/chat-selection/` |
 | 8 | `intent_instruction` | `/modules/intent-instruction/` | `/workflows/chat-intent/` |
@@ -79,13 +79,48 @@ Step 1-4 combined workflow check:
 
 1. open `/workflows/analysis-selection/`.
 2. use the dataset dropdown to switch between `wide_gap_analysis_debug` and `default_analysis_outlier_debug`.
-3. confirm one SVG shows projected points, cluster colors, LOF outlier markers, and thin selected-point rings.
+3. confirm one SVG shows projected points, cluster colors, LOF outlier markers, and black center dots for selected points.
 4. click a point and confirm it is added to the active selection.
 5. drag a rectangle and confirm every point inside the region is added to the active selection.
 6. select more points and confirm they are added without replacing the existing selection.
 7. change `n_clusters` and confirm cluster colors/assignments update while selection still uses the same point IDs.
 8. save the active selection as a group, change selection, then restore the group.
 9. open `/workflows/analysis-selection/api/state` and confirm dataset, feature matrix, projection, outliers, clusters, selection, and selection context are all present.
+
+Step 5 currently uses real selection debug state and in-memory labeling state.
+For Step 5 browser checks, confirm:
+
+1. `/modules/labeling/` shows current selected and unselected point context.
+2. assigning selected points to `cluster_2` creates a cluster annotation.
+3. marking selected points as outliers creates an outlier annotation.
+4. structured feedback JSON updates after each annotation.
+5. `/modules/labeling/api/state` returns annotation history and structured feedback.
+6. `/workflows/selection-labeling/` shows selection context beside labeling output.
+
+Step 1-5 combined workflow check:
+
+1. open `/workflows/analysis-labeling/`.
+2. use the same dataset dropdown and `n_clusters` input as `/workflows/analysis-selection/`.
+3. confirm one SVG shows projected points, cluster colors, LOF outlier markers, and black center dots for selected points.
+4. click a point or drag a rectangle to add points to the active selection.
+5. assign the selected points to a cluster from the labeling panel.
+6. mark selected points as outliers.
+7. confirm annotation history and structured feedback JSON update on the same page.
+8. open `/workflows/analysis-labeling/api/state` and confirm dataset, feature matrix, projection, outliers, clusters, selection, selection context, groups, and labeling are all present.
+
+Current Step 1-5 labeling rules:
+
+1. allowed labels on `/workflows/analysis-labeling/` are the current cluster labels, such as `cluster_1`, `cluster_2`, `cluster_3`, plus `outlier`.
+2. assigning a point to `cluster_N` updates the effective cluster state and removes that point from the effective outlier set.
+3. assigning a point to `outlier` updates the effective outlier state and removes that point from effective cluster assignments.
+4. the API keeps raw algorithm outputs as `raw_clusters` and `raw_outliers`, while `clusters` and `outliers` represent the effective state used by the frontend.
+
+Expected visual result:
+
+1. assigning selected points to `cluster_N` changes their point color to that cluster color after reload.
+2. assigning selected points to `outlier` changes them to the pink outlier marker after reload.
+3. selected points remain indicated by small black center dots after labeling.
+4. the data preview table shows `Effective Cluster`, `Effective Outlier`, and the manual label history for each affected point.
 
 ## 4. Allowed Alternate Build Path
 

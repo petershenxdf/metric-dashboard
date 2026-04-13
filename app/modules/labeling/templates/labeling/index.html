@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}Labeling{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Module Debug Page</p>
+    <h1>Labeling</h1>
+    <p>
+      Converts selected points into manual supervision. Selection owns which points
+      are active; labeling owns what those selected points mean.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Current Selection Context</h2>
+    <dl class="details">
+      <dt>Dataset ID</dt>
+      <dd>{{ context.dataset_id }}</dd>
+      <dt>Dependency mode</dt>
+      <dd>{{ dependency_mode }}</dd>
+      <dt>Selected</dt>
+      <dd>{{ context.selected_point_ids | length }}</dd>
+      <dt>Unselected</dt>
+      <dd>{{ context.unselected_point_ids | length }}</dd>
+    </dl>
+    <pre>{{ context.to_dict() | tojson(indent=2) }}</pre>
+  </section>
+
+  <section class="panel">
+    <h2>Create Manual Label</h2>
+    <form class="debug-form" data-labeling-form>
+      <label>
+        Action
+        <select name="action">
+          {% for action_type in action_types %}
+            <option value="{{ action_type }}">{{ action_type }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Label value
+        <input name="label_value" placeholder="cluster_2 or class name">
+      </label>
+      <label>
+        Point IDs
+        <input name="point_ids" placeholder="optional, selected points only">
+      </label>
+      <button class="button" type="submit">Apply Label</button>
+    </form>
+    <p class="small">Leave Point IDs empty to label all currently selected points. Outlier actions ignore Label value.</p>
+    <div class="actions">
+      <button type="button" data-labeling-quick="assign_cluster" data-label-value="cluster_2">Assign cluster_2</button>
+      <button type="button" data-labeling-quick="assign_new_class" data-label-value="interesting_group">Assign new class</button>
+      <button type="button" data-labeling-quick="mark_outlier" data-label-value="">Mark outlier</button>
+      <button type="button" data-labeling-quick="mark_not_outlier" data-label-value="">Mark not outlier</button>
+      <button type="button" data-labeling-reset>Reset Labels</button>
+    </div>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Annotation History</h2>
+      <pre>{{ state.to_dict().annotations | tojson(indent=2) }}</pre>
+    </article>
+    <article>
+      <h2>Structured Feedback</h2>
+      <pre>{{ state.to_dict().structured_feedback | tojson(indent=2) }}</pre>
+    </article>
+  </section>
+
+  <section class="panel">
+    <h2>APIs</h2>
+    <div class="actions">
+      <a href="{{ url_for('labeling.state_api') }}">State API</a>
+      <a href="{{ url_for('labeling.annotations_api') }}">Annotations API</a>
+    </div>
+  </section>
+
+  <script>
+    const postLabelingJson = async (url, body = {}) => {
+      return fetch(url, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body)
+      });
+    };
+
+    const handleLabelingResponse = async (response) => {
+      if (!response.ok) {
+        const payload = await response.json();
+        alert(payload.error ? payload.error.message : "Labeling action failed");
+        return;
+      }
+      window.location.reload();
+    };
+
+    document.querySelector("[data-labeling-form]").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      const pointIds = form.get("point_ids")
+        .split(",")
+        .map((pointId) => pointId.trim())
+        .filter(Boolean);
+      const response = await postLabelingJson("/modules/labeling/api/apply", {
+        action: form.get("action"),
+        label_value: form.get("label_value"),
+        point_ids: pointIds
+      });
+      handleLabelingResponse(response);
+    });
+
+    document.querySelectorAll("[data-labeling-quick]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const response = await postLabelingJson("/modules/labeling/api/apply", {
+          action: button.dataset.labelingQuick,
+          label_value: button.dataset.labelValue
+        });
+        handleLabelingResponse(response);
+      });
+    });
+
+    document.querySelector("[data-labeling-reset]").addEventListener("click", async () => {
+      const response = await postLabelingJson("/modules/labeling/api/reset");
+      handleLabelingResponse(response);
+    });
+  </script>
+{% endblock %}

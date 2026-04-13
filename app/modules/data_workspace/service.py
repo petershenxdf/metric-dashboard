@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict, Mapping, Optional, Sequence
 
 from app.shared.schemas import Dataset, FeatureMatrix, Point
@@ -95,4 +95,4 @@ def _default_feature_names(feature_width: int) -> Sequence[str]:
 
 
 def _utc_timestamp() -> str:
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")

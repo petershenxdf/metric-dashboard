@@ -110,7 +110,9 @@ The shell should also expose workflow pages:
 /workflows/data-projection/
 /workflows/default-analysis/
 /workflows/selection-context/
+/workflows/analysis-selection/
 /workflows/selection-labeling/
+/workflows/analysis-labeling/
 /workflows/scatter-selection/
 /workflows/scatter-labeling/
 /workflows/chat-selection/
@@ -120,6 +122,15 @@ The shell should also expose workflow pages:
 ```
 
 These pages combine a few modules at a time, not the entire system.
+
+Current working workflow pages:
+
+1. `/workflows/data-projection/`
+2. `/workflows/default-analysis/`
+3. `/workflows/selection-context/`
+4. `/workflows/analysis-selection/`
+5. `/workflows/selection-labeling/`
+6. `/workflows/analysis-labeling/`
 
 ## Testing
 

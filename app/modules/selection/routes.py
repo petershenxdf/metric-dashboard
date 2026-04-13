@@ -5,7 +5,12 @@ from flask import Blueprint, jsonify, render_template, request
 from app.shared.flask_helpers import api_error, api_success
 
 from .fixtures import fixture_group_point_ids, selection_fixture_dataset
-from .schemas import SELECTION_ACTION_TYPES, SELECTION_MODES, SELECTION_SOURCES, SelectionAction
+from .http_helpers import (
+    optional_point_ids_from_payload,
+    request_payload,
+    selection_action_from_payload,
+)
+from .schemas import SELECTION_ACTION_TYPES, SELECTION_MODES, SELECTION_SOURCES
 from .service import (
     apply_selection_action,
     delete_selection_group,
@@ -61,9 +66,11 @@ def create_blueprint() -> Blueprint:
     @blueprint.get("/api/state")
     def state_api():
         state = get_selection_state(get_debug_store())
+        payload = state.to_dict()
+        payload.update({"module": "selection", "status": "working"})
         return jsonify(
             api_success(
-                state.to_dict(),
+                payload,
                 diagnostics={"dependency_mode": "real data-workspace fixture"},
             )
         )
@@ -121,12 +128,12 @@ def create_blueprint() -> Blueprint:
 
     @blueprint.post("/api/groups")
     def save_group_api():
-        payload = _request_payload()
+        payload = request_payload(request)
         try:
             group = save_selection_group(
                 get_debug_store(),
                 group_name=payload.get("group_name", ""),
-                point_ids=_optional_point_ids_from_payload(payload),
+                point_ids=optional_point_ids_from_payload(payload),
                 metadata=payload.get("metadata", {}),
             )
         except ValueError as exc:
@@ -171,15 +178,9 @@ def create_blueprint() -> Blueprint:
 
 
 def _action_response(action_name: str):
-    payload = _request_payload()
+    payload = request_payload(request)
     try:
-        action = SelectionAction(
-            action=action_name,
-            point_ids=_point_ids_from_payload(payload),
-            source=str(payload.get("source", "api")),
-            mode=payload.get("mode"),
-            metadata=payload.get("metadata", {}),
-        )
+        action = selection_action_from_payload(action_name, payload)
         result = apply_selection_action(get_debug_store(), action)
     except ValueError as exc:
         return jsonify(api_error("invalid_selection_action", str(exc))), 400
@@ -190,28 +191,6 @@ def _action_response(action_name: str):
             diagnostics={"dependency_mode": "real data-workspace fixture"},
         )
     )
-
-
-def _request_payload():
-    if request.is_json:
-        return request.get_json(silent=True) or {}
-
-    payload = dict(request.form)
-    payload.update(request.args)
-    return payload
-
-
-def _point_ids_from_payload(payload):
-    point_ids = payload.get("point_ids", [])
-    if isinstance(point_ids, str):
-        return [point_id.strip() for point_id in point_ids.split(",") if point_id.strip()]
-    return point_ids
-
-
-def _optional_point_ids_from_payload(payload):
-    if "point_ids" not in payload or payload.get("point_ids") in (None, ""):
-        return None
-    return _point_ids_from_payload(payload)
 
 
 def _selection_groups_payload():
