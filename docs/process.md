@@ -324,11 +324,62 @@ Open `/modules/selection/` and confirm:
 
 Completion:
 
-Selection can be exercised in Flask without scatterplot or chatbox.
+Selection can be exercised in Flask without labeling, scatterplot, or chatbox.
 
 ---
 
-### Step 5: Scatterplot
+### Step 5: Labeling
+
+Build:
+
+```text
+labeling
+labeling Flask page
+selection-labeling workflow page
+```
+
+Why:
+
+Selection only says which points are active. Labeling says what those selected points mean: same class, assigned cluster, outlier, or not outlier.
+
+Tasks:
+
+1. Define manual annotation and structured feedback schemas.
+2. Accept selection context from the selection module.
+3. Support assigning selected points to an existing cluster.
+4. Support creating a new class label for selected points.
+5. Support marking selected points as outliers or not outliers.
+6. Add `/modules/labeling/`.
+7. Add `/modules/labeling/api/state`.
+8. Add `/modules/labeling/api/apply`.
+9. Add `/workflows/selection-labeling/`.
+10. Show annotation history and structured feedback JSON in Flask.
+
+Unit tests:
+
+1. selected points become `assign_cluster`.
+2. selected points become `is_outlier`.
+3. empty selection is rejected.
+4. unknown point IDs are rejected.
+5. reset clears annotation state.
+
+Flask visual check:
+
+Open `/modules/labeling/` and confirm:
+
+1. selected point IDs are visible.
+2. assigning a cluster creates an annotation.
+3. marking outliers creates an annotation.
+4. structured feedback JSON is visible.
+5. dependency mode clearly says mock or real selection.
+
+Completion:
+
+Manual labels can be created from selected points and inspected in Flask before chatbox or metric learning exists.
+
+---
+
+### Step 6: Scatterplot
 
 Build:
 
@@ -336,11 +387,12 @@ Build:
 scatterplot
 scatterplot Flask page
 scatter-selection workflow page
+scatter-labeling workflow page
 ```
 
 Why:
 
-After data, projection, adapter output, and selection exist, scatterplot can combine them visually.
+After data, projection, adapter output, selection, and labeling exist, scatterplot can combine them visually.
 
 Tasks:
 
@@ -348,15 +400,18 @@ Tasks:
 2. Color points by cluster.
 3. Mark outliers.
 4. Support selection interaction.
-5. Add `/modules/scatterplot/`.
-6. Add `/workflows/scatter-selection/`.
+5. Render manual labels when label state exists.
+6. Send label actions to labeling when that workflow is active.
+7. Add `/modules/scatterplot/`.
+8. Add `/workflows/scatter-selection/`.
+9. Add `/workflows/scatter-labeling/`.
 
 Unit tests:
 
 1. Build render payload correctly.
 2. Preserve point IDs.
 3. Mark selected points correctly.
-4. Include cluster and outlier fields.
+4. Include cluster, outlier, and manual label fields.
 
 Flask visual check:
 
@@ -366,6 +421,7 @@ Open `/modules/scatterplot/` and confirm:
 2. cluster colors are visible.
 3. outlier markers are visible.
 4. clicking points updates selection state.
+5. label actions update labeling state when using the labeling workflow.
 
 Completion:
 
@@ -373,35 +429,37 @@ The scatterplot module can be visually tested before chatbox work.
 
 ---
 
-### Step 6: Chatbox
+### Step 7: Chatbox
 
 Build:
 
 ```text
 chatbox
 chatbox Flask page
-mock selection context
+mock selection and label context
 ```
 
 Why:
 
-Chatbox needs selection context, but should not own selection or run algorithms.
+Chatbox needs selection context and may benefit from recent label context, but should not own selection, labeling, or algorithms.
 
 Tasks:
 
 1. Build chat UI.
 2. Display current selection context.
-3. Submit user message.
-4. Show assistant response.
-5. Add `/modules/chatbox/`.
-6. Add API endpoint for message submission.
-7. Support mock selection context for standalone testing.
+3. Display recent manual label context when available.
+4. Submit user message.
+5. Show assistant response.
+6. Add `/modules/chatbox/`.
+7. Add API endpoint for message submission.
+8. Support mock selection and label context for standalone testing.
 
 Unit tests:
 
 1. Empty messages are rejected.
 2. Message payload includes selection context.
-3. Chatbox does not call clustering or outlier detection.
+3. Message payload includes label context when available.
+4. Chatbox does not call clustering or outlier detection.
 
 Flask visual check:
 
@@ -410,15 +468,16 @@ Open `/modules/chatbox/` and confirm:
 1. chat input works.
 2. message appears in history.
 3. selection context is visible.
-4. response clearly shows whether intent parsing is real or mocked.
+4. label context is visible when available.
+5. response clearly shows whether intent parsing is real or mocked.
 
 Completion:
 
-Chatbox can be manually tested in Flask with mock selection.
+Chatbox can be manually tested in Flask with mock selection and label context.
 
 ---
 
-### Step 7: Intent Instruction
+### Step 8: Intent Instruction
 
 Build:
 
@@ -437,17 +496,19 @@ Tasks:
 1. Define structured instruction schema.
 2. Implement deterministic classifier first.
 3. Resolve selected/unselected references.
-4. Generate clarification requests.
-5. Add `/modules/intent-instruction/`.
-6. Add `/workflows/chat-intent/`.
+4. Resolve cluster and outlier label references when the user mentions them.
+5. Generate clarification requests.
+6. Add `/modules/intent-instruction/`.
+7. Add `/workflows/chat-intent/`.
 
 Unit tests:
 
 1. Grouping messages become `same_class`.
-2. Split messages become `split_into_n_classes`.
-3. Outlier messages become `is_outlier`.
-4. Vague messages require clarification.
-5. Irrelevant messages become `non_actionable`.
+2. Direct label messages become `assign_cluster` or `assign_new_class`.
+3. Split messages become `split_into_n_classes`.
+4. Outlier messages become `is_outlier`.
+5. Vague messages require clarification.
+6. Irrelevant messages become `non_actionable`.
 
 Flask visual check:
 
@@ -463,7 +524,7 @@ Intent parsing is visible and debuggable before metric-learning integration.
 
 ---
 
-### Step 8: Metric-Learning Adapter
+### Step 9: Metric-Learning Adapter
 
 Build:
 
@@ -474,22 +535,24 @@ constraint preview Flask page
 
 Why:
 
-Structured instructions should be converted into metric-learning constraints through one narrow boundary.
+Structured instructions from labeling or intent should be converted into metric-learning constraints through one narrow boundary.
 
 Tasks:
 
 1. Accept structured instruction.
 2. Reject incomplete or non-actionable instruction.
 3. Convert actionable instruction into constraint payload.
-4. Add `/modules/metric-learning-adapter/`.
-5. Show instruction input and constraint output.
+4. Support manual label instructions and chat-derived instructions through the same schema.
+5. Add `/modules/metric-learning-adapter/`.
+6. Show instruction input and constraint output.
 
 Unit tests:
 
 1. `same_class` creates must-link constraints.
-2. `different_class` creates cannot-link constraints.
-3. `split_into_n_classes` creates split constraints.
-4. incomplete instruction is rejected.
+2. `assign_cluster` creates class label constraints.
+3. `different_class` creates cannot-link constraints.
+4. `split_into_n_classes` creates split constraints.
+5. incomplete instruction is rejected.
 
 Flask visual check:
 
@@ -504,7 +567,7 @@ Metric-learning input can be inspected before real refinement loop.
 
 ---
 
-### Step 9: Refinement Orchestrator
+### Step 10: Refinement Orchestrator
 
 Build:
 
@@ -547,7 +610,7 @@ The update loop can be debugged visually before full dashboard integration.
 
 ---
 
-### Step 10: Integrated Dashboard
+### Step 11: Integrated Dashboard
 
 Build:
 
@@ -561,7 +624,7 @@ Only integrate after individual modules and workflow demos work.
 
 Tasks:
 
-1. Compose data, projection, adapters, scatterplot, selection, chatbox, intent, metric learning, and orchestration.
+1. Compose data, projection, adapters, selection, labeling, scatterplot, chatbox, intent, metric learning, and orchestration.
 2. Keep dashboard shell thin.
 3. Show current state clearly.
 4. Make refinement loop visible.
@@ -578,9 +641,10 @@ Flask visual check:
 Open `/` and confirm:
 
 1. scatterplot appears.
-2. selecting points updates chatbox context.
-3. chat instruction produces structured output.
-4. valid instruction updates the visible state.
+2. selecting points updates selection and chatbox context.
+3. direct label actions create structured feedback.
+4. chat instruction produces structured output.
+5. valid instruction updates the visible state.
 
 Completion:
 
@@ -594,8 +658,9 @@ The first complete local human-in-the-loop workflow works in Flask.
 4. Do not let modules communicate through hidden globals.
 5. Do not let chatbox call algorithms directly.
 6. Do not let scatterplot own selection truth.
-7. Do not rewrite existing clustering or outlier logic.
-8. Do not skip browser-visible module pages.
+7. Do not let scatterplot or chatbox own label truth.
+8. Do not rewrite existing clustering or outlier logic.
+9. Do not skip browser-visible module pages.
 
 ## 7. Milestones
 
@@ -611,25 +676,31 @@ Goal:
 
 Data workspace and projection can be opened in Flask, and `/workflows/data-projection/` shows their interaction.
 
-### Milestone 3: Visual Inspection and Selection
+### Milestone 3: Selection and Labeling
 
 Goal:
 
-Scatterplot renders projected points, default clusters, outliers, and selection state.
+Selection and labeling work in Flask, and selected points can become manual cluster/outlier annotations.
 
-### Milestone 4: Chat and Intent
+### Milestone 4: Scatterplot Labeling
 
 Goal:
 
-Chatbox receives selection context and intent module outputs structured instructions.
+Scatterplot renders projected points, default clusters, outliers, selection state, and manual label state.
 
-### Milestone 5: Refinement Loop
+### Milestone 5: Chat and Intent
+
+Goal:
+
+Chatbox receives selection/label context and intent module outputs structured instructions.
+
+### Milestone 6: Refinement Loop
 
 Goal:
 
 Structured instruction flows through metric-learning adapter and refinement orchestrator.
 
-### Milestone 6: Integrated Dashboard
+### Milestone 7: Integrated Dashboard
 
 Goal:
 

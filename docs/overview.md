@@ -10,11 +10,12 @@ The app should let a user:
 2. Project data into 2D with MDS.
 3. View default clustering and outlier detection results.
 4. Select points in a scatterplot.
-5. Give feedback through a chatbox.
-6. Convert feedback into structured instructions.
-7. Use those instructions to guide metric learning.
-8. Rerun projection, clustering, and outlier detection.
-9. See the updated visualization.
+5. Assign selected points to a cluster/class or mark them as outliers.
+6. Give feedback through a chatbox.
+7. Convert direct labels and chat feedback into structured instructions.
+8. Use those instructions to guide metric learning.
+9. Rerun projection, clustering, and outlier detection.
+10. See the updated visualization.
 
 Deployment is out of scope for now. The app only needs to run locally.
 
@@ -55,8 +56,10 @@ data workspace
   -> algorithm adapters
   -> scatterplot
   -> selection
+  -> labeling / annotation
   -> chatbox
-  -> intent instruction
+  -> intent instruction for chat-derived feedback
+  -> unified structured feedback
   -> metric-learning adapter
   -> refinement orchestrator
   -> updated projection and algorithm outputs
@@ -70,11 +73,12 @@ Detailed flow:
 4. Scatterplot renders points with cluster colors and outlier markers.
 5. User selects points.
 6. Selection module stores selected/unselected state.
-7. Chatbox receives user text and current selection context.
-8. Intent instruction module classifies and compiles structured instructions.
-9. Metric-learning adapter converts instructions into constraints.
-10. Refinement orchestrator runs the update sequence.
-11. The integrated dashboard refreshes the visible state.
+7. Labeling module converts direct label actions into manual annotations or structured feedback instructions.
+8. Chatbox receives user text and current selection/labeling context.
+9. Intent instruction module classifies chat text and compiles structured instructions.
+10. Metric-learning adapter converts structured feedback into constraints.
+11. Refinement orchestrator runs the update sequence.
+12. The integrated dashboard refreshes the visible state.
 
 ## 5. Product Constraints
 
@@ -82,9 +86,10 @@ Detailed flow:
 2. Chatbox must not directly perform clustering or outlier detection.
 3. Scatterplot must not parse language.
 4. Selection state must be accessible outside the scatterplot.
-5. Vague user feedback must not become hard supervision without clarification.
-6. All cross-module contracts should use shared schemas.
-7. Every module must be independently visible in Flask.
+5. Labeling state must be owned by the labeling module, not by scatterplot or chatbox.
+6. Vague user feedback must not become hard supervision without clarification.
+7. All cross-module contracts should use shared schemas.
+8. Every module must be independently visible in Flask.
 
 ## 6. Target File Structure
 
@@ -156,6 +161,14 @@ metric-dashboard/
         templates/selection/
         static/selection/
 
+      labeling/
+        schemas.py
+        service.py
+        fixtures.py
+        routes.py
+        templates/labeling/
+        static/labeling/
+
       scatterplot/
         schemas.py
         service.py
@@ -196,7 +209,9 @@ metric-dashboard/
 
     workflows/
       data_projection.py
+      selection_labeling.py
       scatter_selection.py
+      scatter_labeling.py
       chat_intent.py
       refinement_loop.py
 
@@ -206,12 +221,13 @@ metric-dashboard/
       projection/
       algorithm_adapters/
       selection/
+      labeling/
       scatterplot/
       chatbox/
       intent_instruction/
       metric_learning_adapter/
       refinement_orchestrator/
-    flask/
+    flask_app/
       test_module_pages.py
       test_workflow_pages.py
 
@@ -261,6 +277,7 @@ Each module should expose these boundaries where applicable:
 | Projection | MDS 2D coordinates | `/modules/projection/` |
 | Algorithm Adapters | Existing clustering/outlier wrappers | `/modules/algorithm-adapters/` |
 | Selection | Selected/unselected point state | `/modules/selection/` |
+| Labeling | Manual point annotations, cluster labels, and outlier labels | `/modules/labeling/` |
 | Scatterplot | Visual point rendering and selection UI | `/modules/scatterplot/` |
 | Chatbox | Dialogue UI and clarification flow | `/modules/chatbox/` |
 | Intent Instruction | Message classification and structured instructions | `/modules/intent-instruction/` |
@@ -271,14 +288,16 @@ Each module should expose these boundaries where applicable:
 
 Start with these families:
 
-1. `same_class`
-2. `different_class`
-3. `split_into_n_classes`
-4. `merge_groups`
-5. `is_outlier`
-6. `not_outlier`
-7. `needs_clarification`
-8. `non_actionable`
+1. `assign_cluster`
+2. `assign_new_class`
+3. `same_class`
+4. `different_class`
+5. `split_into_n_classes`
+6. `merge_groups`
+7. `is_outlier`
+8. `not_outlier`
+9. `needs_clarification`
+10. `non_actionable`
 
 Example:
 
@@ -286,6 +305,7 @@ Example:
 {
   "instruction_type": "same_class",
   "status": "actionable",
+  "source": "chat_intent",
   "target": {
     "source": "selected_points",
     "point_ids": ["p1", "p7", "p9"]

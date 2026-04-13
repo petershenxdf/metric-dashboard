@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}{{ module.title }}{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Module Debug Page</p>
+    <h1>{{ module.title }}</h1>
+    <p>{{ module.purpose }}</p>
+  </section>
+
+  <section class="panel">
+    <h2>Status</h2>
+    <dl class="details">
+      <dt>Module slug</dt>
+      <dd>{{ module.slug }}</dd>
+      <dt>Python package</dt>
+      <dd>{{ module.package_name }}</dd>
+      <dt>Status</dt>
+      <dd>{{ module.status }}</dd>
+      <dt>Dependency mode</dt>
+      <dd>placeholder</dd>
+    </dl>
+  </section>
+
+  <section class="panel">
+    <h2>Debug APIs</h2>
+    <ul>
+      <li><a href="{{ url_for('core.module_health', module_slug=module.slug) }}">Health endpoint</a></li>
+      <li><a href="{{ url_for('core.module_state', module_slug=module.slug) }}">State endpoint</a></li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <h2>Next Step</h2>
+    <p>This placeholder will be replaced by the module's real Flask debug page when that module is built.</p>
+  </section>
+{% endblock %}

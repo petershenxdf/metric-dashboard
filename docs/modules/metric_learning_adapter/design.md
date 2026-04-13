@@ -6,12 +6,14 @@ The metric-learning adapter converts structured instructions into constraint pay
 
 It should not receive raw chat text. It should only receive validated structured instructions.
 
+Instructions may come from either the labeling module or the intent instruction module, but they should share one schema before reaching this adapter.
+
 ## Responsibilities
 
 1. Accept structured instructions.
-2. Validate instruction status.
+2. Validate instruction source and status.
 3. Reject incomplete and non-actionable instructions.
-4. Convert instructions into metric-learning constraints.
+4. Convert manual labels and chat-derived instructions into metric-learning constraints.
 5. Call the metric-learning pipeline when available.
 6. Provide a Flask page for constraint preview.
 
@@ -45,6 +47,7 @@ tests/modules/metric_learning_adapter/
 {
   "instruction_type": "same_class",
   "status": "actionable",
+  "source": "manual_label",
   "target": {
     "source": "selected_points",
     "point_ids": ["p1", "p7", "p9"]
@@ -61,6 +64,16 @@ Same class:
 {
   "constraint_type": "must_link",
   "point_ids": ["p1", "p7", "p9"]
+}
+```
+
+Assign cluster:
+
+```json
+{
+  "constraint_type": "class_label",
+  "point_ids": ["p1", "p7", "p9"],
+  "label": "cluster_2"
 }
 ```
 
@@ -106,11 +119,12 @@ The page should show:
 Unit tests:
 
 1. `same_class` becomes must-link constraints.
-2. `different_class` becomes cannot-link constraints.
-3. `split_into_n_classes` becomes split constraints.
-4. `is_outlier` becomes outlier hint if supported.
-5. `needs_clarification` is rejected.
-6. `non_actionable` is rejected.
+2. `assign_cluster` becomes class label constraints.
+3. `different_class` becomes cannot-link constraints.
+4. `split_into_n_classes` becomes split constraints.
+5. `is_outlier` becomes outlier hint if supported.
+6. `needs_clarification` is rejected.
+7. `non_actionable` is rejected.
 
 Flask route tests:
 
@@ -128,4 +142,3 @@ Manual browser check:
 ## Completion Criteria
 
 This module is complete when instruction-to-constraint conversion is inspectable through Flask and isolated from chat UI.
-

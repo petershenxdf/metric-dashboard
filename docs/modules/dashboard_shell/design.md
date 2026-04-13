@@ -6,7 +6,7 @@ The dashboard shell owns the local Flask app structure.
 
 It is responsible for making every module visible in the browser and for composing modules into workflow demos and the final integrated dashboard.
 
-The shell should stay thin. It should not contain data normalization, MDS, clustering, outlier detection, selection logic, chat parsing, metric learning, or refinement internals.
+The shell should stay thin. It should not contain data normalization, MDS, clustering, outlier detection, selection logic, labeling logic, chat parsing, metric learning, or refinement internals.
 
 ## Responsibilities
 
@@ -23,8 +23,9 @@ The shell should stay thin. It should not contain data normalization, MDS, clust
 1. Computing projections.
 2. Running algorithms.
 3. Owning selection state.
-4. Parsing chat messages.
-5. Creating metric-learning constraints.
+4. Owning manual label state.
+5. Parsing chat messages.
+6. Creating metric-learning constraints.
 
 ## Target Files
 
@@ -80,6 +81,7 @@ The shell registers modules through a central registry:
 MODULES = {
     "data-workspace": data_workspace.create_blueprint,
     "projection": projection.create_blueprint,
+    "labeling": labeling.create_blueprint,
 }
 ```
 
@@ -103,7 +105,9 @@ The shell should also expose workflow pages:
 
 ```text
 /workflows/data-projection/
+/workflows/selection-labeling/
 /workflows/scatter-selection/
+/workflows/scatter-labeling/
 /workflows/chat-intent/
 /workflows/refinement-loop/
 ```
@@ -134,4 +138,3 @@ Manual browser check:
 ## Completion Criteria
 
 This module is complete when the local Flask app can host module pages and workflow demos.
-

@@ -42,6 +42,19 @@ tests/modules/projection/
   test_routes.py
 ```
 
+## Current Status
+
+Status: `working`
+
+Step 2 implementation is complete enough for local inspection:
+
+1. MDS service exists.
+2. Projection schemas exist.
+3. Flask debug page exists.
+4. projection and state APIs exist.
+5. `/workflows/data-projection/` exists.
+6. unit tests and route tests exist.
+
 ## Input Contract
 
 ```json
@@ -80,6 +93,7 @@ project_feature_matrix(feature_matrix, projection_id=None)
 /modules/projection/                      projection debug page
 /modules/projection/health                module health
 /modules/projection/api/projection        projection JSON
+/modules/projection/api/state             current module summary as JSON
 /workflows/data-projection/               data table and projection together
 ```
 
@@ -111,6 +125,8 @@ Flask route tests:
 1. debug page returns 200.
 2. API returns `projection_id`, `method`, and `coordinates`.
 3. API coordinate count matches fixture point count.
+4. state API returns module status and coordinate count.
+5. data-projection workflow page returns 200.
 
 Manual browser check:
 
@@ -119,7 +135,13 @@ Manual browser check:
 3. inspect the MDS SVG and coordinate table.
 4. open `/workflows/data-projection/` to see data and projection together.
 
+Validation commands:
+
+```powershell
+python -m compileall app tests run.py
+python -m unittest discover -s tests
+```
+
 ## Completion Criteria
 
 The module is complete when projection behavior passes unit tests and can be visually inspected through Flask.
-

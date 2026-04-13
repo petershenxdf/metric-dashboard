@@ -42,6 +42,18 @@ tests/modules/data_workspace/
   test_routes.py
 ```
 
+## Current Status
+
+Status: `working`
+
+Step 1 implementation is complete enough for local inspection:
+
+1. service logic exists.
+2. Iris fixture exists.
+3. Flask debug page exists.
+4. dataset and matrix APIs exist.
+5. unit tests and route tests exist.
+
 ## Core Schemas
 
 Point:
@@ -92,6 +104,7 @@ create_point_id_map(dataset)
 /modules/data-workspace/health           module health
 /modules/data-workspace/api/dataset      current fixture dataset as JSON
 /modules/data-workspace/api/matrix       current feature matrix as JSON
+/modules/data-workspace/api/state        current module summary as JSON
 ```
 
 ## Flask Debug Page Requirements
@@ -130,6 +143,7 @@ Flask route tests:
 1. debug page returns 200.
 2. dataset API returns `dataset_id`, `points`, and `feature_names`.
 3. matrix API returns `point_ids`, `feature_names`, and `values`.
+4. state API returns point count, feature count, and matrix shape.
 
 Manual browser check:
 
@@ -137,7 +151,13 @@ Manual browser check:
 2. open `/modules/data-workspace/`.
 3. verify the point table and matrix match the fixture.
 
+Validation commands:
+
+```powershell
+python -m compileall app tests run.py
+python -m unittest discover -s tests
+```
+
 ## Completion Criteria
 
 The module is complete when both code tests and Flask-visible dataset inspection work.
-

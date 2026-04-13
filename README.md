@@ -31,6 +31,7 @@ The first product version has two main user-facing areas:
    - Colors points by cluster.
    - Marks outliers.
    - Lets the user select points.
+   - Lets selected points become explicit cluster or outlier labels through the labeling module.
 
 2. Chatbox
    - Receives feedback about selected or unselected points.
@@ -50,8 +51,10 @@ user data
   -> outlier adapter
   -> scatterplot
   -> point selection
-  -> chatbox feedback
-  -> intent instruction
+  -> direct labeling / annotation
+  -> or chatbox feedback
+  -> intent instruction for chat-derived feedback
+  -> unified structured feedback
   -> metric-learning adapter
   -> refinement orchestrator
   -> updated projection/clusters/outliers
@@ -102,6 +105,7 @@ The module lab is important. It lets the developer open one module at a time and
 | `projection` | MDS projection into 2D | `/modules/projection/` |
 | `algorithm_adapters` | Existing clustering and outlier wrappers | `/modules/algorithm-adapters/` |
 | `selection` | Selected and unselected point state | `/modules/selection/` |
+| `labeling` | Manual point annotations, cluster labels, and outlier labels | `/modules/labeling/` |
 | `scatterplot` | Point rendering, clusters, outliers, visual selection | `/modules/scatterplot/` |
 | `chatbox` | Chat UI, user feedback, clarification display | `/modules/chatbox/` |
 | `intent_instruction` | Message classification and structured instruction output | `/modules/intent-instruction/` |
@@ -113,11 +117,13 @@ The module lab is important. It lets the developer open one module at a time and
 1. Scatterplot does not parse chat text.
 2. Chatbox does not run clustering, outlier detection, projection, or metric learning.
 3. Selection state is owned by the selection module, not hidden inside scatterplot.
-4. Intent instruction receives chat text plus context and outputs structured instructions.
-5. Metric-learning adapter receives structured instructions, not raw chat text.
-6. Existing algorithms are accessed only through algorithm adapters.
-7. Dashboard shell composes modules but does not own module internals.
-8. Integration should happen through schemas, services, APIs, or workflow pages.
+4. Labeling owns manual cluster/outlier annotations derived from selected points.
+5. Scatterplot can expose label actions, but it must send them to labeling instead of owning label truth.
+6. Intent instruction receives chat text plus context and outputs structured instructions.
+7. Metric-learning adapter receives structured instructions, not raw chat text.
+8. Existing algorithms are accessed only through algorithm adapters.
+9. Dashboard shell composes modules but does not own module internals.
+10. Integration should happen through schemas, services, APIs, or workflow pages.
 
 ## Structured Instructions
 
@@ -126,6 +132,8 @@ Actionable user feedback should become stable structured instructions.
 Initial instruction types:
 
 ```text
+assign_cluster
+assign_new_class
 same_class
 different_class
 split_into_n_classes
@@ -142,6 +150,7 @@ Example:
 {
   "instruction_type": "same_class",
   "status": "actionable",
+  "source": "chat_intent",
   "target": {
     "source": "selected_points",
     "point_ids": ["p1", "p7", "p9"]
@@ -175,22 +184,25 @@ Current planned order:
 5. `selection`
    - make selected/unselected state interactive in Flask.
 
-6. `scatterplot`
+6. `labeling`
+   - convert selected point IDs into manual cluster/outlier annotations.
+
+7. `scatterplot`
    - render projected points, clusters, outliers, and selection.
 
-7. `chatbox`
+8. `chatbox`
    - build chat UI with mock or real selection context.
 
-8. `intent_instruction`
+9. `intent_instruction`
    - compile messages into structured instructions.
 
-9. `metric_learning_adapter`
+10. `metric_learning_adapter`
    - convert structured instructions into constraints.
 
-10. `refinement_orchestrator`
+11. `refinement_orchestrator`
    - coordinate one full update loop.
 
-11. integrated dashboard
+12. integrated dashboard
    - combine already-tested modules.
 
 ## Testing Expectations

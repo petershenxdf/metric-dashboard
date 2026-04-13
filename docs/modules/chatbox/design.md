@@ -6,14 +6,17 @@ The chatbox module is the dialogue interface for user feedback.
 
 It receives user messages and displays responses, but it does not directly run clustering, outlier detection, MDS, or metric learning.
 
+It is one path for user feedback. Direct point labels are handled by the labeling module, while chat text is sent to intent instruction and compiled into the same structured feedback family.
+
 ## Responsibilities
 
 1. Display conversation history.
 2. Display current selection context.
-3. Accept user messages.
-4. Send message plus selection context to the intent instruction module when available.
-5. Show clarification or confirmation responses.
-6. Provide standalone Flask testing with mock selection context.
+3. Display recent manual label context when available.
+4. Accept user messages.
+5. Send message plus selection and label context to the intent instruction module when available.
+6. Show clarification or confirmation responses.
+7. Provide standalone Flask testing with mock selection and label context.
 
 ## Not Responsible For
 
@@ -23,6 +26,7 @@ It receives user messages and displays responses, but it does not directly run c
 4. Running outlier detection.
 5. Running metric learning.
 6. Updating the scatterplot directly.
+7. Owning manual label state.
 
 ## Target Files
 
@@ -52,6 +56,9 @@ tests/modules/chatbox/
     "unselected_point_ids": ["p2", "p3"],
     "selected_count": 2,
     "unselected_count": 2
+  },
+  "label_context": {
+    "active_annotations": []
   }
 }
 ```
@@ -85,9 +92,10 @@ The page should show:
 1. chat history.
 2. message input.
 3. current selection context panel.
-4. response output.
-5. structured instruction JSON preview if available.
-6. a note showing whether selection context is mocked or real.
+4. current label context panel when available.
+5. response output.
+6. structured instruction JSON preview if available.
+7. a note showing whether selection and label context are mocked or real.
 
 ## Testing
 
@@ -96,7 +104,8 @@ Unit tests:
 1. empty message is rejected.
 2. valid message creates a chat turn.
 3. selection context is included in downstream payload.
-4. chatbox service does not call clustering or outlier detection.
+4. label context is included when available.
+5. chatbox service does not call clustering or outlier detection.
 
 Flask route tests:
 
@@ -110,9 +119,9 @@ Manual browser check:
 2. type a message.
 3. confirm the message appears in history.
 4. confirm selection context is visible.
-5. confirm response states whether intent parsing is active or mocked.
+5. confirm label context is visible when available.
+6. confirm response states whether intent parsing is active or mocked.
 
 ## Completion Criteria
 
 This module is complete when chat interaction can be tested visibly through Flask without depending on the full dashboard.
-

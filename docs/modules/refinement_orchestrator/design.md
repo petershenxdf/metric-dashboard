@@ -4,17 +4,18 @@
 
 The refinement orchestrator coordinates the end-to-end update flow after valid user feedback.
 
-It does not own the implementation of metric learning, projection, clustering, outlier detection, chat, or scatterplot. It calls other modules in the correct order.
+It does not own the implementation of metric learning, projection, clustering, outlier detection, labeling, chat, or scatterplot. It calls other modules in the correct order.
 
 ## Responsibilities
 
 1. Receive actionable structured instructions.
-2. Call metric-learning adapter.
-3. Trigger updated projection.
-4. Rerun clustering through algorithm adapters.
-5. Rerun outlier detection through algorithm adapters.
-6. Return updated dashboard state.
-7. Provide a Flask timeline page for debugging the update flow.
+2. Accept instructions from labeling or intent instruction.
+3. Call metric-learning adapter.
+4. Trigger updated projection.
+5. Rerun clustering through algorithm adapters.
+6. Rerun outlier detection through algorithm adapters.
+7. Return updated dashboard state.
+8. Provide a Flask timeline page for debugging the update flow.
 
 ## Not Responsible For
 
@@ -23,6 +24,7 @@ It does not own the implementation of metric learning, projection, clustering, o
 3. Implementing metric learning internals.
 4. Implementing clustering or outlier detection.
 5. Owning selection state.
+6. Owning manual label state.
 
 ## Target Files
 
@@ -43,7 +45,7 @@ tests/modules/refinement_orchestrator/
 ## Main Flow
 
 ```text
-structured instruction
+structured instruction from labeling or intent
   -> metric-learning adapter
   -> updated metric state or representation
   -> projection
@@ -122,4 +124,3 @@ Manual browser check:
 ## Completion Criteria
 
 This module is complete when the refinement loop can be tested with mocks and inspected through a Flask timeline page.
-

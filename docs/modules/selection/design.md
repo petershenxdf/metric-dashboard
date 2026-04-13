@@ -6,6 +6,8 @@ The selection module owns selected and unselected point state.
 
 It grounds user phrases such as "these points", "selected points", and "unselected points".
 
+It does not decide what the selected points mean. That semantic layer belongs to the labeling module or the intent instruction module.
+
 ## Responsibilities
 
 1. Store selected point IDs.
@@ -22,6 +24,7 @@ It grounds user phrases such as "these points", "selected points", and "unselect
 2. Parsing chat messages.
 3. Running clustering or outlier detection.
 4. Running metric learning.
+5. Assigning selected points to clusters or outlier labels.
 
 ## Target Files
 
@@ -63,6 +66,17 @@ clear_selection()
 get_selection_context(dataset)
 ```
 
+Downstream modules should consume this context instead of reading selection internals directly.
+
+```json
+{
+  "source": "selection",
+  "dataset_id": "iris_sample",
+  "selected_point_ids": ["p1", "p7"],
+  "unselected_point_ids": ["p2", "p3"]
+}
+```
+
 ## Flask Routes
 
 ```text
@@ -84,6 +98,7 @@ The page should show:
 3. unselected point IDs.
 4. JSON preview of selection context.
 5. clear button.
+6. link to the labeling workflow when available.
 
 ## Testing
 
@@ -112,3 +127,4 @@ Manual browser check:
 
 This module is complete when selection state can be tested in code and manipulated visibly through Flask.
 
+The first downstream integration should be `/workflows/selection-labeling/`, where selected points are converted into manual annotations.

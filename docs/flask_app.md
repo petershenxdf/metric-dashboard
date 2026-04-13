@@ -45,6 +45,7 @@ Use a central module registry:
 MODULES = {
     "data-workspace": data_workspace.create_blueprint,
     "projection": projection.create_blueprint,
+    "labeling": labeling.create_blueprint,
     "scatterplot": scatterplot.create_blueprint,
     "chatbox": chatbox.create_blueprint,
 }
@@ -75,7 +76,9 @@ Workflow routes:
 
 ```text
 /workflows/data-projection/
+/workflows/selection-labeling/
 /workflows/scatter-selection/
+/workflows/scatter-labeling/
 /workflows/chat-intent/
 /workflows/refinement-loop/
 ```
@@ -96,7 +99,8 @@ For example:
 1. `data_workspace` shows a dataset table and feature matrix preview.
 2. `projection` shows an SVG MDS plot and coordinate table.
 3. `selection` shows clickable points and selected/unselected JSON.
-4. `chatbox` shows a chat UI with mock or real selection context.
+4. `labeling` shows selected points converted into cluster/outlier annotations.
+5. `chatbox` shows a chat UI with mock or real selection and label context.
 
 ## 7. Testing Layers
 
@@ -117,7 +121,7 @@ Unit tests are necessary, but they are not enough.
 
 For early development, use simple local state:
 
-1. in-memory state for current dataset and selection.
+1. in-memory state for current dataset, selection, and manual annotations.
 2. fixtures for repeatable module demos.
 3. no production database.
 
@@ -142,4 +146,3 @@ A module is not complete until:
 2. its Flask route tests pass.
 3. its module debug page can be opened locally.
 4. its debug page makes the module behavior visible.
-

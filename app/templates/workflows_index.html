@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Workflow Demos{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Workflow Demos</p>
+    <h1>Incremental Integration Pages</h1>
+    <p>Use these pages to test how completed modules interact with each other.</p>
+  </section>
+
+  <div class="card-grid">
+    {% for workflow in workflows %}
+      <article class="card">
+        <p class="status">{{ workflow.status }}</p>
+        <h2>{{ workflow.title }}</h2>
+        <p>{{ workflow.purpose }}</p>
+        <p class="small">Modules: {{ workflow.modules | join(", ") }}</p>
+        <a class="button" href="{{ url_for('core.workflow_placeholder', workflow_slug=workflow.slug) }}">Open</a>
+      </article>
+    {% endfor %}
+  </div>
+{% endblock %}

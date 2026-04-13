@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}{{ workflow.title }}{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Workflow Placeholder</p>
+    <h1>{{ workflow.title }}</h1>
+    <p>{{ workflow.purpose }}</p>
+  </section>
+
+  <section class="panel">
+    <h2>Included Modules</h2>
+    <ul>
+      {% for module_slug in workflow.modules %}
+        <li><a href="/modules/{{ module_slug }}/">{{ module_slug }}</a></li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="panel">
+    <h2>Status</h2>
+    <p>This workflow page is a placeholder until the included modules have working debug pages.</p>
+  </section>
+{% endblock %}

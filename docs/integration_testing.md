@@ -40,12 +40,13 @@ For every module, use four testing levels:
 | 2 | `projection` | `/modules/projection/` | `/workflows/data-projection/` |
 | 3 | `algorithm_adapters` | `/modules/algorithm-adapters/` | `/workflows/default-analysis/` |
 | 4 | `selection` | `/modules/selection/` | `/workflows/selection-context/` |
-| 5 | `scatterplot` | `/modules/scatterplot/` | `/workflows/scatter-selection/` |
-| 6 | `chatbox` | `/modules/chatbox/` | `/workflows/chat-selection/` |
-| 7 | `intent_instruction` | `/modules/intent-instruction/` | `/workflows/chat-intent/` |
-| 8 | `metric_learning_adapter` | `/modules/metric-learning-adapter/` | `/workflows/instruction-constraints/` |
-| 9 | `refinement_orchestrator` | `/modules/refinement-orchestrator/` | `/workflows/refinement-loop/` |
-| 10 | integrated dashboard | `/` | full app |
+| 5 | `labeling` | `/modules/labeling/` | `/workflows/selection-labeling/` |
+| 6 | `scatterplot` | `/modules/scatterplot/` | `/workflows/scatter-selection/` and `/workflows/scatter-labeling/` |
+| 7 | `chatbox` | `/modules/chatbox/` | `/workflows/chat-selection/` |
+| 8 | `intent_instruction` | `/modules/intent-instruction/` | `/workflows/chat-intent/` |
+| 9 | `metric_learning_adapter` | `/modules/metric-learning-adapter/` | `/workflows/instruction-constraints/` |
+| 10 | `refinement_orchestrator` | `/modules/refinement-orchestrator/` | `/workflows/refinement-loop/` |
+| 11 | integrated dashboard | `/` | full app |
 
 Not every workflow needs to be polished. A workflow page can be simple and diagnostic as long as it shows the interaction clearly.
 
@@ -59,8 +60,8 @@ Allowed early path:
 
 ```text
 dashboard_shell
-  -> intent_instruction with mock selection context
-  -> chatbox with mock selection context
+  -> intent_instruction with mock selection and label context
+  -> chatbox with mock selection and label context
   -> chat-intent workflow
 ```
 
@@ -70,8 +71,10 @@ Rules for this alternate path:
 2. Chatbox must not call outlier detection.
 3. Chatbox must not call metric learning.
 4. Intent module must output structured instructions only.
-5. Mock selection context must be clearly labeled in the Flask page.
-6. When the real selection module exists, the mock context should be replaceable through a small boundary.
+5. Mock selection and label context must be clearly labeled in the Flask page.
+6. When the real selection and labeling modules exist, the mock context should be replaceable through a small boundary.
+
+It is also allowed to build `labeling` early after `data_workspace` if it uses mock selection context. The labeling page must clearly mark whether selected point IDs are mock or real.
 
 ## 5. Mock vs Real Dependency Rule
 
@@ -94,10 +97,13 @@ Examples:
 1. Chatbox before selection exists:
    - use mock selected/unselected IDs.
 
-2. Scatterplot before algorithm adapters exist:
+2. Labeling before selection exists:
+   - use mock selected IDs and clearly mark them as mock.
+
+3. Scatterplot before algorithm adapters exist:
    - use mock cluster and outlier assignments.
 
-3. Refinement orchestrator before real metric learning exists:
+4. Refinement orchestrator before real metric learning exists:
    - use mock metric update output.
 
 ## 6. Workflow Page Standard
@@ -120,4 +126,3 @@ A module can move from standalone to integrated only when:
 2. its API route tests pass.
 3. its dependency mode is clear.
 4. its first workflow with previous modules works.
-

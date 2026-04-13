@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Module Lab{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Module Lab</p>
+    <h1>Standalone Module Debug Pages</h1>
+    <p>Each module gets a visible Flask page before it is integrated into the full dashboard.</p>
+  </section>
+
+  <div class="card-grid">
+    {% for module in modules %}
+      <article class="card">
+        <p class="status">{{ module.status }}</p>
+        <h2>{{ module.title }}</h2>
+        <p>{{ module.purpose }}</p>
+        <dl>
+          <dt>Package</dt>
+          <dd>{{ module.package_name }}</dd>
+          <dt>Route</dt>
+          <dd>/modules/{{ module.slug }}/</dd>
+        </dl>
+        <div class="actions">
+          <a class="button" href="{{ url_for('core.module_placeholder', module_slug=module.slug) }}">Open</a>
+          <a href="{{ url_for('core.module_health', module_slug=module.slug) }}">Health</a>
+          <a href="{{ url_for('core.module_state', module_slug=module.slug) }}">State API</a>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+{% endblock %}

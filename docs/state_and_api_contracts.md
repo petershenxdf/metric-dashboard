@@ -22,6 +22,7 @@ class AppState:
     cluster_result = None
     outlier_result = None
     selection = None
+    annotations = []
     chat_history = []
     structured_instructions = []
     constraints = []
@@ -41,12 +42,20 @@ Each state area has one owner:
 | cluster assignments | `algorithm_adapters` |
 | outlier scores | `algorithm_adapters` |
 | selected point IDs | `selection` |
+| manual cluster/outlier annotations | `labeling` |
 | chat history | `chatbox` |
 | structured instructions | `intent_instruction` |
 | metric constraints | `metric_learning_adapter` |
 | refinement run history | `refinement_orchestrator` |
 
 Other modules may read state through contracts, but should not mutate state they do not own.
+
+Structured feedback can originate from two modules:
+
+1. `labeling` for direct UI actions such as assigning selected points to a cluster or marking outliers.
+2. `intent_instruction` for chat-derived feedback.
+
+Both sources should use the same instruction shape before reaching `metric_learning_adapter`.
 
 ## 4. API Response Envelope
 
@@ -85,6 +94,7 @@ Python package names should use snake_case:
 data_workspace
 intent_instruction
 metric_learning_adapter
+labeling
 ```
 
 Flask route slugs should use kebab-case:
@@ -93,6 +103,7 @@ Flask route slugs should use kebab-case:
 data-workspace
 intent-instruction
 metric-learning-adapter
+labeling
 ```
 
 The module registry should define the mapping explicitly.
@@ -111,6 +122,7 @@ Each module should expose at least one state or primary data API, such as:
 /modules/data-workspace/api/dataset
 /modules/projection/api/projection
 /modules/selection/api/state
+/modules/labeling/api/state
 /modules/chatbox/api/context
 ```
 
@@ -118,8 +130,20 @@ Interactive modules should expose action APIs:
 
 ```text
 /modules/selection/api/select
+/modules/labeling/api/apply
 /modules/chatbox/api/messages
 /modules/intent-instruction/api/compile
+```
+
+Labeling action payloads should use selected point IDs and produce structured feedback:
+
+```json
+{
+  "action": "assign_cluster",
+  "scope": "selected_points",
+  "point_ids": ["p1", "p7", "p9"],
+  "target_label": "cluster_2"
+}
 ```
 
 ## 7. Reset Rule
@@ -133,8 +157,9 @@ For local debugging, stateful modules should support a reset path when useful:
 This is especially useful for:
 
 1. selection.
-2. chatbox.
-3. refinement orchestrator.
+2. labeling.
+3. chatbox.
+4. refinement orchestrator.
 
 ## 8. Fixture Rule
 
@@ -155,4 +180,3 @@ Example:
   "mocked_inputs": ["cluster_result", "outlier_result"]
 }
 ```
-

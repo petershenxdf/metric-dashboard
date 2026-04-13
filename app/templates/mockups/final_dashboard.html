@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}Final Dashboard Mockup{% endblock %}
+
+{% block content %}
+  <section class="mock-header">
+    <div>
+      <p class="eyebrow">Final Dashboard Mockup</p>
+      <h1>Metric Learning Dashboard</h1>
+      <p>
+        Explore projected user data, select points, and turn feedback into
+        structured instructions for the metric-learning layer.
+      </p>
+    </div>
+    <div class="mock-run-state" aria-label="Current run state">
+      <span>Dataset: Iris sample</span>
+      <span>Projection: MDS</span>
+      <span>Model pass: 03</span>
+    </div>
+  </section>
+
+  <section class="mock-layout" aria-label="Final dashboard layout">
+    <section class="mock-main" aria-label="Scatterplot workspace">
+      <div class="mock-toolbar">
+        <div>
+          <p class="eyebrow">Scatterplot</p>
+          <h2>MDS Projection</h2>
+        </div>
+        <div class="mock-toolbar-actions">
+          <button type="button">Lasso</button>
+          <button type="button">Cluster View</button>
+          <button type="button">Outliers</button>
+        </div>
+      </div>
+
+      <div class="mock-plot-shell">
+        <svg class="mock-scatter" viewBox="0 0 760 500" role="img" aria-labelledby="scatter-title scatter-desc">
+          <title id="scatter-title">Scatterplot with clusters and selected points</title>
+          <desc id="scatter-desc">A two dimensional MDS projection with three clusters, several outliers, and a highlighted selected group.</desc>
+          <rect x="0" y="0" width="760" height="500" class="mock-plot-bg"></rect>
+          <line x1="64" y1="420" x2="710" y2="420" class="mock-axis"></line>
+          <line x1="64" y1="54" x2="64" y2="420" class="mock-axis"></line>
+          <text x="640" y="454" class="mock-axis-label">MDS 1</text>
+          <text x="24" y="76" class="mock-axis-label">MDS 2</text>
+
+          <g class="cluster-a">
+            <circle cx="150" cy="320" r="9"></circle>
+            <circle cx="185" cy="300" r="9"></circle>
+            <circle cx="214" cy="336" r="9"></circle>
+            <circle cx="246" cy="292" r="9"></circle>
+            <circle cx="270" cy="340" r="9"></circle>
+            <circle cx="305" cy="314" r="9"></circle>
+            <circle cx="331" cy="352" r="9"></circle>
+          </g>
+
+          <g class="cluster-b">
+            <circle cx="404" cy="182" r="9"></circle>
+            <circle cx="436" cy="150" r="9"></circle>
+            <circle cx="462" cy="205" r="9"></circle>
+            <circle cx="498" cy="170" r="9"></circle>
+            <circle cx="532" cy="218" r="9"></circle>
+            <circle cx="564" cy="184" r="9"></circle>
+          </g>
+
+          <g class="cluster-c">
+            <circle cx="516" cy="332" r="9"></circle>
+            <circle cx="552" cy="306" r="9"></circle>
+            <circle cx="584" cy="352" r="9"></circle>
+            <circle cx="620" cy="315" r="9"></circle>
+            <circle cx="654" cy="360" r="9"></circle>
+            <circle cx="680" cy="330" r="9"></circle>
+          </g>
+
+          <g class="outliers">
+            <circle cx="108" cy="104" r="10"></circle>
+            <circle cx="684" cy="92" r="10"></circle>
+            <circle cx="380" cy="405" r="10"></circle>
+          </g>
+
+          <path d="M130 286 C180 248, 272 246, 330 290 C346 324, 320 372, 254 380 C190 388, 124 360, 130 286 Z" class="selection-region"></path>
+          <g class="selected-points">
+            <circle cx="185" cy="300" r="15"></circle>
+            <circle cx="214" cy="336" r="15"></circle>
+            <circle cx="246" cy="292" r="15"></circle>
+            <circle cx="270" cy="340" r="15"></circle>
+            <circle cx="305" cy="314" r="15"></circle>
+          </g>
+        </svg>
+      </div>
+
+      <div class="mock-legend" aria-label="Legend">
+        <span><i class="legend-a"></i> Cluster A</span>
+        <span><i class="legend-b"></i> Cluster B</span>
+        <span><i class="legend-c"></i> Cluster C</span>
+        <span><i class="legend-outlier"></i> Outlier</span>
+        <span><i class="legend-selected"></i> Selected</span>
+      </div>
+    </section>
+
+    <aside class="mock-side" aria-label="Feedback workspace">
+      <section class="mock-side-block">
+        <div class="mock-block-title">
+          <p class="eyebrow">Selection</p>
+          <h2>5 Points Active</h2>
+        </div>
+        <div class="mock-chip-row">
+          <span>p-014</span>
+          <span>p-021</span>
+          <span>p-034</span>
+          <span>p-055</span>
+          <span>p-062</span>
+        </div>
+      </section>
+
+      <section class="mock-chatbox" aria-label="Chatbox">
+        <div class="mock-block-title">
+          <p class="eyebrow">Chatbox</p>
+          <h2>Metric Feedback</h2>
+        </div>
+        <div class="mock-message user">
+          These selected points should be one class.
+        </div>
+        <div class="mock-message assistant">
+          I will treat the active selection as a positive same-class constraint.
+          Should the unselected points stay unchanged?
+        </div>
+        <div class="mock-message user">
+          Yes, keep the rest unchanged for this iteration.
+        </div>
+        <div class="mock-input-row">
+          <textarea aria-label="Instruction input" rows="3" placeholder="Tell the system what the selected or unselected points should mean."></textarea>
+          <button type="button">Send</button>
+        </div>
+      </section>
+
+      <section class="mock-side-block">
+        <div class="mock-block-title">
+          <p class="eyebrow">Structured Instruction</p>
+          <h2>Ready For Adapter</h2>
+        </div>
+        <dl class="mock-structured">
+          <dt>type</dt>
+          <dd>selected_points_same_class</dd>
+          <dt>scope</dt>
+          <dd>selected_points</dd>
+          <dt>point_ids</dt>
+          <dd>p-014, p-021, p-034, p-055, p-062</dd>
+          <dt>confidence</dt>
+          <dd>confirmed_by_user</dd>
+        </dl>
+      </section>
+    </aside>
+  </section>
+
+  <section class="mock-bottom" aria-label="Metric learning status">
+    <article>
+      <p class="eyebrow">Iteration</p>
+      <h2>Constraint Queue</h2>
+      <p>2 same-class constraints, 1 split-class request, 0 unresolved clarifications.</p>
+    </article>
+    <article>
+      <p class="eyebrow">Adapter</p>
+      <h2>Algorithm Boundary</h2>
+      <p>Cluster and outlier algorithms stay behind adapters while feedback changes the metric space.</p>
+    </article>
+    <article>
+      <p class="eyebrow">Next Render</p>
+      <h2>Projected Update</h2>
+      <p>After confirmation, the dashboard refreshes clusters, outliers, and point positions together.</p>
+    </article>
+  </section>
+{% endblock %}

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}Projection{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Module Debug Page</p>
+    <h1>Projection</h1>
+    <p>MDS projection from the Data Workspace feature matrix. Iris labels are used only for debug coloring.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Projection State</h2>
+    <dl class="details">
+      <dt>Dataset ID</dt>
+      <dd>{{ dataset.dataset_id }}</dd>
+      <dt>Projection ID</dt>
+      <dd>{{ projection.projection_id }}</dd>
+      <dt>Method</dt>
+      <dd>{{ projection.method }}</dd>
+      <dt>Dependency mode</dt>
+      <dd>{{ dependency_mode }}</dd>
+      <dt>Coordinates</dt>
+      <dd>{{ projection.coordinates | length }}</dd>
+    </dl>
+    <div class="actions">
+      <a href="{{ url_for('projection.projection_api') }}">Projection API</a>
+      <a href="{{ url_for('projection.state_api') }}">State API</a>
+      <a href="{{ url_for('core.workflow_placeholder', workflow_slug='data-projection') }}">Data Projection Workflow</a>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>MDS Debug Plot</h2>
+    <svg class="debug-plot" viewBox="0 0 860 520" role="img" aria-label="MDS projection plot">
+      <line x1="56" y1="260" x2="804" y2="260" stroke="#dadce0"></line>
+      <line x1="430" y1="56" x2="430" y2="464" stroke="#dadce0"></line>
+      {% for point in scaled_points %}
+        <g>
+          <circle
+            cx="{{ '%.2f'|format(point.screen_x) }}"
+            cy="{{ '%.2f'|format(point.screen_y) }}"
+            r="7"
+            fill="{{ point.color }}"
+            stroke="#202124"
+            stroke-width="1.5"
+          >
+            <title>{{ point.point_id }}{% if point.label %} ({{ point.label }}){% endif %}</title>
+          </circle>
+          <text
+            x="{{ '%.2f'|format(point.screen_x + 10) }}"
+            y="{{ '%.2f'|format(point.screen_y - 8) }}"
+          >{{ point.point_id }}</text>
+        </g>
+      {% endfor %}
+    </svg>
+    <p class="small">Debug colors come from fixture labels, not clustering output.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Coordinate Table</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Point ID</th>
+            <th>Label</th>
+            <th>X</th>
+            <th>Y</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for point in scaled_points %}
+            <tr>
+              <td>{{ point.point_id }}</td>
+              <td>{{ point.label }}</td>
+              <td>{{ "%.6f"|format(point.x) }}</td>
+              <td>{{ "%.6f"|format(point.y) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

@@ -6,15 +6,18 @@ The intent instruction module converts user language into stable structured inst
 
 It is the boundary between vague chat text and deterministic downstream metric-learning constraints.
 
+Chat-derived instructions should use the same feedback instruction family as manual labels from the labeling module.
+
 ## Responsibilities
 
 1. Classify user messages.
 2. Decide whether the message is actionable.
 3. Resolve references using selection context.
-4. Compile actionable messages into structured instructions.
-5. Generate clarification prompts for incomplete messages.
-6. Reject irrelevant messages as constraints.
-7. Provide a Flask page for trying example messages.
+4. Resolve references using existing label context when useful.
+5. Compile actionable messages into structured feedback instructions.
+6. Generate clarification prompts for incomplete messages.
+7. Reject irrelevant messages as constraints.
+8. Provide a Flask page for trying example messages.
 
 ## Not Responsible For
 
@@ -23,6 +26,7 @@ It is the boundary between vague chat text and deterministic downstream metric-l
 3. Running clustering.
 4. Running outlier detection.
 5. Rendering scatterplot points.
+6. Owning manual label state.
 
 ## Target Files
 
@@ -59,6 +63,7 @@ tests/modules/intent_instruction/
     "source": "selected_points",
     "point_ids": ["p1", "p7"]
   },
+  "source": "chat_intent",
   "parameters": {},
   "explicitness": "explicit",
   "requires_followup": false,
@@ -70,13 +75,15 @@ tests/modules/intent_instruction/
 ## Supported Instruction Types
 
 1. `same_class`
-2. `different_class`
-3. `split_into_n_classes`
-4. `merge_groups`
-5. `is_outlier`
-6. `not_outlier`
-7. `needs_clarification`
-8. `non_actionable`
+2. `assign_cluster`
+3. `assign_new_class`
+4. `different_class`
+5. `split_into_n_classes`
+6. `merge_groups`
+7. `is_outlier`
+8. `not_outlier`
+9. `needs_clarification`
+10. `non_actionable`
 
 ## Flask Routes
 
@@ -105,9 +112,10 @@ Start with rules-based behavior:
 
 1. keywords for same class.
 2. keywords for split into N classes.
-3. keywords for outlier/not outlier.
-4. selected/unselected reference resolution.
-5. deterministic clarification templates.
+3. keywords for assign to cluster or create class.
+4. keywords for outlier/not outlier.
+5. selected/unselected reference resolution.
+6. deterministic clarification templates.
 
 LLM behavior can be added later behind the same schema.
 
@@ -116,11 +124,12 @@ LLM behavior can be added later behind the same schema.
 Unit tests:
 
 1. "these points should be one class" becomes `same_class`.
-2. "unselected points should be split into three classes" becomes `split_into_n_classes`.
-3. "these are outliers" becomes `is_outlier`.
-4. vague relevant messages require clarification.
-5. irrelevant messages become `non_actionable`.
-6. empty selection with "these points" requires clarification.
+2. "put these points into cluster 2" becomes `assign_cluster`.
+3. "unselected points should be split into three classes" becomes `split_into_n_classes`.
+4. "these are outliers" becomes `is_outlier`.
+5. vague relevant messages require clarification.
+6. irrelevant messages become `non_actionable`.
+7. empty selection with "these points" requires clarification.
 
 Flask route tests:
 
@@ -138,4 +147,3 @@ Manual browser check:
 ## Completion Criteria
 
 This module is complete when structured instruction generation is testable in code and inspectable through Flask.
-

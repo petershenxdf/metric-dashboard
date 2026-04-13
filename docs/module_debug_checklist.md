@@ -26,6 +26,7 @@ Each module should also have at least one state or primary data API. The exact r
 /modules/data-workspace/api/dataset
 /modules/projection/api/projection
 /modules/selection/api/state
+/modules/labeling/api/state
 ```
 
 If the module performs actions, add action APIs:
@@ -38,6 +39,7 @@ Examples:
 
 ```text
 /modules/selection/api/select
+/modules/labeling/api/apply
 /modules/chatbox/api/messages
 /modules/intent-instruction/api/compile
 ```

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Metric Dashboard{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="{{ url_for('core.home') }}">Metric Dashboard</a>
+      <nav aria-label="Primary navigation">
+        <a href="{{ url_for('core.modules_index') }}">Modules</a>
+        <a href="{{ url_for('core.workflows_index') }}">Workflows</a>
+        <a href="{{ url_for('mockups.final_dashboard') }}">Final UI</a>
+        <a href="{{ url_for('core.health') }}">Health</a>
+      </nav>
+    </header>
+
+    <main class="page">
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

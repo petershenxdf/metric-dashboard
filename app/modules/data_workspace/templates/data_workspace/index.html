@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Data Workspace{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Module Debug Page</p>
+    <h1>Data Workspace</h1>
+    <p>Inspect stable point IDs, metadata, feature names, and feature matrix output.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Fixture State</h2>
+    <dl class="details">
+      <dt>Dataset ID</dt>
+      <dd>{{ dataset.dataset_id }}</dd>
+      <dt>Dependency mode</dt>
+      <dd>{{ dependency_mode }}</dd>
+      <dt>Points</dt>
+      <dd>{{ dataset.points | length }}</dd>
+      <dt>Features</dt>
+      <dd>{{ dataset.feature_names | join(", ") }}</dd>
+    </dl>
+    <div class="actions">
+      <a href="{{ url_for('data_workspace.dataset_api') }}">Dataset API</a>
+      <a href="{{ url_for('data_workspace.matrix_api') }}">Matrix API</a>
+      <a href="{{ url_for('data_workspace.state_api') }}">State API</a>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Point Table</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Point ID</th>
+            <th>Label</th>
+            {% for feature_name in dataset.feature_names %}
+              <th>{{ feature_name }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for point in dataset.points %}
+            <tr>
+              <td>{{ point.point_id }}</td>
+              <td>{{ point.metadata.get("label", "") }}</td>
+              {% for value in point.features %}
+                <td>{{ "%.2f"|format(value) }}</td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Feature Matrix Preview</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Point ID</th>
+            {% for feature_name in feature_matrix.feature_names %}
+              <th>{{ feature_name }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in feature_matrix.values %}
+            <tr>
+              <td>{{ feature_matrix.point_ids[loop.index0] }}</td>
+              {% for value in row %}
+                <td>{{ "%.2f"|format(value) }}</td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

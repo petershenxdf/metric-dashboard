@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Metric Dashboard{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Local Flask App</p>
+    <h1>Metric Dashboard</h1>
+    <p>
+      Module-first dashboard for human-in-the-loop metric learning.
+      Step 0 provides the Flask shell, module lab, and workflow placeholders.
+    </p>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Module Lab</h2>
+      <p>Open one module at a time, inspect its state, and verify its local debug API.</p>
+      <a class="button" href="{{ url_for('core.modules_index') }}">Open Modules</a>
+    </article>
+
+    <article>
+      <h2>Workflow Demos</h2>
+      <p>Combine completed modules gradually instead of waiting for the final dashboard.</p>
+      <a class="button" href="{{ url_for('core.workflows_index') }}">Open Workflows</a>
+    </article>
+  </section>
+
+  <section class="panel callout">
+    <div>
+      <p class="eyebrow">Final target UI</p>
+      <h2>Integrated Dashboard Mockup</h2>
+      <p>
+        Preview the finished local dashboard shape: projection, point selection,
+        chat-driven instruction capture, and metric-learning iteration state.
+      </p>
+    </div>
+    <a class="button" href="{{ url_for('mockups.final_dashboard') }}">Open Final UI</a>
+  </section>
+
+  <section>
+    <h2>Current Modules</h2>
+    <div class="card-grid">
+      {% for module in modules %}
+        <article class="card">
+          <p class="status">{{ module.status }}</p>
+          <h3>{{ module.title }}</h3>
+          <p>{{ module.purpose }}</p>
+          <a href="{{ url_for('core.module_placeholder', module_slug=module.slug) }}">Debug page</a>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+{% endblock %}
