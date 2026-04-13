@@ -6,8 +6,11 @@ from typing import Callable, Iterable, Optional, Tuple, TYPE_CHECKING
 from .modules.algorithm_adapters import create_blueprint as create_algorithm_adapters_blueprint
 from .modules.data_workspace import create_blueprint as create_data_workspace_blueprint
 from .modules.projection import create_blueprint as create_projection_blueprint
+from .modules.selection import create_blueprint as create_selection_blueprint
+from .workflows.analysis_selection import create_blueprint as create_analysis_selection_blueprint
 from .workflows.default_analysis import create_blueprint as create_default_analysis_blueprint
 from .workflows.data_projection import create_blueprint as create_data_projection_blueprint
+from .workflows.selection_context import create_blueprint as create_selection_context_blueprint
 
 if TYPE_CHECKING:
     from flask import Blueprint, Flask
@@ -66,6 +69,8 @@ MODULES: Tuple[ModuleInfo, ...] = (
         package_name="selection",
         title="Selection",
         purpose="Selected and unselected point state.",
+        status="working",
+        blueprint_factory=create_selection_blueprint,
     ),
     ModuleInfo(
         slug="labeling",
@@ -127,6 +132,16 @@ WORKFLOWS: Tuple[WorkflowInfo, ...] = (
         title="Selection Context",
         purpose="Inspect selected and unselected point context.",
         modules=("data-workspace", "selection"),
+        status="working",
+        blueprint_factory=create_selection_context_blueprint,
+    ),
+    WorkflowInfo(
+        slug="analysis-selection",
+        title="Step 1-4 Analysis Selection",
+        purpose="Inspect data, projection, outliers, clusters, and selection on one shared visual layer.",
+        modules=("data-workspace", "projection", "algorithm-adapters", "selection"),
+        status="working",
+        blueprint_factory=create_analysis_selection_blueprint,
     ),
     WorkflowInfo(
         slug="selection-labeling",

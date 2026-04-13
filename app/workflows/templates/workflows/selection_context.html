@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Selection Context Workflow{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Workflow Demo</p>
+    <h1>Selection Context</h1>
+    <p>
+      Checks that Data Workspace point IDs can be converted into a reusable
+      selection context for labeling, chatbox, and intent modules.
+    </p>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Data Workspace Fixture</h2>
+      <dl>
+        <dt>Dataset</dt>
+        <dd>{{ dataset.dataset_id }}</dd>
+        <dt>Known points</dt>
+        <dd>{{ dataset.points | length }}</dd>
+        <dt>Features</dt>
+        <dd>{{ dataset.feature_names | join(", ") }}</dd>
+      </dl>
+      <a href="{{ url_for('selection.index') }}">Open Selection Module</a>
+    </article>
+
+    <article>
+      <h2>Selection Summary</h2>
+      <dl>
+        <dt>Selected</dt>
+        <dd>{{ context.selected_point_ids | length }}</dd>
+        <dt>Unselected</dt>
+        <dd>{{ context.unselected_point_ids | length }}</dd>
+        <dt>Source</dt>
+        <dd>{{ context.source }}</dd>
+      </dl>
+      <a href="{{ url_for('selection.context_api') }}">Context API</a>
+    </article>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Selection State</h2>
+      <pre>{{ state.to_dict() | tojson(indent=2) }}</pre>
+    </article>
+
+    <article>
+      <h2>Selection Context Payload</h2>
+      <pre>{{ context.to_dict() | tojson(indent=2) }}</pre>
+    </article>
+  </section>
+{% endblock %}

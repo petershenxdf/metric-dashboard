@@ -79,6 +79,7 @@ Workflow routes:
 /workflows/data-projection/
 /workflows/default-analysis/
 /workflows/selection-context/
+/workflows/analysis-selection/
 /workflows/selection-labeling/
 /workflows/scatter-selection/
 /workflows/scatter-labeling/

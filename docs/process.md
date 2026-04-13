@@ -329,6 +329,19 @@ Tasks:
 4. Add `/modules/selection/`.
 5. Add selection API endpoints.
 6. Build a clickable point list in Flask.
+7. Add `/workflows/selection-context/`.
+8. Preserve action `source`, `mode`, and metadata fields for future selection gestures.
+9. Support named selection groups so a user can save the current point set and restore it later.
+
+Current implementation:
+
+1. Supports `select`, `deselect`, `replace`, `toggle`, and `clear`.
+2. Supports action sources such as `api`, `point_click`, `lasso`, `rectangle`, `manual_list`, and `workflow_fixture`.
+3. Stores local debug state in memory.
+4. Exposes selection state and downstream selection context separately.
+5. `/workflows/selection-context/` shows Data Workspace point IDs converted into selection context.
+6. Saves reusable named selection groups.
+7. Selecting a saved group replaces the active selection with that group's point IDs.
 
 Unit tests:
 
@@ -336,6 +349,10 @@ Unit tests:
 2. Reject unknown IDs.
 3. Clear selection.
 4. Return selected/unselected IDs.
+5. Deselect, replace, and toggle points.
+6. Preserve future gesture metadata.
+7. Save, select, and delete named selection groups.
+8. Reject duplicate selection group names.
 
 Flask visual check:
 
@@ -344,6 +361,27 @@ Open `/modules/selection/` and confirm:
 1. clicking points changes selection state.
 2. selected/unselected JSON updates.
 3. clear selection works.
+4. manual action lab can apply select, deselect, replace, toggle, and clear.
+5. supported action/source/mode values are visible.
+6. saving the current selection creates a visible named group.
+7. clicking a saved group name restores that point selection.
+8. deleting a saved group removes it without changing the active selection.
+
+Open `/workflows/selection-context/` and confirm:
+
+1. Data Workspace point IDs are visible.
+2. selection context JSON is visible.
+3. selected and unselected counts match the module page.
+
+Open `/workflows/analysis-selection/` and confirm:
+
+1. data, projection, algorithm results, and selection use the same point IDs.
+2. the dataset dropdown can switch between a sparse selection-friendly fixture and the original outlier debug fixture.
+3. clicking projected points adds them to the active selection and shows thin selected-point rings.
+4. rectangle selection adds all points inside the region to the active selection.
+5. outliers remain visually distinct from selected points.
+6. changing `n_clusters` reruns clustering without breaking selection.
+7. saved selection groups can be restored from the combined workflow page.
 
 Completion:
 
@@ -710,6 +748,10 @@ Algorithm adapters can be opened in Flask, Local Outlier Factor and KMeans outpu
 Goal:
 
 Selection and labeling work in Flask, and selected points can become manual cluster/outlier annotations.
+
+Current first half:
+
+Selection works in Flask, supports named selection groups, `/workflows/selection-context/` exposes reusable selected/unselected context, and `/workflows/analysis-selection/` connects Steps 1-4 on one visual testing page. Labeling is the next module.
 
 ### Milestone 4: Scatterplot Labeling
 

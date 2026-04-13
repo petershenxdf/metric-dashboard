@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+
+{% block title %}Selection{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Module Debug Page</p>
+    <h1>Selection</h1>
+    <p>
+      Owns selected and unselected point state. It does not decide what selected
+      points mean; labeling and intent modules consume this context later.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Selection State</h2>
+    <dl class="details">
+      <dt>Dataset ID</dt>
+      <dd>{{ state.dataset_id }}</dd>
+      <dt>Dependency mode</dt>
+      <dd>{{ dependency_mode }}</dd>
+      <dt>Selected</dt>
+      <dd>{{ state.selected_point_ids | length }}</dd>
+      <dt>Unselected</dt>
+      <dd>{{ state.unselected_point_ids | length }}</dd>
+    </dl>
+
+    <div class="actions">
+      <a href="{{ url_for('selection.state_api') }}">State API</a>
+      <a href="{{ url_for('selection.context_api') }}">Context API</a>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Saved Selection Groups</h2>
+    <p class="small">
+      Save the current selection with a name, then click that name later to replace the
+      active selection with the saved points.
+    </p>
+    <form class="debug-form" data-selection-group-form>
+      <label>
+        Group name
+        <input name="group_name" placeholder="important set">
+      </label>
+      <button class="button" type="submit">Save Current Selection</button>
+    </form>
+
+    {% if selection_groups %}
+      <div class="selection-group-list">
+        {% for group in selection_groups %}
+          <article class="selection-group-card">
+            <div>
+              <h3>{{ group.group_name }}</h3>
+              <p class="small">{{ group.point_ids | length }} points</p>
+              <code>{{ group.point_ids | join(', ') }}</code>
+            </div>
+            <div class="actions">
+              <button type="button" data-group-action="select" data-group-id="{{ group.group_id }}">
+                Select {{ group.group_name }}
+              </button>
+              <button type="button" data-group-action="delete" data-group-id="{{ group.group_id }}">
+                Delete
+              </button>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="small">No saved selection groups yet.</p>
+    {% endif %}
+
+    <div class="actions">
+      <a href="{{ url_for('selection.groups_api') }}">Groups API</a>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Supported Selection Types</h2>
+    <div class="split">
+      <article>
+        <h3>Actions</h3>
+        <div class="chip-row">
+          {% for action_type in action_types %}
+            <span>{{ action_type }}</span>
+          {% endfor %}
+        </div>
+      </article>
+      <article>
+        <h3>Sources</h3>
+        <div class="chip-row">
+          {% for source in sources %}
+            <span>{{ source }}</span>
+          {% endfor %}
+        </div>
+      </article>
+    </div>
+    <h3>Modes</h3>
+    <div class="chip-row">
+      {% for mode in modes %}
+        <span>{{ mode }}</span>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Manual Action Lab</h2>
+    <form class="debug-form" data-selection-form>
+      <label>
+        Action
+        <select name="action">
+          {% for action_type in action_types %}
+            <option value="{{ action_type }}">{{ action_type }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Point IDs
+        <input name="point_ids" placeholder="setosa_001, versicolor_001">
+      </label>
+      <label>
+        Source
+        <select name="source">
+          {% for source in sources %}
+            <option value="{{ source }}">{{ source }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="button" type="submit">Apply</button>
+    </form>
+    <p class="small">Use comma-separated point IDs. Clear ignores the point ID field.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Fixture Shortcuts</h2>
+    <div class="actions">
+      {% for group_name, point_ids in fixture_groups.items() %}
+        <button type="button" data-selection-action="replace" data-point-ids="{{ point_ids | join(',') }}">
+          Replace with {{ group_name }}
+        </button>
+      {% endfor %}
+      <button type="button" data-selection-action="clear" data-point-ids="">Clear</button>
+      <button type="button" data-selection-action="reset" data-point-ids="">Reset Fixture</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Clickable Points</h2>
+    <p class="small">Click a point to toggle it. This uses the same `/api/toggle` boundary that scatterplot can call later.</p>
+    <div class="point-grid">
+      {% for point in dataset.points %}
+        <button
+          type="button"
+          class="point-card{% if point.point_id in state.selected_point_ids %} selected{% endif %}"
+          data-selection-action="toggle"
+          data-point-ids="{{ point.point_id }}"
+        >
+          <strong>{{ point.point_id }}</strong>
+          <span>{{ point.metadata.get("label", "") }}</span>
+        </button>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Selected Point IDs</h2>
+      <pre>{{ state.selected_point_ids | list | tojson(indent=2) }}</pre>
+    </article>
+    <article>
+      <h2>Selection Context</h2>
+      <pre>{{ context.to_dict() | tojson(indent=2) }}</pre>
+    </article>
+  </section>
+
+  <script>
+    const postJson = async (url, body = {}, method = "POST") => {
+      return fetch(url, {
+        method,
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body)
+      });
+    };
+
+    const postSelectionAction = async (action, pointIds, source = "point_click") => {
+      const response = await postJson(
+        `/modules/selection/api/${action}`,
+        {point_ids: pointIds, source}
+      );
+
+      if (!response.ok) {
+        const payload = await response.json();
+        alert(payload.error ? payload.error.message : "Selection action failed");
+        return;
+      }
+
+      window.location.reload();
+    };
+
+    const handleSelectionGroupResponse = async (response) => {
+      if (!response.ok) {
+        const payload = await response.json();
+        alert(payload.error ? payload.error.message : "Selection group action failed");
+        return;
+      }
+
+      window.location.reload();
+    };
+
+    document.querySelectorAll("[data-selection-action]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const action = button.dataset.selectionAction;
+        if (action === "reset") {
+          postSelectionAction("reset", [], "api");
+          return;
+        }
+
+        const pointIds = button.dataset.pointIds
+          ? button.dataset.pointIds.split(",").filter(Boolean)
+          : [];
+        postSelectionAction(action, pointIds);
+      });
+    });
+
+    document.querySelector("[data-selection-form]").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      const action = form.get("action");
+      const pointIds = form.get("point_ids")
+        .split(",")
+        .map((pointId) => pointId.trim())
+        .filter(Boolean);
+      postSelectionAction(action, pointIds, form.get("source"));
+    });
+
+    document.querySelector("[data-selection-group-form]").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      const response = await postJson(
+        "/modules/selection/api/groups",
+        {group_name: form.get("group_name"), source: "api"}
+      );
+      handleSelectionGroupResponse(response);
+    });
+
+    document.querySelectorAll("[data-group-action]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const groupId = button.dataset.groupId;
+        const action = button.dataset.groupAction;
+        const url = `/modules/selection/api/groups/${groupId}${action === "select" ? "/select" : ""}`;
+        const response = action === "delete"
+          ? await postJson(url, {}, "DELETE")
+          : await postJson(url, {});
+        handleSelectionGroupResponse(response);
+      });
+    });
+  </script>
+{% endblock %}

@@ -73,8 +73,8 @@ Detailed flow:
    The current provider runs Local Outlier Factor first, excludes detected outliers,
    and then runs deterministic KMeans on the remaining points.
 4. Scatterplot renders points with cluster colors and outlier markers.
-5. User selects points.
-6. Selection module stores selected/unselected state.
+5. User selects points through clicks, lasso, rectangle, API calls, or future selection gestures.
+6. Selection module stores selected/unselected state, can save reusable named selection groups, and exposes reusable selection context.
 7. Labeling module converts direct label actions into manual annotations or structured feedback instructions.
 8. Chatbox receives user text and current selection/labeling context.
 9. Intent instruction module classifies chat text and compiles structured instructions.
@@ -212,6 +212,7 @@ metric-dashboard/
     workflows/
       data_projection.py
       default_analysis.py
+      selection_context.py
       selection_labeling.py
       scatter_selection.py
       scatter_labeling.py
@@ -341,6 +342,7 @@ The currently implemented working slice is:
 data_workspace
   -> projection
   -> algorithm_adapters
+  -> selection
 ```
 
 Browser checks:
@@ -349,10 +351,28 @@ Browser checks:
 /modules/data-workspace/
 /modules/projection/
 /modules/algorithm-adapters/
+/modules/selection/
 /workflows/data-projection/
 /workflows/default-analysis/
+/workflows/selection-context/
+/workflows/analysis-selection/
 ```
 
 `/workflows/default-analysis/` uses the `default_analysis_outlier_debug` fixture
 so outliers are visible during local debugging. It should not be interpreted as
 the final user dataset flow.
+
+`/workflows/selection-context/` uses a selection debug fixture to show how stable
+point IDs become selected/unselected context for downstream labeling, chatbox,
+and intent modules.
+
+The selection module also supports saved selection groups. These are named point
+sets for quickly restoring a previous selection; they are intentionally separate
+from semantic labels, which remain the labeling module's responsibility.
+
+`/workflows/analysis-selection/` connects the Step 1-4 path on one shared
+fixture: Data Workspace creates point IDs and features, Projection computes MDS
+coordinates, Algorithm Adapters mark clusters/outliers, and Selection overlays
+active and saved selections on the same SVG plot. It includes a dataset dropdown,
+click selection, and rectangle selection. New clicks or rectangle selections are
+added to the active selection so the user does not need to choose a selection mode.

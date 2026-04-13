@@ -132,6 +132,14 @@ The current working modules are:
    - `n_clusters` can be adjusted from the module page, workflow page, or API query string.
    - `/workflows/default-analysis/` shows data, projection, outliers, and clusters together.
 
+5. `selection`
+   - owns selected and unselected point state.
+   - supports `select`, `deselect`, `replace`, `toggle`, and `clear`.
+   - supports saved selection groups, which are reusable named point sets.
+   - preserves `source`, `mode`, and metadata fields for future UI gestures such as lasso and rectangle selection.
+   - `/workflows/selection-context/` shows Data Workspace point IDs converted into reusable selection context.
+   - `/workflows/analysis-selection/` connects Steps 1-4 on one shared visual layer with dataset switching, click selection, and rectangle selection.
+
 The default algorithm-adapter fixture is `default_analysis_outlier_debug`, not Iris. It intentionally contains three compact clusters plus three distant outlier candidates so Step 3 is visually inspectable.
 
 Future algorithms should be added behind the `algorithm_adapters` provider boundary. The current provider is `SequentialLofThenKMeansProvider`; a future SSDBCODI provider can replace it while returning the same dashboard-facing schemas.
@@ -208,6 +216,8 @@ Current planned order:
 
 5. `selection`
    - make selected/unselected state interactive in Flask.
+   - keep action/source/mode fields extensible for future selection gestures.
+   - let users save and restore named selections without turning them into semantic labels.
 
 6. `labeling`
    - convert selected point IDs into manual cluster/outlier annotations.

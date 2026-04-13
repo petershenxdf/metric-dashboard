@@ -125,6 +125,8 @@ Each module should expose at least one state or primary data API, such as:
 /modules/algorithm-adapters/api/clusters
 /modules/algorithm-adapters/api/analysis
 /modules/selection/api/state
+/modules/selection/api/context
+/modules/selection/api/groups
 /modules/labeling/api/state
 /modules/chatbox/api/context
 ```
@@ -133,10 +135,81 @@ Interactive modules should expose action APIs:
 
 ```text
 /modules/selection/api/select
+/modules/selection/api/deselect
+/modules/selection/api/replace
+/modules/selection/api/toggle
+/modules/selection/api/clear
+/modules/selection/api/groups
+/modules/selection/api/groups/<id>/select
 /modules/labeling/api/apply
 /modules/chatbox/api/messages
 /modules/intent-instruction/api/compile
 ```
+
+Selection action payloads should be action-route based and extensible:
+
+```json
+{
+  "point_ids": ["setosa_001", "versicolor_001"],
+  "source": "lasso",
+  "mode": "replace",
+  "metadata": {
+    "gesture_id": "lasso_001"
+  }
+}
+```
+
+Supported selection actions:
+
+```text
+select
+deselect
+replace
+toggle
+clear
+```
+
+Supported selection sources should start with:
+
+```text
+api
+point_click
+lasso
+rectangle
+manual_list
+workflow_fixture
+selection_group
+```
+
+Future selection gestures should add new source or mode values while preserving
+the same selected/unselected context output shape.
+
+Selection groups are reusable named point sets owned by the selection module.
+They are useful for restoring a previous selection, but they are not semantic
+labels or metric-learning constraints.
+
+```json
+{
+  "group_id": "group_001",
+  "group_name": "interesting pair",
+  "dataset_id": "selection_iris_debug",
+  "point_ids": ["setosa_001", "versicolor_001"],
+  "point_count": 2,
+  "metadata": {}
+}
+```
+
+Group routes:
+
+```text
+GET    /modules/selection/api/groups
+POST   /modules/selection/api/groups
+POST   /modules/selection/api/groups/<id>/select
+DELETE /modules/selection/api/groups/<id>
+```
+
+Creating a group without `point_ids` saves the current active selection.
+Selecting a group applies `replace` selection with `source: "selection_group"`.
 
 Labeling action payloads should use selected point IDs and produce structured feedback:
 

@@ -39,7 +39,7 @@ For every module, use four testing levels:
 | 1 | `data_workspace` | `/modules/data-workspace/` | none yet |
 | 2 | `projection` | `/modules/projection/` | `/workflows/data-projection/` |
 | 3 | `algorithm_adapters` | `/modules/algorithm-adapters/` | `/workflows/default-analysis/` |
-| 4 | `selection` | `/modules/selection/` | `/workflows/selection-context/` |
+| 4 | `selection` | `/modules/selection/` | `/workflows/selection-context/`, `/workflows/analysis-selection/` |
 | 5 | `labeling` | `/modules/labeling/` | `/workflows/selection-labeling/` |
 | 6 | `scatterplot` | `/modules/scatterplot/` | `/workflows/scatter-selection/` and `/workflows/scatter-labeling/` |
 | 7 | `chatbox` | `/modules/chatbox/` | `/workflows/chat-selection/` |
@@ -61,6 +61,31 @@ For Step 3 browser checks, confirm:
 2. KMeans assignments exclude detected outliers.
 3. changing `n_clusters` changes the requested cluster count.
 4. `/workflows/default-analysis/` shows projection, outliers, and clusters together.
+
+Step 4 currently uses the `selection_iris_debug` fixture and in-memory debug
+state. For Step 4 browser checks, confirm:
+
+1. `/modules/selection/` shows supported actions, sources, and modes.
+2. point clicks call the `toggle` action.
+3. manual action lab supports `select`, `deselect`, `replace`, `toggle`, and `clear`.
+4. `/modules/selection/api/context` returns selected and unselected point IDs.
+5. the saved selection group form can save the current selection by name.
+6. clicking a saved group restores that group's points as the active selection.
+7. deleting a saved group removes it without changing the active selection.
+8. `/modules/selection/api/groups` returns saved group metadata.
+9. `/workflows/selection-context/` shows Data Workspace output and selection context together.
+
+Step 1-4 combined workflow check:
+
+1. open `/workflows/analysis-selection/`.
+2. use the dataset dropdown to switch between `wide_gap_analysis_debug` and `default_analysis_outlier_debug`.
+3. confirm one SVG shows projected points, cluster colors, LOF outlier markers, and thin selected-point rings.
+4. click a point and confirm it is added to the active selection.
+5. drag a rectangle and confirm every point inside the region is added to the active selection.
+6. select more points and confirm they are added without replacing the existing selection.
+7. change `n_clusters` and confirm cluster colors/assignments update while selection still uses the same point IDs.
+8. save the active selection as a group, change selection, then restore the group.
+9. open `/workflows/analysis-selection/api/state` and confirm dataset, feature matrix, projection, outliers, clusters, selection, and selection context are all present.
 
 ## 4. Allowed Alternate Build Path
 

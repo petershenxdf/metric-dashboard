@@ -137,6 +137,12 @@ def cluster_non_outliers(
     if not non_outlier_indices:
         raise ValueError("at least one non-outlier point is required for clustering")
 
+    if isinstance(n_clusters, bool) or not isinstance(n_clusters, int):
+        raise ValueError("n_clusters must be an integer")
+
+    if n_clusters < 1:
+        raise ValueError("n_clusters must be at least 1")
+
     if n_clusters > len(non_outlier_indices):
         raise ValueError("n_clusters must not exceed the number of non-outlier points")
 

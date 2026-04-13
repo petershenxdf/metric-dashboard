@@ -66,6 +66,12 @@ class AlgorithmAdapterServiceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             cluster_non_outliers(matrix, [], n_clusters=99)
 
+    def test_non_integer_cluster_count_is_rejected(self):
+        matrix = _cluster_feature_matrix()
+
+        with self.assertRaises(ValueError):
+            cluster_non_outliers(matrix, [], n_clusters="2")
+
 
 def _outlier_feature_matrix():
     dataset = create_dataset(
