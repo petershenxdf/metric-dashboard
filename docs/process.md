@@ -487,12 +487,14 @@ Tasks:
 1. Render projected points.
 2. Color points by cluster.
 3. Mark outliers.
-4. Support selection interaction.
+4. Support click selection and rectangle selection through the selection module.
 5. Render manual labels when label state exists.
 6. Send label actions to labeling when that workflow is active.
 7. Add `/modules/scatterplot/`.
 8. Add `/workflows/scatter-selection/`.
 9. Add `/workflows/scatter-labeling/`.
+10. Preserve saved selection groups from Step 4 in scatter workflows.
+11. Preserve adjustable `n_clusters` from Step 3 in scatter workflows.
 
 Unit tests:
 
@@ -500,6 +502,9 @@ Unit tests:
 2. Preserve point IDs.
 3. Mark selected points correctly.
 4. Include cluster, outlier, and manual label fields.
+5. Verify rectangle selection preserves `source: "rectangle"`.
+6. Verify selection groups can be saved, restored, and deleted from scatter workflows.
+7. Verify `n_clusters` changes cluster label options in scatter-labeling.
 
 Flask visual check:
 
@@ -509,11 +514,17 @@ Open `/modules/scatterplot/` and confirm:
 2. cluster colors are visible.
 3. outlier markers are visible.
 4. clicking points updates selection state.
-5. label actions update labeling state when using the labeling workflow.
+5. dragging a rectangle adds points inside the region to selection.
+6. saving, restoring, and deleting a selection group works.
+7. changing `n_clusters` reruns analysis and updates label options.
+8. label actions update labeling state when using the labeling workflow.
 
 Completion:
 
-The scatterplot module can be visually tested before chatbox work.
+The scatterplot module can be visually tested before chatbox work, and the
+Step 1-6 workflow preserves every completed upstream interaction that it
+integrates: algorithm controls, selection gestures, selection groups, and manual
+labeling.
 
 ---
 
@@ -785,6 +796,10 @@ Selection works in Flask, supports named selection groups, `/workflows/selection
 Goal:
 
 Scatterplot renders projected points, default clusters, outliers, selection state, and manual label state.
+
+Current status:
+
+Scatterplot has a working module page, render-payload API, scatter-selection workflow, and scatter-labeling workflow. It renders state owned by previous modules and sends selection/label actions back through their module boundaries. Step 6 must preserve prior workflow capabilities when integrated: rectangle selection, saved selection groups, and adjustable cluster count are part of the acceptance check.
 
 ### Milestone 5: Chat and Intent
 

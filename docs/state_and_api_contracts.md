@@ -145,6 +145,17 @@ Interactive modules should expose action APIs:
 /workflows/analysis-labeling/api/select
 /workflows/analysis-labeling/api/label
 /workflows/analysis-labeling/api/clear-labels
+/modules/scatterplot/api/render-payload
+/modules/scatterplot/api/select
+/modules/scatterplot/api/toggle
+/modules/scatterplot/api/groups
+/workflows/scatter-selection/api/state
+/workflows/scatter-selection/api/select
+/workflows/scatter-selection/api/groups
+/workflows/scatter-labeling/api/state
+/workflows/scatter-labeling/api/select
+/workflows/scatter-labeling/api/label
+/workflows/scatter-labeling/api/groups
 /modules/chatbox/api/messages
 /modules/intent-instruction/api/compile
 ```
@@ -289,6 +300,39 @@ outlier
 The available cluster labels are determined by the current `n_clusters` value.
 `cluster_N` makes the target points non-outliers in effective state. `outlier`
 removes the target points from effective cluster assignments.
+
+The Step 1-6 scatterplot workflows expose render state at:
+
+```text
+/modules/scatterplot/api/render-payload
+/workflows/scatter-selection/api/state
+/workflows/scatter-labeling/api/state
+```
+
+The render payload is derived state, not new ownership. Dataset, projection,
+cluster, outlier, selection, and label truth remain owned by their original
+modules. Scatterplot points include:
+
+```json
+{
+  "point_id": "p1",
+  "x": 0.2,
+  "y": -0.7,
+  "screen_x": 240.0,
+  "screen_y": 300.0,
+  "cluster_id": "cluster_1",
+  "is_outlier": false,
+  "selected": true,
+  "manual_labels": [],
+  "metadata": {},
+  "color": "#2f6fed"
+}
+```
+
+Scatterplot selection actions must preserve the same selection action contract
+as the selection module, including `source: "point_click"` and
+`source: "rectangle"`. Saved selection groups in scatterplot workflows are the
+same selection-module groups; they are not labels or constraints.
 
 Algorithm adapter APIs should expose point-ID-based outputs.
 

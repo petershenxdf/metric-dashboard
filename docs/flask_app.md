@@ -108,7 +108,8 @@ For example:
 3. `selection` shows clickable points and selected/unselected JSON.
 4. `labeling` shows selected points converted into cluster/outlier annotations.
 5. `analysis-labeling` shows Steps 1-5 together on one visual debug page.
-6. `chatbox` shows a chat UI with mock or real selection and label context.
+6. `scatterplot` shows the Step 1-6 render payload with click/rectangle selection, saved groups, adjustable clusters, and labeling workflows.
+7. `chatbox` shows a chat UI with mock or real selection and label context.
 
 ## 7. Testing Layers
 

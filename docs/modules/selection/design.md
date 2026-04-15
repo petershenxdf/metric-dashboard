@@ -68,6 +68,7 @@ Step 4 implementation is complete enough for local inspection:
 9. the combined workflow supports a dataset dropdown, click selection, and rectangle selection without exposing mode choices to the user.
 10. selected points in combined workflow SVGs use small black center dots instead of large outer rings.
 11. `/workflows/analysis-labeling/` is the Step 1-5 visual integration page where selected points can be labeled.
+12. `/workflows/scatter-selection/` and `/workflows/scatter-labeling/` preserve the same selection boundary for Step 6, including rectangle selection and saved selection groups.
 
 ## State Contract
 
@@ -145,6 +146,8 @@ Downstream modules should consume this context instead of reading selection inte
 /workflows/analysis-selection/            data, projection, analysis, and selection visual test
 /workflows/selection-labeling/            minimal selection-to-labeling boundary test
 /workflows/analysis-labeling/             Step 1-5 visual select-and-label test
+/workflows/scatter-selection/             Step 1-6 scatterplot selection test
+/workflows/scatter-labeling/              Step 1-6 scatterplot selection and labeling test
 ```
 
 Action payload:
@@ -233,6 +236,7 @@ Manual browser check:
 10. open `/workflows/analysis-selection/` and confirm projected point clicks update selection on the combined plot.
 11. drag a rectangle and confirm points inside the region are added to the active selection.
 12. open `/workflows/analysis-labeling/` and confirm selected points can be labeled without changing selection ownership.
+13. open `/workflows/scatter-labeling/` and confirm click selection, rectangle selection, and saved selection groups still mutate selection through this module's contract.
 
 ## Completion Criteria
 
@@ -243,3 +247,4 @@ Downstream integrations are split by purpose:
 1. `/workflows/selection-labeling/` is the minimal selection-to-labeling boundary test.
 2. `/workflows/analysis-selection/` is the Step 1-4 visual analysis plus selection test.
 3. `/workflows/analysis-labeling/` is the Step 1-5 visual select-and-label test.
+4. `/workflows/scatter-selection/` and `/workflows/scatter-labeling/` are Step 1-6 tests that must preserve the same selection action and group contracts.

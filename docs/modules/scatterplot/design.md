@@ -67,6 +67,24 @@ tests/modules/scatterplot/
 }
 ```
 
+## Current Status
+
+Status: `working`
+
+Step 6 implementation is complete enough for local inspection:
+
+1. scatterplot service builds a stable render payload from projection, cluster,
+   outlier, selection, and label state.
+2. `/modules/scatterplot/` shows projected points with cluster colors, outlier
+   markers, selected point indicators, and render JSON.
+3. `/modules/scatterplot/api/render-payload` exposes points ready for rendering.
+4. `/workflows/scatter-selection/` verifies scatterplot point clicks update
+   selection through the selection module.
+5. `/workflows/scatter-labeling/` verifies selected points can be labeled
+   through the labeling module while scatterplot only renders effective state.
+6. The Step 1-6 pages preserve Step 4 selection behavior: click selection,
+   rectangle selection, saved selection groups, and adjustable `n_clusters`.
+
 ## Flask Routes
 
 ```text
@@ -124,8 +142,11 @@ Manual browser check:
 2. confirm points are visible.
 3. confirm cluster colors and outlier markers are visible.
 4. click points and confirm selection state changes.
-5. open `/workflows/scatter-selection/` to check interaction with selection module.
-6. open `/workflows/scatter-labeling/` when labeling exists and confirm selected points can be annotated.
+5. drag a rectangle and confirm points inside it are selected.
+6. save a selected set as a named group, change selection, then restore the group.
+7. change `n_clusters` and confirm cluster labels and label options update.
+8. open `/workflows/scatter-selection/` to check interaction with selection module.
+9. open `/workflows/scatter-labeling/` and confirm selected points can be annotated.
 
 ## Completion Criteria
 

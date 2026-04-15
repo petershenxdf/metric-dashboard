@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+
+{% block title %}Scatter Selection Workflow{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Workflow Demo</p>
+    <h1>Scatter Selection</h1>
+    <p>Checks that the scatterplot render payload can drive selection through the selection module.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Workflow State</h2>
+    <form class="debug-form" method="get">
+      <label>
+        KMeans clusters
+        <input type="number" name="n_clusters" min="1" value="{{ n_clusters }}">
+      </label>
+      <button class="button" type="submit">Run Scatter Selection</button>
+    </form>
+    <dl class="details">
+      <dt>Dataset</dt>
+      <dd>{{ dataset.dataset_id }}</dd>
+      <dt>Dependency mode</dt>
+      <dd>{{ dependency_mode }}</dd>
+      <dt>Points</dt>
+      <dd>{{ render_payload.points | length }}</dd>
+      <dt>Selected</dt>
+      <dd>{{ selection_state.selected_point_ids | length }}</dd>
+    </dl>
+    <div class="actions">
+      <a href="{{ url_for('scatter_selection_workflow.state_api', n_clusters=n_clusters) }}">State API</a>
+      <button type="button" data-scatter-action="clear">Clear Selection</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Scatterplot</h2>
+    <p class="small">Click a point to toggle it, or drag a rectangle to add points. Selection state remains owned by the selection module.</p>
+    <svg
+      class="debug-plot workflow-selection-plot"
+      viewBox="0 0 860 520"
+      role="img"
+      aria-label="Scatter selection plot"
+      data-selection-plot
+    >
+      <line x1="56" y1="260" x2="804" y2="260" stroke="#dadce0"></line>
+      <line x1="430" y1="56" x2="430" y2="464" stroke="#dadce0"></line>
+      {% for point in render_payload.points %}
+        <g
+          class="workflow-point"
+          data-point-id="{{ point.point_id }}"
+          data-screen-x="{{ '%.2f'|format(point.screen_x) }}"
+          data-screen-y="{{ '%.2f'|format(point.screen_y) }}"
+          tabindex="0"
+        >
+          <circle
+            cx="{{ '%.2f'|format(point.screen_x) }}"
+            cy="{{ '%.2f'|format(point.screen_y) }}"
+            r="{{ 10 if point.is_outlier else 7 }}"
+            fill="{{ '#d6336c' if point.is_outlier else point.color }}"
+            stroke="{{ '#111827' if point.selected else '#202124' }}"
+            stroke-width="{{ 1.8 if point.selected else (1.8 if point.is_outlier else 1.1) }}"
+          ></circle>
+          {% if point.selected %}
+            <circle cx="{{ '%.2f'|format(point.screen_x) }}" cy="{{ '%.2f'|format(point.screen_y) }}" r="2.2" fill="#111827"></circle>
+          {% endif %}
+          <text x="{{ '%.2f'|format(point.screen_x + 10) }}" y="{{ '%.2f'|format(point.screen_y - 8) }}">{{ point.point_id }}</text>
+        </g>
+      {% endfor %}
+      <rect
+        class="selection-drag-box"
+        x="0"
+        y="0"
+        width="0"
+        height="0"
+        visibility="hidden"
+        data-selection-rect
+      ></rect>
+    </svg>
+  </section>
+
+  <section class="panel">
+    <h2>Saved Selection Groups</h2>
+    <form class="debug-form" data-workflow-group-form>
+      <label>
+        Group name
+        <input name="group_name" placeholder="cluster A plus outlier">
+      </label>
+      <button class="button" type="submit">Save Current Selection</button>
+    </form>
+    {% if selection_groups %}
+      <div class="selection-group-list">
+        {% for group in selection_groups %}
+          <article class="selection-group-card">
+            <div>
+              <h3>{{ group.group_name }}</h3>
+              <p class="small">{{ group.point_ids | length }} points</p>
+              <code>{{ group.point_ids | join(", ") }}</code>
+            </div>
+            <div class="actions">
+              <button type="button" data-group-action="select" data-group-id="{{ group.group_id }}">
+                Select {{ group.group_name }}
+              </button>
+              <button type="button" data-group-action="delete" data-group-id="{{ group.group_id }}">
+                Delete
+              </button>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="small">No saved groups yet. Select points on the plot, then save the current selection.</p>
+    {% endif %}
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Selection Context</h2>
+      <pre>{{ context.to_dict() | tojson(indent=2) }}</pre>
+    </article>
+    <article>
+      <h2>Render Payload</h2>
+      <pre>{{ render_payload.to_dict() | tojson(indent=2) }}</pre>
+    </article>
+  </section>
+
+  <script>
+    const workflowNClusters = "{{ n_clusters }}";
+    const workflowBasePath = "/workflows/scatter-selection";
+
+    const postScatterWorkflowJson = async (url, body = {}) => {
+      return fetch(url, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({n_clusters: workflowNClusters, ...body})
+      });
+    };
+
+    const reloadOrAlert = async (response) => {
+      if (!response.ok) {
+        const payload = await response.json();
+        alert(payload.error ? payload.error.message : "Workflow action failed");
+        return;
+      }
+      window.location.reload();
+    };
+
+    document.querySelectorAll("[data-scatter-action]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const response = await postScatterWorkflowJson(`${workflowBasePath}/api/${button.dataset.scatterAction}`);
+        reloadOrAlert(response);
+      });
+    });
+
+    document.querySelector("[data-workflow-group-form]").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      const response = await postScatterWorkflowJson(
+        `${workflowBasePath}/api/groups`,
+        {group_name: form.get("group_name")}
+      );
+      reloadOrAlert(response);
+    });
+
+    document.querySelectorAll("[data-group-action]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const action = button.dataset.groupAction;
+        const groupId = button.dataset.groupId;
+        const url = `${workflowBasePath}/api/groups/${groupId}${action === "select" ? "/select" : ""}`;
+        const response = await fetch(url, {
+          method: action === "delete" ? "DELETE" : "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({n_clusters: workflowNClusters})
+        });
+        reloadOrAlert(response);
+      });
+    });
+
+    const applyPointIds = async (pointIds, source) => {
+      if (!pointIds.length) {
+        return;
+      }
+      const response = await postScatterWorkflowJson(
+        `${workflowBasePath}/api/select`,
+        {point_ids: pointIds, source, mode: "additive"}
+      );
+      reloadOrAlert(response);
+    };
+
+    const plot = document.querySelector("[data-selection-plot]");
+    const dragBox = document.querySelector("[data-selection-rect]");
+    let dragStart = null;
+    let didDrag = false;
+    let pressedPointId = null;
+
+    const plotPointFromEvent = (event) => {
+      const rect = plot.getBoundingClientRect();
+      return {
+        x: ((event.clientX - rect.left) / rect.width) * 860,
+        y: ((event.clientY - rect.top) / rect.height) * 520
+      };
+    };
+
+    const updateDragBox = (start, end) => {
+      const x = Math.min(start.x, end.x);
+      const y = Math.min(start.y, end.y);
+      const width = Math.abs(end.x - start.x);
+      const height = Math.abs(end.y - start.y);
+      dragBox.setAttribute("x", x);
+      dragBox.setAttribute("y", y);
+      dragBox.setAttribute("width", width);
+      dragBox.setAttribute("height", height);
+      dragBox.setAttribute("visibility", "visible");
+      return {x, y, width, height};
+    };
+
+    const pointIdsInBox = (box) => {
+      return Array.from(document.querySelectorAll("[data-point-id]"))
+        .filter((point) => {
+          const x = Number(point.dataset.screenX);
+          const y = Number(point.dataset.screenY);
+          return x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
+        })
+        .map((point) => point.dataset.pointId);
+    };
+
+    plot.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      plot.setPointerCapture(event.pointerId);
+      dragStart = plotPointFromEvent(event);
+      didDrag = false;
+      pressedPointId = event.target.closest("[data-point-id]")?.dataset.pointId || null;
+      updateDragBox(dragStart, dragStart);
+    });
+
+    plot.addEventListener("pointermove", (event) => {
+      if (!dragStart) {
+        return;
+      }
+      const current = plotPointFromEvent(event);
+      const box = updateDragBox(dragStart, current);
+      didDrag = box.width > 3 || box.height > 3;
+    });
+
+    plot.addEventListener("pointerup", async (event) => {
+      if (!dragStart) {
+        return;
+      }
+      const current = plotPointFromEvent(event);
+      const box = updateDragBox(dragStart, current);
+      dragStart = null;
+      dragBox.setAttribute("visibility", "hidden");
+
+      if (!didDrag) {
+        if (pressedPointId) {
+          applyPointIds([pressedPointId], "point_click");
+        }
+        pressedPointId = null;
+        return;
+      }
+
+      const selectedPointIds = pointIdsInBox(box);
+      pressedPointId = null;
+      applyPointIds(selectedPointIds, "rectangle");
+    });
+  </script>
+{% endblock %}

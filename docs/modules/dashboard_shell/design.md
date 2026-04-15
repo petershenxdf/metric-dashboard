@@ -131,6 +131,8 @@ Current working workflow pages:
 4. `/workflows/analysis-selection/`
 5. `/workflows/selection-labeling/`
 6. `/workflows/analysis-labeling/`
+7. `/workflows/scatter-selection/`
+8. `/workflows/scatter-labeling/`
 
 ## Testing
 

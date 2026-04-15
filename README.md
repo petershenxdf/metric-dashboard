@@ -148,7 +148,15 @@ The current working modules are:
    - `/workflows/selection-labeling/` shows selection context beside annotation output.
    - `/workflows/analysis-labeling/` connects Steps 1-5 on one shared visual layer: data, projection, LOF outliers, KMeans clusters, selection, and labeling.
    - in the Step 1-5 workflow, labels are limited to `cluster_1...cluster_n` and `outlier`; those labels update the effective cluster/outlier state and the frontend colors/markers.
-   - `/workflows/analysis-labeling/` is the current main manual browser test page for the completed Step 1-5 path.
+   - `/workflows/analysis-labeling/` remains the main manual browser test page for the completed Step 1-5 path.
+
+7. `scatterplot`
+   - builds a point render payload from projection, cluster, outlier, selection, and label state.
+   - shows projected points with cluster colors, outlier markers, selected point indicators, and manual label context.
+   - preserves click selection, rectangle selection, saved selection groups, and adjustable cluster count in the Step 1-6 workflows.
+   - exposes `/modules/scatterplot/api/render-payload` for downstream UI rendering.
+   - `/workflows/scatter-selection/` tests scatterplot click/rectangle selection and saved groups flowing through the selection module.
+   - `/workflows/scatter-labeling/` is the current main Step 1-6 manual browser test page: data, projection, algorithms, scatterplot, selection, saved groups, and labeling together.
 
 The default algorithm-adapter fixture is `default_analysis_outlier_debug`, not Iris. It intentionally contains three compact clusters plus three distant outlier candidates so Step 3 is visually inspectable.
 
@@ -233,7 +241,7 @@ Current planned order:
    - convert selected point IDs into manual cluster/outlier annotations.
 
 7. `scatterplot`
-   - render projected points, clusters, outliers, and selection.
+   - render projected points, clusters, outliers, selection, and manual label state.
 
 8. `chatbox`
    - build chat UI with mock or real selection context.

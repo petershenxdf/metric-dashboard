@@ -59,6 +59,7 @@ Step 5 implementation is complete enough for local inspection:
 7. `/workflows/analysis-labeling/` connects data, projection, outliers, clusters, selection, and labeling on one visual test page.
 8. On `/workflows/analysis-labeling/`, labels are restricted to the active `cluster_1...cluster_n` set plus `outlier`.
 9. The Step 1-5 workflow applies manual labels as effective analysis-state overrides while preserving raw algorithm output for debugging.
+10. `/workflows/scatter-labeling/` connects Step 1-6 and sends scatterplot label actions through this module while scatterplot only renders effective state.
 
 ## Annotation Contract
 
@@ -153,6 +154,7 @@ annotation_to_instruction(annotation)
 /modules/labeling/api/clear              clear local annotations
 /workflows/selection-labeling/           selection plus labeling workflow
 /workflows/analysis-labeling/            Step 1-5 analysis, selection, and labeling workflow
+/workflows/scatter-labeling/             Step 1-6 scatterplot, selection, and labeling workflow
 ```
 
 Step 1-5 effective-state behavior:
@@ -160,6 +162,10 @@ Step 1-5 effective-state behavior:
 1. assigning selected points to `cluster_N` updates effective cluster assignments and clears effective outlier status for those points.
 2. assigning selected points to `outlier` updates effective outlier status and removes those points from effective cluster assignments.
 3. `/workflows/analysis-labeling/api/state` returns effective `clusters` and `outliers` plus raw `raw_clusters` and `raw_outliers`.
+
+Step 1-6 scatter-labeling behavior follows the same labeling rules, but renders
+the result through scatterplot's render payload at
+`/workflows/scatter-labeling/api/state`.
 
 Standalone `/modules/labeling/` remains more general than the Step 1-5
 workflow. It supports `assign_cluster`, `assign_new_class`, `mark_outlier`,
@@ -214,6 +220,7 @@ Manual browser check:
 5. confirm annotation history and structured feedback JSON update.
 6. open `/workflows/selection-labeling/` to check interaction with real selection when available.
 7. open `/workflows/analysis-labeling/` to test selecting projected points and immediately labeling them.
+8. open `/workflows/scatter-labeling/` to confirm scatterplot label controls call labeling and update effective render state.
 
 ## Completion Criteria
 

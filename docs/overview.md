@@ -345,6 +345,8 @@ data_workspace
   -> projection
   -> algorithm_adapters
   -> selection
+  -> labeling
+  -> scatterplot
 ```
 
 Browser checks:
@@ -360,6 +362,9 @@ Browser checks:
 /workflows/analysis-selection/
 /workflows/selection-labeling/
 /workflows/analysis-labeling/
+/modules/scatterplot/
+/workflows/scatter-selection/
+/workflows/scatter-labeling/
 ```
 
 `/workflows/default-analysis/` uses the `default_analysis_outlier_debug` fixture
@@ -391,3 +396,11 @@ click/rectangle selection, saved selection groups, and labeling controls on one
 shared point-ID fixture. Manual labels are limited to `cluster_1...cluster_n`
 and `outlier`; they update the effective cluster/outlier state used by the
 frontend while raw algorithm outputs remain available in the state API.
+
+`/modules/scatterplot/` is the Step 6 module page. It turns already-computed
+projection, analysis, selection, and labeling state into a render payload and
+visible SVG plot without owning selection or label truth. `/workflows/scatter-selection/`
+and `/workflows/scatter-labeling/` verify those boundaries with selection and
+labeling connected. The Step 1-6 workflow preserves prior interaction behavior:
+click selection, rectangle selection, saved selection groups, adjustable
+`n_clusters`, and manual cluster/outlier labeling.

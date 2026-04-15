@@ -122,6 +122,18 @@ Expected visual result:
 3. selected points remain indicated by small black center dots after labeling.
 4. the data preview table shows `Effective Cluster`, `Effective Outlier`, and the manual label history for each affected point.
 
+Step 6 currently uses the same wide-gap analysis fixture as the Step 1-5
+workflow. For Step 6 browser checks, confirm:
+
+1. `/modules/scatterplot/` shows the render payload and SVG plot.
+2. clicking a point toggles selection through scatterplot's selection boundary.
+3. dragging a rectangle adds all points inside the region through the same selection boundary.
+4. saved selection groups can be created, restored, and deleted from the scatter workflows.
+5. changing `n_clusters` reruns analysis and updates available cluster label options.
+6. `/workflows/scatter-selection/` exposes projection, analysis, selection, selection groups, and render payload together.
+7. `/workflows/scatter-labeling/` lets selected points become cluster or outlier labels through labeling.
+8. `/workflows/scatter-labeling/api/state` includes raw analysis, effective analysis, selection groups, labeling state, and render payload.
+
 ## 4. Allowed Alternate Build Path
 
 The recommended order is safe, but it is not mandatory.

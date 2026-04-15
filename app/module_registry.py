@@ -7,11 +7,14 @@ from .modules.algorithm_adapters import create_blueprint as create_algorithm_ada
 from .modules.data_workspace import create_blueprint as create_data_workspace_blueprint
 from .modules.labeling import create_blueprint as create_labeling_blueprint
 from .modules.projection import create_blueprint as create_projection_blueprint
+from .modules.scatterplot import create_blueprint as create_scatterplot_blueprint
 from .modules.selection import create_blueprint as create_selection_blueprint
 from .workflows.analysis_selection import create_blueprint as create_analysis_selection_blueprint
 from .workflows.analysis_labeling import create_blueprint as create_analysis_labeling_blueprint
 from .workflows.default_analysis import create_blueprint as create_default_analysis_blueprint
 from .workflows.data_projection import create_blueprint as create_data_projection_blueprint
+from .workflows.scatter_selection import create_blueprint as create_scatter_selection_blueprint
+from .workflows.scatter_labeling import create_blueprint as create_scatter_labeling_blueprint
 from .workflows.selection_context import create_blueprint as create_selection_context_blueprint
 from .workflows.selection_labeling import create_blueprint as create_selection_labeling_blueprint
 
@@ -88,6 +91,8 @@ MODULES: Tuple[ModuleInfo, ...] = (
         package_name="scatterplot",
         title="Scatterplot",
         purpose="Point rendering, clusters, outliers, and visual selection.",
+        status="working",
+        blueprint_factory=create_scatterplot_blueprint,
     ),
     ModuleInfo(
         slug="chatbox",
@@ -169,12 +174,16 @@ WORKFLOWS: Tuple[WorkflowInfo, ...] = (
         title="Scatter Selection",
         purpose="Inspect scatterplot interactions with selection and label state.",
         modules=("projection", "algorithm-adapters", "selection", "labeling", "scatterplot"),
+        status="working",
+        blueprint_factory=create_scatter_selection_blueprint,
     ),
     WorkflowInfo(
         slug="scatter-labeling",
         title="Scatter Labeling",
         purpose="Inspect visual point selection converted into label annotations.",
         modules=("projection", "algorithm-adapters", "selection", "labeling", "scatterplot"),
+        status="working",
+        blueprint_factory=create_scatter_labeling_blueprint,
     ),
     WorkflowInfo(
         slug="chat-selection",
