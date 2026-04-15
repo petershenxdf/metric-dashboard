@@ -18,15 +18,17 @@ Suggested app state:
 class AppState:
     dataset = None
     feature_matrix = None
+    transformed_feature_matrix = None  # X · L, set after a refinement run
     projection = None
     cluster_result = None
     outlier_result = None
     selection = None
+    selection_groups = []
     annotations = []
     chat_history = []
-    structured_instructions = []
-    constraints = []
-    refinement_runs = []
+    structured_instruction = None      # evolving single state (not a list)
+    active_learned_metric = None       # {M, L, provider, diagnostics}
+    refinement_runs = []               # history for rollback
 ```
 
 This can start as a simple object or dictionary attached to `app.config` or a small state module.
@@ -44,18 +46,20 @@ Each state area has one owner:
 | selected point IDs | `selection` |
 | manual cluster/outlier annotations | `labeling` |
 | chat history | `chatbox` |
-| structured instructions | `intent_instruction` |
-| metric constraints | `metric_learning_adapter` |
-| refinement run history | `refinement_orchestrator` |
+| structured instruction state | `intent_instruction` |
+| metric constraint set and learned metric | `metric_learning_adapter` |
+| refinement run history and active metric pointer | `refinement_orchestrator` |
 
 Other modules may read state through contracts, but should not mutate state they do not own.
 
 Structured feedback can originate from two modules:
 
 1. `labeling` for direct UI actions such as assigning selected points to a cluster or marking outliers.
-2. `intent_instruction` for chat-derived feedback.
+2. `intent_instruction` for chat-derived feedback. This module owns a single evolving `StructuredInstruction` state, updated turn by turn through deltas rather than regenerated from scratch.
 
-Both sources should use the same instruction shape before reaching `metric_learning_adapter`.
+Both sources are merged by `metric_learning_adapter.constraint_builder` into a unified `ConstraintSet` before the metric learner runs. The adapter's learned matrix `L = chol(M)` is applied as a linear pre-transform to the feature matrix so projection and algorithm adapters can be reused without modification.
+
+Phase 1 intents are limited to those that map cleanly to pair-based ITML constraints: `feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`. The intents `split_cluster` and `reclassify_outlier` are deferred because metric change alone cannot drive them - they require upgrading the clustering provider (`k` adjustment or sub-clustering) and the outlier provider (dynamic threshold), respectively.
 
 ## 4. API Response Envelope
 
@@ -157,7 +161,16 @@ Interactive modules should expose action APIs:
 /workflows/scatter-labeling/api/label
 /workflows/scatter-labeling/api/groups
 /modules/chatbox/api/messages
+/modules/chatbox/api/history
+/modules/intent-instruction/api/route
 /modules/intent-instruction/api/compile
+/modules/intent-instruction/api/state
+/modules/metric-learning-adapter/api/constraints
+/modules/metric-learning-adapter/api/fit
+/modules/metric-learning-adapter/api/providers
+/modules/refinement-orchestrator/api/run
+/modules/refinement-orchestrator/api/history
+/modules/refinement-orchestrator/api/rollback
 ```
 
 Every module-level state route should include module identity fields in the

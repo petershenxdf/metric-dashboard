@@ -78,8 +78,8 @@ Detailed flow:
 7. Labeling module converts direct label actions into manual annotations or structured feedback instructions.
 8. Chatbox receives user text and current selection/labeling context.
 9. Intent instruction module classifies chat text and compiles structured instructions.
-10. Metric-learning adapter converts structured feedback into constraints.
-11. Refinement orchestrator runs the update sequence.
+10. Metric-learning adapter merges labeling annotations plus structured instructions into a `ConstraintSet`, runs a replaceable metric learner (default ITML), and returns a Mahalanobis matrix `M`. Its Cholesky factor `L` is applied as a linear pre-transform to the feature matrix.
+11. Refinement orchestrator runs the update sequence on the transformed matrix, records history, and supports rollback.
 12. The integrated dashboard refreshes the visible state.
 
 ## 5. Product Constraints
@@ -189,14 +189,24 @@ metric-dashboard/
 
       intent_instruction/
         schemas.py
-        classifier.py
-        compiler.py
+        router.py
+        extractor.py
+        providers/
+          base.py
+          mock.py
+          local_qwen.py
+          cloud_claude.py
         fixtures.py
         routes.py
         templates/intent_instruction/
 
       metric_learning_adapter/
         schemas.py
+        constraint_builder.py
+        providers/
+          base.py
+          identity.py
+          itml.py
         adapter.py
         fixtures.py
         routes.py
@@ -205,6 +215,7 @@ metric-dashboard/
       refinement_orchestrator/
         schemas.py
         service.py
+        history.py
         fixtures.py
         routes.py
         templates/refinement_orchestrator/
@@ -285,40 +296,60 @@ Each module should expose these boundaries where applicable:
 | Selection | Selected/unselected point state | `/modules/selection/` |
 | Labeling | Manual point annotations, cluster labels, and outlier labels | `/modules/labeling/` |
 | Scatterplot | Visual point rendering and selection UI | `/modules/scatterplot/` |
-| Chatbox | Dialogue UI and clarification flow | `/modules/chatbox/` |
-| Intent Instruction | Message classification and structured instructions | `/modules/intent-instruction/` |
-| Metric-Learning Adapter | Instruction to constraint conversion | `/modules/metric-learning-adapter/` |
-| Refinement Orchestrator | End-to-end update coordination | `/modules/refinement-orchestrator/` |
+| Chatbox | Dialogue UI, suggestion chips, clarification flow | `/modules/chatbox/` |
+| Intent Instruction | Router + extractor with replaceable LLM provider; emits instruction deltas | `/modules/intent-instruction/` |
+| Metric-Learning Adapter | Constraint builder + replaceable metric learner (default ITML), returns learned `M` | `/modules/metric-learning-adapter/` |
+| Refinement Orchestrator | End-to-end update coordination, history, rollback | `/modules/refinement-orchestrator/` |
 
 ## 9. Structured Instruction Families
 
-Start with these families:
+Chat-derived feedback flows through intent instruction and produces an evolving `StructuredInstruction` state. Each turn the extractor emits a delta that is applied to this state.
 
-1. `assign_cluster`
-2. `assign_new_class`
-3. `same_class`
-4. `different_class`
-5. `split_into_n_classes`
-6. `merge_groups`
-7. `is_outlier`
-8. `not_outlier`
-9. `needs_clarification`
-10. `non_actionable`
+### Phase 1 Intents (ITML-Aligned)
 
-Example:
+These intents map cleanly to pair-based metric learning constraints and are the initial implementation scope:
+
+1. `feature_weight` - increase, decrease, or ignore a feature (implemented through pre-scaling, not pair constraints).
+2. `group_similar` - two groups should be closer together.
+3. `group_dissimilar` - two groups should be farther apart.
+4. `merge_clusters` - two or more clusters should be treated as one.
+5. `anchor_point` - one reference point attracts a target group.
+6. `ignore_cluster` - a cluster is excluded from metric updates this round.
+
+Router-level meta-categories that do not produce pair constraints:
+
+7. `needs_clarification`
+8. `non_actionable`
+9. `meta_query`
+
+### Labeling-Derived Instructions
+
+Manual labels from the labeling module remain as-is. In the constraint builder, `assign_cluster` annotations become intra-label must-link pairs, and `mark_outlier` / `mark_not_outlier` annotations stay within the labeling module's effective state rather than being translated into metric pair constraints in Phase 1.
+
+### Phase 2 (Deferred)
+
+The following intents are intentionally excluded from Phase 1 because metric change alone cannot drive them:
+
+1. `split_cluster` - requires changing the clustering algorithm's `k` or running sub-clustering.
+2. `reclassify_outlier` - LOF uses a fixed contamination threshold; a metric change may not move a point across the boundary.
+
+Both will be revisited after the clustering and outlier providers are swapped for algorithms that can accept these signals directly. They are not blockers for Phase 1.
+
+Example delta:
 
 ```json
 {
-  "instruction_type": "same_class",
-  "status": "actionable",
-  "source": "chat_intent",
-  "target": {
-    "source": "selected_points",
-    "point_ids": ["p1", "p7", "p9"]
-  },
-  "explicitness": "explicit",
-  "requires_followup": false,
-  "followup_question": null
+  "operations": [
+    {
+      "op": "add",
+      "constraint": {
+        "id": "c2",
+        "intent": "group_similar",
+        "group_a": {"source": "selection_group", "ref": "group_001"},
+        "group_b": {"source": "cluster", "ref": "cluster_2"}
+      }
+    }
+  ]
 }
 ```
 

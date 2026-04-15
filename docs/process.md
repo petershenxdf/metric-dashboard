@@ -535,44 +535,48 @@ Build:
 ```text
 chatbox
 chatbox Flask page
-mock selection and label context
+mock selection, label, and instruction context
 ```
 
 Why:
 
-Chatbox needs selection context and may benefit from recent label context, but should not own selection, labeling, or algorithms.
+Chatbox needs selection context and may benefit from recent label context, but should not own selection, labeling, algorithms, or the structured instruction state.
 
 Tasks:
 
 1. Build chat UI.
-2. Display current selection context.
+2. Display current selection context and selection groups.
 3. Display recent manual label context when available.
-4. Submit user message.
-5. Show assistant response.
-6. Add `/modules/chatbox/`.
-7. Add API endpoint for message submission.
-8. Support mock selection and label context for standalone testing.
+4. Display the current `StructuredInstruction` panel (read from intent instruction).
+5. Display suggestion chips derived from dataset context. Chips only cover Phase 1 intents.
+6. Submit user message with a truncated history window (default last 3 turns) plus context.
+7. Show assistant response including router category.
+8. Add `/modules/chatbox/`.
+9. Add APIs for message submission, context, history, and reset.
+10. Support mock selection, label, and instruction context for standalone testing.
 
 Unit tests:
 
 1. Empty messages are rejected.
-2. Message payload includes selection context.
+2. Message payload includes selection context and selection groups.
 3. Message payload includes label context when available.
-4. Chatbox does not call clustering or outlier detection.
+4. History window is truncated to the configured N turns.
+5. Chatbox does not call clustering or outlier detection.
+6. Chatbox does not mutate selection, labeling, or structured instruction state.
 
 Flask visual check:
 
 Open `/modules/chatbox/` and confirm:
 
-1. chat input works.
-2. message appears in history.
-3. selection context is visible.
-4. label context is visible when available.
-5. response clearly shows whether intent parsing is real or mocked.
+1. chat input works and messages appear in history.
+2. selection and label context are visible.
+3. suggestion chips produce valid Phase 1 intents when clicked.
+4. the `StructuredInstruction` preview panel updates after actionable messages.
+5. response clearly shows whether the LLM provider is real or mocked.
 
 Completion:
 
-Chatbox can be manually tested in Flask with mock selection and label context.
+Chatbox can be manually tested in Flask with mock selection, label, and instruction context.
 
 ---
 
@@ -582,44 +586,60 @@ Build:
 
 ```text
 intent_instruction
+router + extractor + LLM provider protocol
 intent Flask page
 chat-intent workflow page
 ```
 
 Why:
 
-User language must become structured instructions before metric learning is touched.
+User language must become structured instructions before metric learning is touched. The module must be robust to off-topic, ambiguous, and partial messages.
 
 Tasks:
 
-1. Define structured instruction schema.
-2. Implement deterministic classifier first.
-3. Resolve selected/unselected references.
-4. Resolve cluster and outlier label references when the user mentions them.
-5. Generate clarification requests.
-6. Add `/modules/intent-instruction/`.
-7. Add `/workflows/chat-intent/`.
+1. Define `StructuredInstruction` schema and `InstructionDelta` schema.
+2. Implement two-stage pipeline: router first, extractor only on actionable messages.
+3. Define `LlmProvider` protocol; implement `MockLlmProvider` for tests and `LocalQwenProvider` (qwen2.5-14b via Ollama or vLLM) as default runtime. Cloud providers (`ClaudeProvider`, `OpenAIProvider`) slot into the same protocol.
+4. Prompts use JSON-schema constrained output so small models can produce valid deltas.
+5. Resolve group references (`selected_points`, `selection_group`, `cluster`, `outlier_set`, `point_id`).
+6. Generate clarification prompts for ambiguous and partial messages.
+7. Only emit Phase 1 intents: `feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`.
+8. Do not emit `split_cluster` or `reclassify_outlier` - both are deferred until the clustering and outlier providers are upgraded.
+9. Forward only the last N turns (default 3) plus the current instruction snapshot to the LLM, not full chat history.
+10. Add `/modules/intent-instruction/` with route, compile, state, reset, and examples APIs.
+11. Add `/workflows/chat-intent/`.
 
-Unit tests:
+Unit tests (router):
 
-1. Grouping messages become `same_class`.
-2. Direct label messages become `assign_cluster` or `assign_new_class`.
-3. Split messages become `split_into_n_classes`.
-4. Outlier messages become `is_outlier`.
-5. Vague messages require clarification.
-6. Irrelevant messages become `non_actionable`.
+1. Off-topic messages like "today's weather" become `off_topic`.
+2. Meta queries like "how many clusters are there" become `meta_query`.
+3. "move these together" with empty selection becomes `on_topic_ambiguous`.
+4. Clear actionable messages become `on_topic_actionable`.
+
+Unit tests (extractor, with MockLlmProvider):
+
+1. Grouping messages become `group_similar` deltas.
+2. Separating messages become `group_dissimilar` deltas.
+3. Merge messages become `merge_clusters` deltas.
+4. Feature-importance messages become `feature_weight` deltas.
+5. Anchor references become `anchor_point` deltas.
+6. Ignore-cluster messages become `ignore_cluster` deltas.
+7. Applying a delta to an `StructuredInstruction` produces the expected next state.
+8. Deferred intents are never emitted.
 
 Flask visual check:
 
 Open `/modules/intent-instruction/` and confirm:
 
-1. example messages can be submitted.
-2. structured instruction JSON is visible.
-3. clarification cases are clear.
+1. example messages grouped by intent can be submitted.
+2. router category and confidence are visible.
+3. delta JSON and resulting `StructuredInstruction` state are both visible.
+4. clarification cases are clear and do not mutate state.
+5. active provider (mock, local qwen, cloud) is clearly labeled.
 
 Completion:
 
-Intent parsing is visible and debuggable before metric-learning integration.
+Intent parsing is visible and debuggable before metric-learning integration, and the LLM provider is swappable through settings.
 
 ---
 
@@ -629,40 +649,58 @@ Build:
 
 ```text
 metric_learning_adapter
+constraint_builder (pure)
+MetricLearnerProvider protocol (IdentityProvider, ItmlProvider)
 constraint preview Flask page
 ```
 
 Why:
 
-Structured instructions from labeling or intent should be converted into metric-learning constraints through one narrow boundary.
+Structured instructions from labeling or chat should be converted into a single `ConstraintSet` and then into a learned Mahalanobis matrix through one narrow boundary. The learned matrix is applied as a linear pre-transform to the feature matrix so projection and algorithm adapters can be reused unchanged.
 
 Tasks:
 
-1. Accept structured instruction.
-2. Reject incomplete or non-actionable instruction.
-3. Convert actionable instruction into constraint payload.
-4. Support manual label instructions and chat-derived instructions through the same schema.
-5. Add `/modules/metric-learning-adapter/`.
-6. Show instruction input and constraint output.
+1. Build `constraint_builder` as a pure function module:
+   - Labeling `assign_cluster` annotations become intra-label must-link pairs.
+   - `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point` become sampled pair constraints (bounded by `max_pairs_per_intent`, default 50).
+   - `feature_weight` populates a `feature_scale` dict, not pair lists.
+   - `ignore_cluster` excludes that cluster from all pair generation.
+   - `split_cluster` and `reclassify_outlier` are rejected with `intent_deferred` error code.
+   - Detect conflicting must-link / cannot-link pairs and report them.
+2. Define `MetricLearnerProvider` protocol and implement:
+   - `IdentityProvider` - returns `M = I`, used for cold start or empty constraints.
+   - `ItmlProvider` - wraps `metric-learn` ITML, accepts must-link / cannot-link pairs and `feature_scale` via pre-scaling of `X`.
+3. Output a `LearnedMetric` containing `M`, `L = chol(M)`, provider name, constraint count, diagnostics.
+4. Applying the metric is a linear pre-transform: `X' = X · L` (with `feature_scale` folded in).
+5. Add `/modules/metric-learning-adapter/` with `constraints`, `fit`, and `providers` APIs.
+6. Show instruction input, annotation input, `ConstraintSet`, and learned `M` preview.
 
 Unit tests:
 
-1. `same_class` creates must-link constraints.
-2. `assign_cluster` creates class label constraints.
-3. `different_class` creates cannot-link constraints.
-4. `split_into_n_classes` creates split constraints.
-5. incomplete instruction is rejected.
+1. `group_similar` produces must-link pairs bounded by sampling cap.
+2. `group_dissimilar` produces cannot-link pairs.
+3. `merge_clusters` produces cross-cluster must-link pairs.
+4. `feature_weight` populates `feature_scale`, not pair lists.
+5. `anchor_point` produces must-link pairs from anchor to every target.
+6. `ignore_cluster` excludes that cluster's points.
+7. `split_cluster` and `reclassify_outlier` return `intent_deferred`.
+8. Conflicting must-link/cannot-link pairs are reported.
+9. Labeling `assign_cluster` annotations merge with chat-derived constraints into the same `ConstraintSet`.
+10. `IdentityProvider.fit` returns `M = I`.
+11. `ItmlProvider.fit` with similar pairs reduces their distance under the learned metric.
 
 Flask visual check:
 
 Open `/modules/metric-learning-adapter/` and confirm:
 
-1. sample instruction produces visible constraints.
-2. invalid instruction produces clear error.
+1. sample instruction plus sample annotations produce a visible `ConstraintSet` with pair count and conflict list.
+2. the active provider is visible and switchable.
+3. fit produces a visible `M` preview and transformed feature matrix preview.
+4. a `split_cluster` instruction produces a clear "intent deferred" error.
 
 Completion:
 
-Metric-learning input can be inspected before real refinement loop.
+Metric-learning input can be inspected before the refinement loop, and the learned metric is usable as a pre-transform by projection and algorithm adapters.
 
 ---
 
@@ -672,40 +710,50 @@ Build:
 
 ```text
 refinement_orchestrator
+refinement history + rollback
 refinement timeline Flask page
 ```
 
 Why:
 
-The orchestrator coordinates modules but should not contain their internal logic.
+The orchestrator coordinates modules but should not contain their internal logic. It must also record each run so users can inspect and revert changes.
 
 Tasks:
 
-1. Receive structured instruction.
-2. Call metric-learning adapter.
-3. Trigger updated projection.
-4. Rerun clustering and outlier adapters.
-5. Return updated dashboard state.
-6. Add `/modules/refinement-orchestrator/`.
-7. Add `/workflows/refinement-loop/`.
+1. Accept a refinement trigger from labeling, intent instruction, or a manual refine button.
+2. Call `metric_learning_adapter.build_constraints`, then `fit`.
+3. Apply the returned `L` to the feature matrix.
+4. Trigger updated projection on the transformed matrix.
+5. Rerun clustering and outlier detection through algorithm adapters on the transformed matrix.
+6. Record each completed run (constraints, learned metric, downstream run IDs, instruction version) in history.
+7. Support rollback to a prior run.
+8. Reject triggers that contain `split_cluster` or `reclassify_outlier` intents with a clear `intent_deferred` error.
+9. Add `/modules/refinement-orchestrator/` with run, history, rollback, and reset APIs.
+10. Add `/workflows/refinement-loop/`.
 
 Unit tests:
 
-1. Actionable instruction triggers the flow.
-2. incomplete instruction stops early.
-3. failures return diagnostics.
+1. Actionable instruction triggers the flow in the expected step order.
+2. Empty instruction plus empty annotations produces an identity-metric run (no-op visible as a run).
+3. Deferred intent returns `intent_deferred` before metric fit.
+4. Metric-fit failure returns diagnostics and leaves prior active run untouched.
+5. Projection failure returns diagnostics and preserves prior run.
+6. History is appended only on success.
+7. Rollback restores a prior run without recomputation.
 
 Flask visual check:
 
 Open `/modules/refinement-orchestrator/` and confirm:
 
 1. timeline shows each step.
-2. intermediate payloads are visible.
+2. intermediate payloads (constraint set, metric metadata) are visible.
 3. failure and success states are understandable.
+4. history list shows prior runs and offers rollback buttons.
+5. deferred-intent errors name the intent clearly.
 
 Completion:
 
-The update loop can be debugged visually before full dashboard integration.
+The update loop can be debugged visually, and every successful run is reversible before full dashboard integration.
 
 ---
 

@@ -4,29 +4,31 @@
 
 The chatbox module is the dialogue interface for user feedback.
 
-It receives user messages and displays responses, but it does not directly run clustering, outlier detection, MDS, or metric learning.
+It receives user messages and displays responses, but it does not run clustering, outlier detection, MDS, or metric learning.
 
 It is one path for user feedback. Direct point labels are handled by the labeling module, while chat text is sent to intent instruction and compiled into the same structured feedback family.
 
 ## Responsibilities
 
 1. Display conversation history.
-2. Display current selection context.
+2. Display current selection context and selection groups.
 3. Display recent manual label context when available.
-4. Accept user messages.
-5. Send message plus selection and label context to the intent instruction module when available.
-6. Show clarification or confirmation responses.
-7. Provide standalone Flask testing with mock selection and label context.
+4. Display the current accumulated `StructuredInstruction` (delta memory).
+5. Display suggestion chips generated from current dataset context.
+6. Accept user messages and forward them with context to intent instruction.
+7. Show router-level responses (clarification, off-topic redirect, meta-query answer).
+8. Provide standalone Flask testing with mock selection, label, and instruction context.
 
 ## Not Responsible For
 
 1. Owning selection state.
-2. Parsing language internally beyond basic request handling.
-3. Running clustering.
-4. Running outlier detection.
-5. Running metric learning.
-6. Updating the scatterplot directly.
-7. Owning manual label state.
+2. Owning manual label state.
+3. Owning structured instruction state (that belongs to intent instruction).
+4. Parsing language internally.
+5. Running clustering.
+6. Running outlier detection.
+7. Running metric learning.
+8. Updating the scatterplot directly.
 
 ## Target Files
 
@@ -46,20 +48,37 @@ tests/modules/chatbox/
   test_routes.py
 ```
 
+## Chat History Policy
+
+Chat history is stored for display, not for replay into the LLM.
+
+1. Full history is kept in memory per session for the UI.
+2. Only the last N turns (default N=3) are forwarded to intent instruction with each new message.
+3. The real cross-turn memory is the `StructuredInstruction` state owned by intent instruction, not the raw history.
+
+This policy keeps prompts short and compatible with small local models.
+
 ## Message Request Contract
 
 ```json
 {
-  "message": "I think these points should be one class",
+  "message": "move group A closer to cluster 2",
   "selection_context": {
     "selected_point_ids": ["p1", "p7"],
     "unselected_point_ids": ["p2", "p3"],
     "selected_count": 2,
     "unselected_count": 2
   },
+  "selection_groups": [
+    {"group_id": "group_001", "group_name": "group A", "point_ids": ["p1", "p7"]}
+  ],
   "label_context": {
     "active_annotations": []
-  }
+  },
+  "history_window": [
+    {"role": "user", "text": "these points are similar"},
+    {"role": "assistant", "text": "noted as group_similar"}
+  ]
 }
 ```
 
@@ -67,13 +86,31 @@ tests/modules/chatbox/
 
 ```json
 {
-  "reply": "I interpreted this as same_class.",
-  "structured_instruction": null,
-  "requires_followup": false
+  "reply": "Added group_similar between group A and cluster 2.",
+  "router_category": "on_topic_actionable",
+  "delta": {
+    "operations": [
+      {"op": "add", "constraint_id": "c3"}
+    ]
+  },
+  "current_instruction_version": 4,
+  "requires_followup": false,
+  "followup_question": null
 }
 ```
 
-If the intent module is not implemented yet, the response must clearly say that parsing is mocked or not connected.
+For off-topic or ambiguous messages, `delta` is `null` and `reply` contains a redirect or clarification.
+
+## Suggestion Chips
+
+The chatbox generates a small set of suggestion chips per turn from dataset context. Examples:
+
+1. "Make feature `petal_length` more important"
+2. "Pull cluster 1 and cluster 3 apart"
+3. "Merge group A with cluster 2"
+4. "Treat p42 as a typical point for cluster 1"
+
+Clicking a chip sends the exact phrase as a normal message. Chips always map to Phase 1 intents (no `split_cluster` or `reclassify_outlier` chips).
 
 ## Flask Routes
 
@@ -81,7 +118,9 @@ If the intent module is not implemented yet, the response must clearly say that 
 /modules/chatbox/                       chatbox debug page
 /modules/chatbox/health                 module health
 /modules/chatbox/api/messages           submit message
-/modules/chatbox/api/context            current selection context
+/modules/chatbox/api/context            current selection and label context
+/modules/chatbox/api/history            current chat history
+/modules/chatbox/api/reset              clear chat history
 /workflows/chat-intent/                 chatbox plus intent parser
 ```
 
@@ -90,12 +129,14 @@ If the intent module is not implemented yet, the response must clearly say that 
 The page should show:
 
 1. chat history.
-2. message input.
-3. current selection context panel.
-4. current label context panel when available.
-5. response output.
-6. structured instruction JSON preview if available.
-7. a note showing whether selection and label context are mocked or real.
+2. message input and send button.
+3. suggestion chips derived from current dataset context.
+4. current selection context panel.
+5. current label context panel when available.
+6. current `StructuredInstruction` preview panel (read from intent instruction API).
+7. response output with router category visible.
+8. a note showing whether selection, label, and instruction context are mocked or real.
+9. a provider status badge showing which LLM is active.
 
 ## Testing
 
@@ -105,23 +146,28 @@ Unit tests:
 2. valid message creates a chat turn.
 3. selection context is included in downstream payload.
 4. label context is included when available.
-5. chatbox service does not call clustering or outlier detection.
+5. history window is truncated to the configured N turns.
+6. chatbox service does not call clustering or outlier detection.
+7. chatbox service does not mutate selection, labeling, or structured instruction state.
 
 Flask route tests:
 
 1. debug page returns 200.
 2. context API returns selected/unselected data.
-3. message API handles valid and invalid messages.
+3. history API returns stored turns.
+4. message API handles valid and invalid messages.
+5. reset API clears history.
 
 Manual browser check:
 
 1. open `/modules/chatbox/`.
 2. type a message.
 3. confirm the message appears in history.
-4. confirm selection context is visible.
-5. confirm label context is visible when available.
-6. confirm response states whether intent parsing is active or mocked.
+4. confirm selection and label context are visible.
+5. confirm response shows router category.
+6. confirm suggestion chips produce valid messages when clicked.
+7. confirm off-topic messages do not update the `StructuredInstruction` panel.
 
 ## Completion Criteria
 
-This module is complete when chat interaction can be tested visibly through Flask without depending on the full dashboard.
+This module is complete when chat interaction can be tested visibly through Flask without depending on the full dashboard, and when the UI clearly separates raw chat history from the accumulated structured instruction state.

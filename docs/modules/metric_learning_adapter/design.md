@@ -2,20 +2,20 @@
 
 ## Purpose
 
-The metric-learning adapter converts structured instructions into constraint payloads for the metric-learning pipeline.
+The metric-learning adapter converts structured instructions and manual labels into a learned Mahalanobis distance metric.
 
-It should not receive raw chat text. It should only receive validated structured instructions.
+It is the single boundary between dashboard-facing feedback and the actual metric learning library.
 
-Instructions may come from either the labeling module or the intent instruction module, but they should share one schema before reaching this adapter.
+It should not receive raw chat text. It should only receive validated structured instructions and labeling annotations.
 
 ## Responsibilities
 
-1. Accept structured instructions.
-2. Validate instruction source and status.
+1. Accept a `ConstraintSet` built from `StructuredInstruction` (chat) and labeling annotations.
+2. Validate instruction source, status, and referenced point IDs.
 3. Reject incomplete and non-actionable instructions.
-4. Convert manual labels and chat-derived instructions into metric-learning constraints.
-5. Call the metric-learning pipeline when available.
-6. Provide a Flask page for constraint preview.
+4. Run a replaceable metric learner and return a Mahalanobis matrix `M` (plus its Cholesky factor `L`).
+5. Apply `L` as a linear pre-transform to the feature matrix so projection and algorithm adapters can consume it unchanged.
+6. Provide a Flask page for inspecting the constraint set, learned `M`, and the transformed feature space.
 
 ## Not Responsible For
 
@@ -24,6 +24,7 @@ Instructions may come from either the labeling module or the intent instruction 
 3. Managing selection state.
 4. Running clustering directly.
 5. Running outlier detection directly.
+6. Owning manual label state.
 
 ## Target Files
 
@@ -31,114 +32,219 @@ Instructions may come from either the labeling module or the intent instruction 
 app/modules/metric_learning_adapter/
   __init__.py
   schemas.py
+  constraint_builder.py
+  providers/
+    base.py
+    identity.py
+    itml.py
   adapter.py
   fixtures.py
   routes.py
   templates/metric_learning_adapter/index.html
 
 tests/modules/metric_learning_adapter/
+  test_constraint_builder.py
+  test_providers.py
   test_adapter.py
   test_routes.py
 ```
 
-## Input Contract
+## Pipeline
+
+```text
+labeling annotations        ──┐
+StructuredInstruction       ──┼─► constraint_builder ─► ConstraintSet ─► MetricLearnerProvider ─► M
+selection groups (read-only)──┘                                                                  │
+                                                                                                 ▼
+                                                    apply L = chol(M) as pre-transform: X' = X · L
+                                                                                                 │
+                                                                                                 ▼
+                                                    projection and algorithm_adapters run on X'
+```
+
+Projection and algorithm adapters are not changed. They receive a transformed feature matrix rather than the raw one.
+
+## Constraint Builder
+
+`constraint_builder.py` is a pure function module. It merges the three input sources into a unified `ConstraintSet`:
+
+1. Labeling `assign_cluster` annotations - intra-label similar pairs.
+2. Labeling `mark_outlier` annotations - outlier handling is owned by labeling directly; the adapter does not translate these into metric pairs in Phase 1.
+3. Structured instruction constraints, by intent type (see mapping below).
+
+### Intent to Constraint Mapping (Phase 1)
+
+| Intent | Produces |
+|--------|----------|
+| `feature_weight` | Entry in `feature_scale` dict (see below). Not a pair constraint. |
+| `group_similar` | Sampled must-link pairs between the two groups. |
+| `group_dissimilar` | Sampled cannot-link pairs between the two groups. |
+| `merge_clusters` | Sampled must-link pairs across all member clusters. |
+| `anchor_point` | Must-link pairs from anchor to each target group point. |
+| `ignore_cluster` | No pairs generated from that cluster this round. |
+
+### Deferred Intents (Phase 2)
+
+The following intents are not converted to constraints in Phase 1:
+
+1. `split_cluster` - would require intra-cluster cannot-link pairs plus a `k` increment in the clustering provider. The metric change alone cannot force KMeans to split a cluster, so this is deferred until the clustering algorithm can accept a split hint directly.
+2. `reclassify_outlier` - LOF's fixed contamination threshold means metric changes may not move a point across the outlier boundary. Users should use labeling's `mark_outlier` / `mark_not_outlier` directly until the outlier algorithm can be updated.
+
+The constraint builder must reject these intents with a clear error code (`intent_deferred`) if they ever appear in a `StructuredInstruction`. The intent module should not emit them in Phase 1.
+
+### Pair Sampling
+
+For any intent that generates pairs between groups of size `n` and `m`, the builder samples `min(n*m, max_pairs_per_intent)` pairs rather than generating all of them. Default `max_pairs_per_intent = 50`. This prevents constraint counts from blowing up ITML solve time on large groups.
+
+### Conflict Detection
+
+The builder performs a simple conflict check before handing off to the learner:
+
+1. The same pair appearing as both must-link and cannot-link is flagged.
+2. When conflicts are detected, the adapter returns `ok: false` with a `conflicts` field so the chatbox can ask the user to resolve them.
+
+## ConstraintSet Schema
 
 ```json
 {
-  "instruction_type": "same_class",
-  "status": "actionable",
-  "source": "manual_label",
-  "target": {
-    "source": "selected_points",
-    "point_ids": ["p1", "p7", "p9"]
+  "must_link": [["p1", "p7"], ["p1", "p9"]],
+  "cannot_link": [["p1", "p23"]],
+  "feature_scale": {
+    "petal_length": 2.0,
+    "sepal_width": 0.5
   },
-  "parameters": {}
+  "excluded_clusters": ["cluster_5"],
+  "conflicts": [],
+  "diagnostics": {
+    "pair_count": 12,
+    "sampled_from": 350,
+    "sources": ["labeling", "chat_intent"]
+  }
 }
 ```
 
-## Constraint Examples
+`feature_scale` maps feature name to multiplier. `1.0` means unchanged. Values above 1 emphasize the feature, below 1 de-emphasize it, and `0.0` drops it.
 
-Same class:
+## Metric Learner Provider Protocol
 
-```json
-{
-  "constraint_type": "must_link",
-  "point_ids": ["p1", "p7", "p9"]
-}
+```python
+class MetricLearnerProvider(Protocol):
+    name: str
+    def fit(self, X: np.ndarray, constraints: ConstraintSet) -> LearnedMetric: ...
 ```
 
-Assign cluster:
+`LearnedMetric` contains:
 
-```json
-{
-  "constraint_type": "class_label",
-  "point_ids": ["p1", "p7", "p9"],
-  "label": "cluster_2"
-}
+```python
+@dataclass
+class LearnedMetric:
+    M: np.ndarray         # Mahalanobis matrix
+    L: np.ndarray         # Cholesky factor, used as linear transform
+    provider: str
+    n_constraints_used: int
+    diagnostics: dict
 ```
 
-Different class:
+Built-in providers:
 
-```json
-{
-  "constraint_type": "cannot_link",
-  "groups": [["p1"], ["p7"]]
-}
+1. `IdentityProvider` - returns `M = I`. Used when no constraints exist or for cold start. Keeps Step 1-6 workflows functional.
+2. `ItmlProvider` - default learner. Wraps `metric-learn`'s ITML. Handles `must_link`, `cannot_link`, and accepts `feature_scale` via pre-scaling of `X` before the fit.
+
+Future providers (documented but not implemented in Phase 1):
+
+3. `LmnnProvider` - for cases where per-point class labels are strong.
+4. `MmcProvider` - stricter variant of pair-based learning.
+
+Provider is chosen from `settings.json` or a request parameter on the Flask API for experimentation.
+
+## Feature Scaling Path
+
+`feature_weight` intents are applied before the metric learner sees the data:
+
+```text
+S         = diag(feature_scale)
+X_scaled  = X · S
+M_scaled  = learner.fit(X_scaled, pair_constraints)
+L_total   = S · chol(M_scaled)
+X'        = X · L_total
 ```
 
-Split:
-
-```json
-{
-  "constraint_type": "split",
-  "point_ids": ["p1", "p7", "p9"],
-  "n_classes": 3
-}
-```
+Row vectors are transformed on the right, so the composite transform is `S` applied first, then `chol(M_scaled)`. This separates feature importance from pair-based similarity learning. It also means that a user who only provides `feature_weight` hints still gets a meaningful metric change, which ITML alone would not produce.
 
 ## Flask Routes
 
 ```text
-/modules/metric-learning-adapter/                    adapter debug page
-/modules/metric-learning-adapter/health              module health
-/modules/metric-learning-adapter/api/constraints     convert instruction to constraints
+/modules/metric-learning-adapter/                       adapter debug page
+/modules/metric-learning-adapter/health                 module health
+/modules/metric-learning-adapter/api/constraints        build ConstraintSet from inputs
+/modules/metric-learning-adapter/api/fit                run provider, return learned metric
+/modules/metric-learning-adapter/api/providers          list available providers
 ```
 
 ## Flask Debug Page Requirements
 
 The page should show:
 
-1. sample structured instruction input.
-2. editable JSON textarea.
-3. generated constraint payload.
-4. validation errors.
-5. note showing whether real metric-learning code is connected or mocked.
+1. sample structured instruction input and labeling annotation input.
+2. editable JSON textareas for both.
+3. current active provider with a dropdown to switch.
+4. generated `ConstraintSet` with pair count and conflict list.
+5. learned `M` preview (heatmap or numeric grid for small feature counts).
+6. transformed feature matrix preview.
+7. note showing whether the provider is real or mocked.
+8. explicit note that `split_cluster` and `reclassify_outlier` intents are deferred.
 
 ## Testing
 
-Unit tests:
+Unit tests (constraint_builder):
 
-1. `same_class` becomes must-link constraints.
-2. `assign_cluster` becomes class label constraints.
-3. `different_class` becomes cannot-link constraints.
-4. `split_into_n_classes` becomes split constraints.
-5. `is_outlier` becomes outlier hint if supported.
-6. `needs_clarification` is rejected.
-7. `non_actionable` is rejected.
+1. `group_similar` produces must-link pairs, count bounded by `max_pairs_per_intent`.
+2. `group_dissimilar` produces cannot-link pairs.
+3. `merge_clusters` with two clusters produces cross-cluster must-link pairs.
+4. `feature_weight` populates `feature_scale`, not pair lists.
+5. `anchor_point` produces must-link pairs from anchor to every target.
+6. `ignore_cluster` excludes that cluster's points from pair generation.
+7. `split_cluster` is rejected with `intent_deferred`.
+8. `reclassify_outlier` is rejected with `intent_deferred`.
+9. Conflicting must-link/cannot-link pairs are detected and reported.
+10. Labeling `assign_cluster` annotations become intra-label must-link pairs.
+
+Unit tests (providers):
+
+1. `IdentityProvider.fit` returns `M = I` regardless of constraints.
+2. `ItmlProvider.fit` with no constraints returns something close to identity.
+3. `ItmlProvider.fit` with similar pairs reduces distance between those pairs in the learned metric.
+4. `ItmlProvider.fit` with `feature_scale` produces an `L` that reflects the scaling.
+5. Provider factory returns the configured provider.
+
+Unit tests (adapter):
+
+1. Full pipeline from structured instruction + labels to `LearnedMetric` works on fixture data.
+2. Empty input returns `IdentityProvider` result and no errors.
+3. Deferred intents return clear error.
 
 Flask route tests:
 
 1. debug page returns 200.
-2. constraints API returns payload for valid instruction.
-3. constraints API returns error for invalid instruction.
+2. constraints API returns `ConstraintSet` for valid input.
+3. constraints API returns error for invalid input and for deferred intents.
+4. fit API returns `LearnedMetric` for valid constraints.
+5. providers API lists `identity` and `itml`.
 
 Manual browser check:
 
 1. open `/modules/metric-learning-adapter/`.
-2. submit sample instruction.
-3. confirm constraint JSON is visible.
-4. submit invalid instruction and confirm clear error.
+2. submit a sample instruction with `group_similar`.
+3. confirm constraint JSON is visible with pair count.
+4. click fit and confirm `M` preview updates.
+5. submit a `split_cluster` instruction and confirm the error clearly says the intent is deferred.
 
 ## Completion Criteria
 
-This module is complete when instruction-to-constraint conversion is inspectable through Flask and isolated from chat UI.
+This module is complete when:
+
+1. Constraint building is testable on both chat-derived and labeling-derived input.
+2. `IdentityProvider` and `ItmlProvider` both run through Flask.
+3. The learned metric applies cleanly as a pre-transform to the feature matrix consumed by projection and algorithm adapters.
+4. Deferred intents are explicitly rejected with a documented error code.
+5. The debug page makes the constraint set and learned metric inspectable in the browser.
