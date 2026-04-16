@@ -179,6 +179,15 @@ metric-dashboard/
         templates/scatterplot/
         static/scatterplot/
 
+      ssdbcodi/
+        algorithm.py
+        schemas.py
+        service.py
+        store.py
+        fixtures.py
+        routes.py
+        templates/ssdbcodi/
+
       chatbox/
         schemas.py
         service.py
@@ -296,6 +305,7 @@ Each module should expose these boundaries where applicable:
 | Selection | Selected/unselected point state | `/modules/selection/` |
 | Labeling | Manual point annotations, cluster labels, and outlier labels | `/modules/labeling/` |
 | Scatterplot | Visual point rendering and selection UI | `/modules/scatterplot/` |
+| SSDBCODI | Semi-supervised density-based clustering with integrated outlier detection (replaces the sequential LOF + KMeans provider) | `/modules/ssdbcodi/` |
 | Chatbox | Dialogue UI, suggestion chips, clarification flow | `/modules/chatbox/` |
 | Intent Instruction | Router + extractor with replaceable LLM provider; emits instruction deltas | `/modules/intent-instruction/` |
 | Metric-Learning Adapter | Constraint builder + replaceable metric learner (default ITML), returns learned `M` | `/modules/metric-learning-adapter/` |
@@ -435,3 +445,21 @@ and `/workflows/scatter-labeling/` verify those boundaries with selection and
 labeling connected. The Step 1-6 workflow preserves prior interaction behavior:
 click selection, rectangle selection, saved selection groups, adjustable
 `n_clusters`, and manual cluster/outlier labeling.
+
+`/modules/ssdbcodi/` is the dedicated module page for the SSDBCODI algorithm
+([arXiv:2208.05561](https://arxiv.org/abs/2208.05561)). It is a parallel
+clustering/outlier provider that replaces the existing sequential LOF + KMeans
+approach with a single semi-supervised density-based pass. Bootstrap behavior:
+the module computes density-safe KMeans center seeds (default `k = 3`,
+user-configurable) so obvious far outliers are not promoted to normal seeds.
+Those bootstrap seeds remain stable anchors, and manual labels override only
+the explicitly labeled points. The debug page uses the same selection behavior
+as Step 1-6: click and rectangle selection add to the active selection,
+selected points use black center dots, and saved selection groups are restored
+through the selection module. Label controls are limited to
+`cluster_1...cluster_n` plus `outlier`; label actions save pending feedback,
+while Run and Store recomputes and persists SSDBCODI. Per-point intermediate
+scores (`rScore`, `lScore`, `simScore`, `tScore`) are persisted in
+`SsdbcodiStore` for downstream metric-learning use. The page also includes
+`demo`, `moons`, and `circles` fixtures for browser testing different shapes.
+See `docs/modules/ssdbcodi/design.md` for the full contract.

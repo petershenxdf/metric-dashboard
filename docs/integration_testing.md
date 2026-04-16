@@ -134,6 +134,34 @@ workflow. For Step 6 browser checks, confirm:
 7. `/workflows/scatter-labeling/` lets selected points become cluster or outlier labels through labeling.
 8. `/workflows/scatter-labeling/api/state` includes raw analysis, effective analysis, selection groups, labeling state, and render payload.
 
+### SSDBCODI Module Check
+
+`/modules/ssdbcodi/` is a standalone future-provider test page. It should be
+checked separately from the legacy Step 1-6 flow until the provider swap is
+made.
+
+Expected behavior:
+
+1. `GET /modules/ssdbcodi/` returns a preview but does not append run history.
+2. `POST /modules/ssdbcodi/api/run` stores a run and exposes scores through
+   `/api/scores` and `/api/result`.
+3. Default bootstrap uses density-safe KMeans center seeds and should not
+   promote the demo fixture's far outliers as normal seeds. Bootstrap seeds
+   remain active after manual labels unless the same point is explicitly
+   relabeled or marked outlier.
+4. Click selection and rectangle selection add to the active selection through
+   the `selection` module without forcing a full page refresh or jumping back
+   to the top of the page.
+5. Selected points use the same black center-dot marker as the Step 1-6 pages.
+6. Saved selection groups can be created, restored, and deleted.
+7. Labeling controls are limited to `cluster_1...cluster_n` plus `outlier` and
+   send actions through the `labeling` module.
+8. Apply Label only saves pending feedback; Run and Store re-runs and stores
+   SSDBCODI, and `rScore`, `lScore`, `simScore`, and `tScore` remain visible
+   per point.
+9. The dataset dropdown can switch among `demo`, `moons`, and `circles`; each
+   dataset keeps separate selection, label, and result state.
+
 ## 4. Allowed Alternate Build Path
 
 The recommended order is safe, but it is not mandatory.

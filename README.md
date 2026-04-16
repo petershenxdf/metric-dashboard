@@ -160,7 +160,14 @@ The current working modules are:
 
 The default algorithm-adapter fixture is `default_analysis_outlier_debug`, not Iris. It intentionally contains three compact clusters plus three distant outlier candidates so Step 3 is visually inspectable.
 
-Future algorithms should be added behind the `algorithm_adapters` provider boundary. The current provider is `SequentialLofThenKMeansProvider`; a future SSDBCODI provider can replace it while returning the same dashboard-facing schemas.
+8. `ssdbcodi`
+   - implements the future semi-supervised clustering/outlier provider as an independent module at `/modules/ssdbcodi/`.
+   - uses density-safe KMeans center seeds as stable bootstrap anchors, then merges manual labels on top so one relabel does not drop unrelated anchors.
+   - includes selectable debug datasets (`demo`, `moons`, `circles`) to test separated, curved, and ring-shaped structures.
+   - persists `rScore`, `lScore`, `simScore`, and `tScore` for downstream metric-learning use.
+   - reuses the existing selection and labeling contracts: additive click/rectangle selection, black center dots for selected points, saved selection groups, and label controls limited to `cluster_1...cluster_n` plus `outlier`.
+   - keeps label entry and execution separate: Apply Label saves pending labeling feedback; Run and Store recomputes and persists SSDBCODI.
+   - returns dashboard-compatible `ClusterResult` and `OutlierResult` schemas so it can later replace `SequentialLofThenKMeansProvider` behind the provider boundary.
 
 ## Module Boundary Rules
 

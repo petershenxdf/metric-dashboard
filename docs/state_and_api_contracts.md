@@ -13,12 +13,11 @@ Use in-memory state during early development.
 Do not add a production database early.
 
 Suggested app state:
-
 ```python
 class AppState:
     dataset = None
     feature_matrix = None
-    transformed_feature_matrix = None  # X · L, set after a refinement run
+    transformed_feature_matrix = None  # X @ L, set after a refinement run
     projection = None
     cluster_result = None
     outlier_result = None
@@ -41,8 +40,9 @@ Each state area has one owner:
 | --- | --- |
 | dataset and feature matrix | `data_workspace` |
 | projection coordinates | `projection` |
-| cluster assignments | `algorithm_adapters` |
-| outlier scores | `algorithm_adapters` |
+| cluster assignments | `algorithm_adapters`; `ssdbcodi` when the future integrated provider is used |
+| outlier scores | `algorithm_adapters`; `ssdbcodi` when the future integrated provider is used |
+| SSDBCODI intermediate scores (`rScore`, `lScore`, `simScore`, `tScore`) | `ssdbcodi` |
 | selected point IDs | `selection` |
 | manual cluster/outlier annotations | `labeling` |
 | chat history | `chatbox` |
@@ -51,6 +51,14 @@ Each state area has one owner:
 | refinement run history and active metric pointer | `refinement_orchestrator` |
 
 Other modules may read state through contracts, but should not mutate state they do not own.
+
+SSDBCODI follows the same ownership split on its debug page: selection remains
+owned by `selection`, manual labels remain owned by `labeling`, and
+`ssdbcodi` owns only its computed result/history/scores. `POST
+/modules/ssdbcodi/api/label` records pending labeling feedback; `POST
+/modules/ssdbcodi/api/run` is the explicit boundary that recomputes and stores
+SSDBCODI output. These states are scoped by `dataset_id` for the module's
+debug fixtures.
 
 Structured feedback can originate from two modules:
 
@@ -128,6 +136,9 @@ Each module should expose at least one state or primary data API, such as:
 /modules/algorithm-adapters/api/outliers
 /modules/algorithm-adapters/api/clusters
 /modules/algorithm-adapters/api/analysis
+/modules/ssdbcodi/api/state
+/modules/ssdbcodi/api/scores
+/modules/ssdbcodi/api/result
 /modules/selection/api/state
 /modules/selection/api/context
 /modules/selection/api/groups
@@ -146,6 +157,11 @@ Interactive modules should expose action APIs:
 /modules/selection/api/groups
 /modules/selection/api/groups/<id>/select
 /modules/labeling/api/apply
+/modules/ssdbcodi/api/run
+/modules/ssdbcodi/api/select
+/modules/ssdbcodi/api/groups
+/modules/ssdbcodi/api/label
+/modules/ssdbcodi/api/clear-labels
 /workflows/analysis-labeling/api/select
 /workflows/analysis-labeling/api/label
 /workflows/analysis-labeling/api/clear-labels

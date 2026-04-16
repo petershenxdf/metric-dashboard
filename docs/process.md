@@ -272,7 +272,13 @@ Current implementation:
 3. deterministic KMeans runs on the remaining non-outlier points.
 4. `n_clusters` can be adjusted through the Flask page or query string.
 5. The current provider is `SequentialLofThenKMeansProvider`.
-6. A future SSDBCODI provider can replace the current provider while preserving dashboard-facing schemas.
+6. The `ssdbcodi` module now exists as a parallel future provider. It preserves
+   dashboard-facing `ClusterResult` / `OutlierResult` schemas while exposing
+   paper-aligned intermediate scores and selection/labeling integration for
+   local testing before it replaces `SequentialLofThenKMeansProvider`. Its
+   debug page keeps bootstrap anchors stable under manual labels, separates
+   pending label entry from Run and Store execution, and includes demo/moons/
+   circles fixtures for shape-specific testing.
 7. The debug fixture is `default_analysis_outlier_debug`, which intentionally contains visible outlier candidates.
 
 Unit tests:

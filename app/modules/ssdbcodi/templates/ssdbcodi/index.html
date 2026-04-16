@@ -1,0 +1,620 @@
+{% extends "base.html" %}
+
+{% block title %}SSDBCODI{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Module Debug Page</p>
+    <h1>SSDBCODI</h1>
+    <p>
+      Semi-Supervised Density-Based Clustering with Outlier Detection
+      Integrated. The page uses the same selection and labeling contracts as
+      the Step 1-6 workflows, then runs SSDBCODI from stable bootstrap anchors
+      plus pending user labels.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Algorithm Controls</h2>
+    <form id="ssdbcodi-controls" class="debug-form" method="get">
+      <label>
+        Dataset
+        <select name="dataset_id">
+          {% for option in dataset_options %}
+            <option value="{{ option.dataset_id }}" {% if option.dataset_id == dataset_id %}selected{% endif %}>
+              {{ option.display_name }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Bootstrap k
+        <input type="number" name="n_clusters" min="1" value="{{ params.n_clusters }}">
+      </label>
+      <label>
+        MinPts
+        <input type="number" name="min_pts" min="1" value="{{ params.min_pts }}">
+      </label>
+      <label>
+        alpha
+        <input type="number" name="alpha" min="0" max="1" step="0.05" value="{{ params.alpha }}">
+      </label>
+      <label>
+        beta
+        <input type="number" name="beta" min="0" max="1" step="0.05" value="{{ params.beta }}">
+      </label>
+      <label>
+        Contamination
+        <input type="number" name="contamination" min="0.01" max="0.49" step="0.01" value="{{ params.contamination }}">
+      </label>
+      <button class="button" type="submit">Preview SSDBCODI</button>
+      <button type="button" id="run-button" class="button">Run and Store</button>
+      <button type="button" data-label-action="clear-labels">Clear Labels</button>
+      <button type="button" data-label-action="reset-labels">Reset Labels</button>
+      <button type="button" data-ssdbcodi-action="reset">Reset All</button>
+    </form>
+
+    {% if error %}
+      <p class="error-text">{{ error }}</p>
+    {% endif %}
+
+    <dl class="details">
+      <dt>Dataset</dt>
+      <dd>{{ feature_matrix.point_ids | length }} points - <code>{{ dataset_id }}</code></dd>
+      <dt>Provider</dt>
+      <dd>ssdbcodi</dd>
+      <dt>Bootstrap mode</dt>
+      <dd>density-safe kmeans center seeds remain as baseline anchors; manual labels override only explicitly labeled points</dd>
+      <dt>Selection</dt>
+      <dd>
+        <span data-selection-count>{{ selection_state.selected_point_ids | length }}</span> selected,
+        <span data-unselected-count>{{ selection_state.unselected_point_ids | length }}</span> unselected
+      </dd>
+      <dt>Labels</dt>
+      <dd>{{ labeling_state.annotations | length }} annotations</dd>
+      <dt>Score persistence</dt>
+      <dd>rScore, lScore, simScore, tScore stored per point after Run and Store</dd>
+    </dl>
+
+    <div class="actions">
+      <a href="{{ url_for('ssdbcodi.state_api', dataset_id=dataset_id) }}">State API</a>
+      <a href="{{ url_for('ssdbcodi.scores_api', dataset_id=dataset_id) }}">Scores API</a>
+      <a href="{{ url_for('ssdbcodi.result_api', dataset_id=dataset_id) }}">Result API</a>
+      <button type="button" data-selection-action="clear-selection">Clear Selection</button>
+      <button type="button" data-selection-action="reset-selection">Reset Selection</button>
+    </div>
+    <p id="ssdbcodi-status" class="small"></p>
+  </section>
+
+  {% if result %}
+    <section class="panel">
+      <h2>Shared Visual Layer</h2>
+      <p class="small">
+        Click points to add them to the active selection, or drag a rectangle to
+        add every point inside the region. Pink points are SSDBCODI outliers,
+        colors are cluster labels, and black center dots mark selected points.
+        Apply one allowed label to the current selection: cluster_1, cluster_2,
+        cluster_3, ... or outlier. Pending labels recolor selected points right
+        away; Run and Store recomputes propagated SSDBCODI labels.
+      </p>
+      <svg
+        class="debug-plot workflow-selection-plot"
+        viewBox="0 0 860 520"
+        role="img"
+        aria-label="SSDBCODI clustering, outlier, selection, and labeling plot"
+        data-selection-plot
+      >
+        <line x1="56" y1="260" x2="804" y2="260" stroke="#dadce0"></line>
+        <line x1="430" y1="56" x2="430" y2="464" stroke="#dadce0"></line>
+        {% for point in plot_points %}
+          <g
+            class="workflow-point"
+            data-point-id="{{ point.point_id }}"
+            data-screen-x="{{ '%.2f'|format(point.screen_x) }}"
+            data-screen-y="{{ '%.2f'|format(point.screen_y) }}"
+            data-selected="{{ 'true' if point.is_selected else 'false' }}"
+            tabindex="0"
+          >
+            <circle
+              data-point-circle
+              cx="{{ '%.2f'|format(point.screen_x) }}"
+              cy="{{ '%.2f'|format(point.screen_y) }}"
+              r="{{ 10 if point.is_outlier else 7 }}"
+              data-base-r="{{ 10 if point.is_outlier else 7 }}"
+              fill="{{ '#d6336c' if point.is_outlier else point.color }}"
+              data-base-fill="{{ '#d6336c' if point.is_outlier else point.color }}"
+              stroke="{{ '#111827' if point.is_selected else '#202124' }}"
+              stroke-width="{{ 1.8 if point.is_selected else (1.8 if point.is_outlier else 1.1) }}"
+              data-base-stroke-width="{{ 1.8 if point.is_outlier else 1.1 }}"
+            >
+              <title>
+                {{ point.point_id }}
+                {{ "outlier" if point.is_outlier else point.cluster_id }}
+                r={{ "%.3f"|format(point.scores.r_score) }}
+                l={{ "%.3f"|format(point.scores.l_score) }}
+                sim={{ "%.3f"|format(point.scores.sim_score) }}
+                t={{ "%.3f"|format(point.scores.t_score) }}
+              </title>
+            </circle>
+            <circle
+              data-selected-marker
+              cx="{{ '%.2f'|format(point.screen_x) }}"
+              cy="{{ '%.2f'|format(point.screen_y) }}"
+              r="2.2"
+              fill="#111827"
+              pointer-events="none"
+              visibility="{{ 'visible' if point.is_selected else 'hidden' }}"
+            ></circle>
+            <text
+              x="{{ '%.2f'|format(point.screen_x + 10) }}"
+              y="{{ '%.2f'|format(point.screen_y - 8) }}"
+            >{{ point.point_id }}</text>
+          </g>
+        {% endfor %}
+        <rect
+          class="selection-drag-box"
+          x="0"
+          y="0"
+          width="0"
+          height="0"
+          visibility="hidden"
+          data-selection-rect
+        ></rect>
+      </svg>
+    </section>
+
+    <section class="split">
+      <article>
+        <h2>Label Selected Points</h2>
+        <p class="small">
+          Labeling uses the current selection owned by the selection module.
+          Label actions are persisted through the labeling module only; click
+          Run and Store when you want SSDBCODI to recompute and persist scores.
+        </p>
+        <form class="debug-form" data-label-form>
+          <label>
+            Label
+            <select name="label_value">
+              {% for label in allowed_labels %}
+                <option value="{{ label }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button class="button" type="submit">Apply Label to Selection</button>
+        </form>
+      </article>
+      <article>
+        <h2>Current Selection</h2>
+        <pre data-current-selection>{{ selection_state.selected_point_ids | list | tojson(indent=2) }}</pre>
+      </article>
+    </section>
+
+    <section class="split">
+      <article>
+        <h2>Cluster Counts</h2>
+        <div class="chip-row">
+          {% for cluster_id, count in cluster_counts.items() %}
+            <span>{{ cluster_id }}: {{ count }}</span>
+          {% endfor %}
+        </div>
+      </article>
+      <article>
+        <h2>Diagnostics</h2>
+        <dl>
+          <dt>Bootstrap used</dt>
+          <dd>{{ "yes" if result.parameters["bootstrap_used"] else "no" }}</dd>
+          <dt>Manual seeds</dt>
+          <dd>{{ result.diagnostics["manual_seed_count"] }}</dd>
+          <dt>Bootstrap seeds</dt>
+          <dd>{{ result.diagnostics["bootstrap_seed_count"] }}</dd>
+          <dt>Labeled outliers</dt>
+          <dd>{{ result.diagnostics["labeled_outlier_count"] }}</dd>
+          <dt>Outliers detected</dt>
+          <dd>{{ result.outlier_result.outlier_point_ids | length }}</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="panel">
+      <h2>Saved Selection Groups</h2>
+      <form class="debug-form" data-group-form>
+        <label>
+          Group name
+          <input name="group_name" placeholder="interesting SSDBCODI subset">
+        </label>
+        <button class="button" type="submit">Save Current Selection</button>
+      </form>
+      {% if selection_groups %}
+        <div class="selection-group-list">
+          {% for group in selection_groups %}
+            <article class="selection-group-card">
+              <div>
+                <h3>{{ group.group_name }}</h3>
+                <p class="small">{{ group.point_ids | length }} points</p>
+                <code>{{ group.point_ids | join(", ") }}</code>
+              </div>
+              <div class="actions">
+                <button type="button" data-group-action="select" data-group-id="{{ group.group_id }}">
+                  Select {{ group.group_name }}
+                </button>
+                <button type="button" data-group-action="delete" data-group-id="{{ group.group_id }}">
+                  Delete
+                </button>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="small">No saved groups yet. Select points on the plot, then save the current selection.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <h2>Per-Point Scores</h2>
+      <p class="small">SSDBCODI persists rScore, lScore, simScore, and tScore for downstream metric-learning steps.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Point ID</th>
+              <th>Cluster</th>
+              <th>Outlier?</th>
+              <th>Selected?</th>
+              <th>Manual Labels</th>
+              <th>rScore</th>
+              <th>lScore</th>
+              <th>simScore</th>
+              <th>tScore</th>
+              <th>cDist</th>
+              <th>eMax</th>
+              <th>Seed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for point in plot_points %}
+              <tr>
+                <td>{{ point.point_id }}</td>
+                <td>{{ point.cluster_id }}</td>
+                <td>{{ "yes" if point.is_outlier else "no" }}</td>
+                <td data-selected-cell="{{ point.point_id }}">{{ "yes" if point.is_selected else "no" }}</td>
+                <td>
+                  {% if point.manual_labels %}
+                    {% for label in point.manual_labels %}
+                      <code>{{ label.display_label }}</code>
+                    {% endfor %}
+                  {% else %}
+                    none
+                  {% endif %}
+                </td>
+                <td>{{ "%.4f"|format(point.scores.r_score) }}</td>
+                <td>{{ "%.4f"|format(point.scores.l_score) }}</td>
+                <td>{{ "%.4f"|format(point.scores.sim_score) }}</td>
+                <td>{{ "%.4f"|format(point.scores.t_score) }}</td>
+                <td>{{ "%.4f"|format(point.scores.c_dist) }}</td>
+                <td>{{ "%.4f"|format(point.scores.e_max) }}</td>
+                <td>{{ point.scores.seed_origin_point_id or "-" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="split">
+      <article>
+        <h2>Structured Feedback</h2>
+        <pre>{{ labeling_state.to_dict().structured_feedback | tojson(indent=2) }}</pre>
+      </article>
+      <article>
+        <h2>Selection Context</h2>
+        <pre>{{ context.to_dict() | tojson(indent=2) }}</pre>
+      </article>
+    </section>
+
+    <section class="panel">
+      <h2>Seeds</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Point ID</th><th>Cluster</th><th>Source</th></tr></thead>
+          <tbody>
+            {% for seed in result.seeds %}
+              <tr><td>{{ seed.point_id }}</td><td>{{ seed.cluster_id }}</td><td>{{ seed.source }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Result Payload</h2>
+      <pre>{{ result.to_dict() | tojson(indent=2) }}</pre>
+    </section>
+  {% endif %}
+
+  <script>
+    const basePath = "/modules/ssdbcodi";
+    const controlsForm = document.getElementById("ssdbcodi-controls");
+    const statusEl = document.getElementById("ssdbcodi-status");
+    const labelColorLookup = {{ label_color_lookup | tojson }};
+    const knownPointIds = {{ feature_matrix.point_ids | list | tojson }};
+    let selectedPointIds = new Set({{ selection_state.selected_point_ids | list | tojson }});
+
+    const controlsToParams = () => {
+      const data = new FormData(controlsForm);
+      return {
+        dataset_id: data.get("dataset_id"),
+        n_clusters: data.get("n_clusters"),
+        min_pts: data.get("min_pts"),
+        alpha: data.get("alpha"),
+        beta: data.get("beta"),
+        contamination: data.get("contamination")
+      };
+    };
+
+    const reloadWithControls = () => {
+      const query = new URLSearchParams(controlsToParams()).toString();
+      window.location.href = `${basePath}/?${query}`;
+    };
+
+    const postJson = async (url, body = {}, method = "POST") => {
+      return fetch(url, {
+        method,
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({...controlsToParams(), ...body})
+      });
+    };
+
+    const reloadOrAlert = async (response) => {
+      if (!response.ok) {
+        const payload = await response.json();
+        statusEl.textContent = payload.error ? payload.error.message : "SSDBCODI action failed";
+        return;
+      }
+      reloadWithControls();
+    };
+
+    const statusOrAlert = async (response, successMessage) => {
+      const payload = await response.json();
+      if (!response.ok) {
+        statusEl.textContent = payload.error ? payload.error.message : "SSDBCODI action failed";
+        return null;
+      }
+      statusEl.textContent = successMessage;
+      return payload;
+    };
+
+    const selectedPointIdsFromPayload = (payload) => {
+      const data = payload.data || {};
+      if (data.state?.selected_point_ids) {
+        return data.state.selected_point_ids;
+      }
+      if (data.selection?.state?.selected_point_ids) {
+        return data.selection.state.selected_point_ids;
+      }
+      if (data.selection?.selected_point_ids) {
+        return data.selection.selected_point_ids;
+      }
+      return null;
+    };
+
+    const setPointSelected = (pointId, isSelected) => {
+      const point = document.querySelector(`[data-point-id="${CSS.escape(pointId)}"]`);
+      if (!point) {
+        return;
+      }
+
+      point.dataset.selected = isSelected ? "true" : "false";
+      const circle = point.querySelector("[data-point-circle]");
+      const marker = point.querySelector("[data-selected-marker]");
+      if (marker) {
+        marker.setAttribute("visibility", isSelected ? "visible" : "hidden");
+      }
+      if (circle) {
+        circle.setAttribute("stroke", isSelected ? "#111827" : "#202124");
+        circle.setAttribute("stroke-width", isSelected ? "1.8" : circle.dataset.baseStrokeWidth);
+      }
+
+      const selectedCell = document.querySelector(`[data-selected-cell="${CSS.escape(pointId)}"]`);
+      if (selectedCell) {
+        selectedCell.textContent = isSelected ? "yes" : "no";
+      }
+    };
+
+    const updateSelectionUi = (pointIds) => {
+      selectedPointIds = new Set(pointIds);
+      knownPointIds.forEach((pointId) => setPointSelected(pointId, selectedPointIds.has(pointId)));
+
+      const selectionCount = document.querySelector("[data-selection-count]");
+      const unselectedCount = document.querySelector("[data-unselected-count]");
+      const currentSelection = document.querySelector("[data-current-selection]");
+      if (selectionCount) {
+        selectionCount.textContent = selectedPointIds.size;
+      }
+      if (unselectedCount) {
+        unselectedCount.textContent = knownPointIds.length - selectedPointIds.size;
+      }
+      if (currentSelection) {
+        currentSelection.textContent = JSON.stringify(Array.from(selectedPointIds), null, 2);
+      }
+    };
+
+    const applyPendingLabelPreview = (labelValue) => {
+      const fill = labelColorLookup[labelValue] || "#111827";
+      selectedPointIds.forEach((pointId) => {
+        const point = document.querySelector(`[data-point-id="${CSS.escape(pointId)}"]`);
+        const circle = point?.querySelector("[data-point-circle]");
+        if (!circle) {
+          return;
+        }
+        circle.setAttribute("fill", fill);
+        if (labelValue === "outlier") {
+          circle.setAttribute("r", "10");
+        }
+      });
+    };
+
+    const updateSelectionFromResponse = async (response, successMessage) => {
+      const payload = await statusOrAlert(response, successMessage);
+      if (!payload) {
+        return;
+      }
+      const pointIds = selectedPointIdsFromPayload(payload);
+      if (pointIds) {
+        updateSelectionUi(pointIds);
+      }
+    };
+
+    document.getElementById("run-button").addEventListener("click", async () => {
+      statusEl.textContent = "running SSDBCODI...";
+      const response = await postJson(`${basePath}/api/run`);
+      reloadOrAlert(response);
+    });
+
+    document.querySelectorAll("[data-selection-action]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const response = await postJson(`${basePath}/api/${button.dataset.selectionAction}`);
+        updateSelectionFromResponse(response, "selection updated");
+      });
+    });
+
+    document.querySelectorAll("[data-label-action]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const response = await postJson(`${basePath}/api/${button.dataset.labelAction}`);
+        reloadOrAlert(response);
+      });
+    });
+
+    document.querySelectorAll("[data-ssdbcodi-action]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const response = await postJson(`${basePath}/api/${button.dataset.ssdbcodiAction}`);
+        reloadOrAlert(response);
+      });
+    });
+
+    document.querySelector("[data-label-form]")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      const labelValue = form.get("label_value");
+      const response = await postJson(
+        `${basePath}/api/label`,
+        {
+          action: labelValue === "outlier" ? "mark_outlier" : "assign_cluster",
+          label_value: labelValue
+        }
+      );
+      const payload = await statusOrAlert(response, "label saved and previewed; click Run and Store to propagate through SSDBCODI");
+      if (payload) {
+        applyPendingLabelPreview(labelValue);
+      }
+    });
+
+    document.querySelector("[data-group-form]")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      const response = await postJson(`${basePath}/api/groups`, {group_name: form.get("group_name")});
+      reloadOrAlert(response);
+    });
+
+    document.querySelectorAll("[data-group-action]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const action = button.dataset.groupAction;
+        const groupId = button.dataset.groupId;
+        const url = `${basePath}/api/groups/${groupId}${action === "select" ? "/select" : ""}`;
+        const response = action === "delete"
+          ? await postJson(url, {}, "DELETE")
+          : await postJson(url);
+        reloadOrAlert(response);
+      });
+    });
+
+    const applyPointIds = async (pointIds, source) => {
+      if (!pointIds.length) {
+        return;
+      }
+      const response = await postJson(
+        `${basePath}/api/select`,
+        {point_ids: pointIds, source, mode: "additive"}
+      );
+      updateSelectionFromResponse(response, "selection updated");
+    };
+
+    const plot = document.querySelector("[data-selection-plot]");
+    const dragBox = document.querySelector("[data-selection-rect]");
+    let dragStart = null;
+    let didDrag = false;
+    let pressedPointId = null;
+
+    const plotPointFromEvent = (event) => {
+      const rect = plot.getBoundingClientRect();
+      return {
+        x: ((event.clientX - rect.left) / rect.width) * 860,
+        y: ((event.clientY - rect.top) / rect.height) * 520
+      };
+    };
+
+    const updateDragBox = (start, end) => {
+      const x = Math.min(start.x, end.x);
+      const y = Math.min(start.y, end.y);
+      const width = Math.abs(end.x - start.x);
+      const height = Math.abs(end.y - start.y);
+      dragBox.setAttribute("x", x);
+      dragBox.setAttribute("y", y);
+      dragBox.setAttribute("width", width);
+      dragBox.setAttribute("height", height);
+      dragBox.setAttribute("visibility", "visible");
+      return {x, y, width, height};
+    };
+
+    const pointIdsInBox = (box) => {
+      return Array.from(document.querySelectorAll("[data-point-id]"))
+        .filter((point) => {
+          const x = Number(point.dataset.screenX);
+          const y = Number(point.dataset.screenY);
+          return x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
+        })
+        .map((point) => point.dataset.pointId);
+    };
+
+    if (plot) {
+      plot.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        plot.setPointerCapture(event.pointerId);
+        dragStart = plotPointFromEvent(event);
+        didDrag = false;
+        pressedPointId = event.target.closest("[data-point-id]")?.dataset.pointId || null;
+        updateDragBox(dragStart, dragStart);
+      });
+
+      plot.addEventListener("pointermove", (event) => {
+        if (!dragStart) {
+          return;
+        }
+        const current = plotPointFromEvent(event);
+        const box = updateDragBox(dragStart, current);
+        didDrag = box.width > 3 || box.height > 3;
+      });
+
+      plot.addEventListener("pointerup", async (event) => {
+        if (!dragStart) {
+          return;
+        }
+        const current = plotPointFromEvent(event);
+        const box = updateDragBox(dragStart, current);
+        dragStart = null;
+        dragBox.setAttribute("visibility", "hidden");
+
+        if (!didDrag) {
+          if (pressedPointId) {
+            applyPointIds([pressedPointId], "point_click");
+          }
+          pressedPointId = null;
+          return;
+        }
+
+        const selectedPointIds = pointIdsInBox(box);
+        pressedPointId = null;
+        applyPointIds(selectedPointIds, "rectangle");
+      });
+    }
+  </script>
+{% endblock %}

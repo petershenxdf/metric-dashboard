@@ -9,6 +9,7 @@ from .modules.labeling import create_blueprint as create_labeling_blueprint
 from .modules.projection import create_blueprint as create_projection_blueprint
 from .modules.scatterplot import create_blueprint as create_scatterplot_blueprint
 from .modules.selection import create_blueprint as create_selection_blueprint
+from .modules.ssdbcodi import create_blueprint as create_ssdbcodi_blueprint
 from .workflows.analysis_selection import create_blueprint as create_analysis_selection_blueprint
 from .workflows.analysis_labeling import create_blueprint as create_analysis_labeling_blueprint
 from .workflows.default_analysis import create_blueprint as create_default_analysis_blueprint
@@ -93,6 +94,14 @@ MODULES: Tuple[ModuleInfo, ...] = (
         purpose="Point rendering, clusters, outliers, and visual selection.",
         status="working",
         blueprint_factory=create_scatterplot_blueprint,
+    ),
+    ModuleInfo(
+        slug="ssdbcodi",
+        package_name="ssdbcodi",
+        title="SSDBCODI",
+        purpose="Semi-supervised density-based clustering with integrated outlier detection.",
+        status="working",
+        blueprint_factory=create_ssdbcodi_blueprint,
     ),
     ModuleInfo(
         slug="chatbox",

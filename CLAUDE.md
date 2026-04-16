@@ -22,14 +22,14 @@ python -m compileall app tests
 
 ## Architecture
 
-This is a local Flask dashboard for human-in-the-loop metric learning. The stack is pure Python + Flask + vanilla JS — no frontend framework, no production database.
+This is a local Flask dashboard for human-in-the-loop metric learning. The stack is pure Python + Flask + vanilla JS - no frontend framework, no production database.
 
 ### App Factory
 
 `app/__init__.py` exports `create_app(enabled_modules=None)`, which calls:
-1. `register_core_routes(app)` — `/`, `/health`, `/modules/`, `/workflows/`
-2. `register_modules(app, enabled_modules)` — loads blueprints from the module registry
-3. `register_workflows(app, enabled_modules)` — registers workflow blueprints from `app/workflows/`
+1. `register_core_routes(app)` - `/`, `/health`, `/modules/`, `/workflows/`
+2. `register_modules(app, enabled_modules)` - loads blueprints from the module registry
+3. `register_workflows(app, enabled_modules)` - registers workflow blueprints from `app/workflows/`
 
 ### Module Registry
 
@@ -67,14 +67,15 @@ Errors use `"ok": false` with `"error": { "code": "...", "message": "..." }`.
 
 ### State Ownership
 
-State is owned by exactly one module — other modules read through contracts, never mutate:
+State is owned by exactly one module - other modules read through contracts, never mutate:
 
 | State | Owner |
 |-------|-------|
 | dataset / feature matrix | `data_workspace` |
 | projection coordinates | `projection` |
-| cluster assignments | `algorithm_adapters` |
-| outlier scores | `algorithm_adapters` |
+| cluster assignments | `algorithm_adapters` (legacy LOF+KMeans) and `ssdbcodi` (new integrated provider) |
+| outlier scores | `algorithm_adapters` (LOF score) and `ssdbcodi` (`tScore`) |
+| ssdbcodi per-point intermediate scores (`rScore`, `lScore`, `simScore`, `tScore`) | `ssdbcodi` |
 | selected point IDs | `selection` |
 | manual annotations | `labeling` |
 | chat history | `chatbox` |
@@ -82,29 +83,42 @@ State is owned by exactly one module — other modules read through contracts, n
 | metric constraints | `metric_learning_adapter` |
 | refinement history | `refinement_orchestrator` |
 
-### Current Pipeline (Steps 1–6, all implemented)
+### Current Pipeline (Steps 1-6, all implemented)
 
 ```
-data_workspace → projection → algorithm_adapters → selection → labeling → scatterplot
+data_workspace -> projection -> algorithm_adapters -> selection -> labeling -> scatterplot
 ```
 
 - `algorithm_adapters`: LOF outlier detection runs first, then deterministic KMeans on non-outlier points via `SequentialLofThenKMeansProvider`. Future providers replace this while preserving the same dashboard-facing schemas.
 - `selection`: supports `select`/`deselect`/`replace`/`toggle`/`clear`, named selection groups (not semantic labels), sources include `point_click`, `rectangle`, `lasso`, `api`, `workflow_fixture`, `selection_group`.
-- `labeling`: converts selected points into `assign_cluster`, `assign_new_class`, `mark_outlier`, `mark_not_outlier` annotations → structured feedback instructions.
+- `labeling`: converts selected points into `assign_cluster`, `assign_new_class`, `mark_outlier`, `mark_not_outlier` annotations -> structured feedback instructions.
 - `scatterplot`: builds a render payload from upstream state; does not own selection or label truth.
 
-The main manual test page for the full Step 1–6 path is `/workflows/scatter-labeling/`.
+The main manual test page for the full Step 1-6 path is `/workflows/scatter-labeling/`.
+
+### SSDBCODI Module (parallel clustering/outlier provider)
+
+`app/modules/ssdbcodi/` implements *Semi-Supervised Density-Based Clustering with Outlier Detection Integrated* ([arXiv:2208.05561](https://arxiv.org/abs/2208.05561)) as a separate, registered module. It is the algorithm the project plans to adopt in place of the existing `SequentialLofThenKMeansProvider`.
+
+- Bootstrap: density-safe KMeans (default `k=3`, user-configurable) seeds SSDBCODI by promoting each dense cluster's centroid-nearest point to a labeled normal seed. These bootstrap anchors remain active as a stable baseline; manual labels override only the explicitly labeled point.
+- Algorithm formulas follow the paper contract: symmetric `rDist = max(cDist(p), cDist(q), dist(p,q))`, `lScore` from nearest-neighbor `rDist`, `simScore` from nearest labeled outlier distance, and `tScore = alpha(1-rScore) + beta(1-lScore) + gamma*simScore`.
+- The debug page uses the existing `selection` and `labeling` module stores: click and rectangle selection are additive, selected points use black center dots, saved selection groups work, and labels are limited to `cluster_1...cluster_n` plus `outlier`.
+- The debug page includes multiple deterministic fixtures (`demo`, `moons`, `circles`) selected by `dataset_id`; selection, labels, and SSDBCODI store state are scoped per dataset.
+- GET `/modules/ssdbcodi/` previews the current result without writing run history. `POST /modules/ssdbcodi/api/label` saves pending feedback only; `POST /modules/ssdbcodi/api/run` recomputes and stores results in `SsdbcodiStore`.
+- Per-point scores `rScore`, `lScore`, `simScore`, `tScore` are persisted in `SsdbcodiStore` for downstream metric-learning consumption.
+- Output schemas (`ClusterResult`, `OutlierResult`) are reused from `algorithm_adapters`, so downstream modules (scatterplot, metric_learning_adapter) can consume SSDBCODI results without changes.
+- The debug page is at `/modules/ssdbcodi/`. See `docs/modules/ssdbcodi/design.md` for the full contract.
 
 ### Workflows
 
-Workflow files live in `app/workflows/`. A workflow page connects multiple modules on one visual debug page. It does not own module internals — it orchestrates through module schemas and service calls.
+Workflow files live in `app/workflows/`. A workflow page connects multiple modules on one visual debug page. It does not own module internals - it orchestrates through module schemas and service calls.
 
 Key workflows:
-- `/workflows/data-projection/` — Steps 1–2
-- `/workflows/default-analysis/` — Steps 1–3 (uses `default_analysis_outlier_debug` fixture with visible outliers)
-- `/workflows/analysis-selection/` — Steps 1–4 with click + rectangle selection
-- `/workflows/analysis-labeling/` — Steps 1–5 (main test page pre-scatterplot)
-- `/workflows/scatter-labeling/` — Steps 1–6 (current main manual test page)
+- `/workflows/data-projection/` - Steps 1-2
+- `/workflows/default-analysis/` - Steps 1-3 (uses `default_analysis_outlier_debug` fixture with visible outliers)
+- `/workflows/analysis-selection/` - Steps 1-4 with click + rectangle selection
+- `/workflows/analysis-labeling/` - Steps 1-5 (main test page pre-scatterplot)
+- `/workflows/scatter-labeling/` - Steps 1-6 (current main manual test page)
 
 ### Module Boundaries (never cross these)
 
@@ -113,7 +127,7 @@ Key workflows:
 3. Selection state is owned by the selection module only.
 4. Labeling owns manual annotations; scatterplot sends label actions *to* labeling.
 5. Existing clustering/outlier algorithms are only accessed through `algorithm_adapters`.
-6. Modules do not import unrelated module internals — use schemas, services, APIs, or workflow pages.
+6. Modules do not import unrelated module internals - use schemas, services, APIs, or workflow pages.
 
 ### Definition of Done for a Module
 
@@ -137,3 +151,5 @@ docs/integration_testing.md
 docs/state_and_api_contracts.md
 docs/modules/<module_name>/design.md
 ```
+
+这个项目的核心设计思想是模块化设计：每个模块相对独立，有自己的测试、可视化单元，又可以和其他模块整合，开发时不至于互相影响。
