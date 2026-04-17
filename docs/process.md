@@ -534,6 +534,49 @@ labeling.
 
 ---
 
+### Step 6.5: SSDBCODI (Parallel Clustering / Outlier Provider)
+
+Build:
+
+```text
+ssdbcodi
+ssdbcodi Flask page
+selection + labeling integration
+per-point score persistence
+```
+
+Why:
+
+The project plans to replace `SequentialLofThenKMeansProvider` with SSDBCODI.
+Building it as a parallel registered module lets the team test interactively
+before the swap, while keeping all existing Step 1-6 workflows untouched.
+
+Current implementation:
+
+1. Implements the paper algorithm: `rDist`, `lScore`, `simScore`, `tScore`.
+2. Bootstrap: density-safe KMeans seeds, centroid-nearest points promoted to
+   normal anchors. Bootstrap anchors remain stable under manual labels.
+3. Debug page at `/modules/ssdbcodi/` with `demo`, `moons`, `circles` fixtures.
+4. Uses existing `selection` and `labeling` stores scoped per dataset.
+5. Pending labels are separate from Run & Store: `POST /api/label` saves
+   feedback; `POST /api/run` recomputes and persists results.
+6. Per-point scores persisted in `SsdbcodiStore` for downstream metric-learning
+   consumption.
+7. Output schemas reuse `ClusterResult` / `OutlierResult` from shared schemas.
+8. The `SsdbcodiProvider` implements the `AnalysisProvider` protocol so it can
+   replace `SequentialLofThenKMeansProvider` by changing one config value.
+
+Provider swap plan:
+
+- `algorithm_adapters` already defines the `AnalysisProvider` protocol.
+- When SSDBCODI is promoted, the app factory instantiates `SsdbcodiProvider`
+  instead of `SequentialLofThenKMeansProvider` and passes it to the adapter
+  service.
+- All downstream code (scatterplot, workflows, metric-learning) continues to
+  work because the output schemas are unchanged.
+
+---
+
 ### Step 7: Chatbox
 
 Build:
@@ -662,7 +705,7 @@ constraint preview Flask page
 
 Why:
 
-Structured instructions from labeling or chat should be converted into a single `ConstraintSet` and then into a learned Mahalanobis matrix through one narrow boundary. The learned matrix is applied as a linear pre-transform to the feature matrix so projection and algorithm adapters can be reused unchanged.
+Structured instructions from labeling or chat should be converted into a single `ConstraintSet` and then into a learned Mahalanobis matrix through one narrow boundary. The learned matrix is applied as a linear pre-transform to the feature matrix so projection and algorithm adapters can be reused unchanged. When SSDBCODI is the active provider, its per-point `tScore` values are available as auxiliary signal for constraint weighting.
 
 Tasks:
 
@@ -854,6 +897,16 @@ Scatterplot renders projected points, default clusters, outliers, selection stat
 Current status:
 
 Scatterplot has a working module page, render-payload API, scatter-selection workflow, and scatter-labeling workflow. It renders state owned by previous modules and sends selection/label actions back through their module boundaries. Step 6 must preserve prior workflow capabilities when integrated: rectangle selection, saved selection groups, and adjustable cluster count are part of the acceptance check.
+
+### Milestone 4.5: SSDBCODI Parallel Provider
+
+Goal:
+
+SSDBCODI module works as a standalone debug page, uses the same selection/labeling stores as Step 4-5, persists per-point scores, and implements the `AnalysisProvider` protocol for future provider swap.
+
+Current status:
+
+Working. Debug page at `/modules/ssdbcodi/` with three fixtures, selection and labeling integration, Run/Store separation, and per-point score persistence.
 
 ### Milestone 5: Chat and Intent
 

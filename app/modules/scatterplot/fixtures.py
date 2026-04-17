@@ -7,7 +7,7 @@ from app.modules.labeling.state import get_debug_store_for_context
 from app.modules.projection.service import project_feature_matrix
 from app.modules.selection.service import get_selection_context, get_selection_state, list_selection_groups
 from app.modules.selection.state import get_debug_store_for_dataset
-from app.workflows.fixtures import (
+from app.shared.fixtures import (
     DEFAULT_WORKFLOW_DATASET_ID,
     analysis_selection_dataset,
     analysis_selection_initial_selected_point_ids,

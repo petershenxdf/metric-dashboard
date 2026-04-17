@@ -1,29 +1,29 @@
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional, Tuple, TYPE_CHECKING
-
-from .modules.algorithm_adapters import create_blueprint as create_algorithm_adapters_blueprint
-from .modules.data_workspace import create_blueprint as create_data_workspace_blueprint
-from .modules.labeling import create_blueprint as create_labeling_blueprint
-from .modules.projection import create_blueprint as create_projection_blueprint
-from .modules.scatterplot import create_blueprint as create_scatterplot_blueprint
-from .modules.selection import create_blueprint as create_selection_blueprint
-from .modules.ssdbcodi import create_blueprint as create_ssdbcodi_blueprint
-from .workflows.analysis_selection import create_blueprint as create_analysis_selection_blueprint
-from .workflows.analysis_labeling import create_blueprint as create_analysis_labeling_blueprint
-from .workflows.default_analysis import create_blueprint as create_default_analysis_blueprint
-from .workflows.data_projection import create_blueprint as create_data_projection_blueprint
-from .workflows.scatter_selection import create_blueprint as create_scatter_selection_blueprint
-from .workflows.scatter_labeling import create_blueprint as create_scatter_labeling_blueprint
-from .workflows.selection_context import create_blueprint as create_selection_context_blueprint
-from .workflows.selection_labeling import create_blueprint as create_selection_labeling_blueprint
 
 if TYPE_CHECKING:
     from flask import Blueprint, Flask
 
 
 BlueprintFactory = Callable[[], "Blueprint"]
+
+
+def _lazy_blueprint(import_path: str) -> BlueprintFactory:
+    """Return a callable that imports and calls ``create_blueprint`` on first use.
+
+    *import_path* is a dotted module path such as
+    ``"app.modules.data_workspace"`` or ``"app.workflows.scatter_labeling"``.
+    The target module must export ``create_blueprint()``.
+    """
+
+    def factory() -> "Blueprint":
+        module = importlib.import_module(import_path)
+        return module.create_blueprint()
+
+    return factory
 
 
 @dataclass(frozen=True)
@@ -53,7 +53,7 @@ MODULES: Tuple[ModuleInfo, ...] = (
         title="Data Workspace",
         purpose="Dataset loading, point IDs, metadata, and feature matrix.",
         status="working",
-        blueprint_factory=create_data_workspace_blueprint,
+        blueprint_factory=_lazy_blueprint("app.modules.data_workspace"),
     ),
     ModuleInfo(
         slug="projection",
@@ -61,7 +61,7 @@ MODULES: Tuple[ModuleInfo, ...] = (
         title="Projection",
         purpose="MDS projection into 2D coordinates.",
         status="working",
-        blueprint_factory=create_projection_blueprint,
+        blueprint_factory=_lazy_blueprint("app.modules.projection"),
     ),
     ModuleInfo(
         slug="algorithm-adapters",
@@ -69,7 +69,7 @@ MODULES: Tuple[ModuleInfo, ...] = (
         title="Algorithm Adapters",
         purpose="Wrappers for existing clustering and outlier algorithms.",
         status="working",
-        blueprint_factory=create_algorithm_adapters_blueprint,
+        blueprint_factory=_lazy_blueprint("app.modules.algorithm_adapters"),
     ),
     ModuleInfo(
         slug="selection",
@@ -77,7 +77,7 @@ MODULES: Tuple[ModuleInfo, ...] = (
         title="Selection",
         purpose="Selected and unselected point state.",
         status="working",
-        blueprint_factory=create_selection_blueprint,
+        blueprint_factory=_lazy_blueprint("app.modules.selection"),
     ),
     ModuleInfo(
         slug="labeling",
@@ -85,7 +85,7 @@ MODULES: Tuple[ModuleInfo, ...] = (
         title="Labeling",
         purpose="Manual point annotations, cluster labels, and outlier labels.",
         status="working",
-        blueprint_factory=create_labeling_blueprint,
+        blueprint_factory=_lazy_blueprint("app.modules.labeling"),
     ),
     ModuleInfo(
         slug="scatterplot",
@@ -93,7 +93,7 @@ MODULES: Tuple[ModuleInfo, ...] = (
         title="Scatterplot",
         purpose="Point rendering, clusters, outliers, and visual selection.",
         status="working",
-        blueprint_factory=create_scatterplot_blueprint,
+        blueprint_factory=_lazy_blueprint("app.modules.scatterplot"),
     ),
     ModuleInfo(
         slug="ssdbcodi",
@@ -101,7 +101,7 @@ MODULES: Tuple[ModuleInfo, ...] = (
         title="SSDBCODI",
         purpose="Semi-supervised density-based clustering with integrated outlier detection.",
         status="working",
-        blueprint_factory=create_ssdbcodi_blueprint,
+        blueprint_factory=_lazy_blueprint("app.modules.ssdbcodi"),
     ),
     ModuleInfo(
         slug="chatbox",
@@ -136,7 +136,7 @@ WORKFLOWS: Tuple[WorkflowInfo, ...] = (
         purpose="Inspect dataset output beside MDS projection output.",
         modules=("data-workspace", "projection"),
         status="working",
-        blueprint_factory=create_data_projection_blueprint,
+        blueprint_factory=_lazy_blueprint("app.workflows.data_projection"),
     ),
     WorkflowInfo(
         slug="default-analysis",
@@ -144,7 +144,7 @@ WORKFLOWS: Tuple[WorkflowInfo, ...] = (
         purpose="Inspect projection with default clusters and outliers.",
         modules=("data-workspace", "projection", "algorithm-adapters"),
         status="working",
-        blueprint_factory=create_default_analysis_blueprint,
+        blueprint_factory=_lazy_blueprint("app.workflows.default_analysis"),
     ),
     WorkflowInfo(
         slug="selection-context",
@@ -152,7 +152,7 @@ WORKFLOWS: Tuple[WorkflowInfo, ...] = (
         purpose="Inspect selected and unselected point context.",
         modules=("data-workspace", "selection"),
         status="working",
-        blueprint_factory=create_selection_context_blueprint,
+        blueprint_factory=_lazy_blueprint("app.workflows.selection_context"),
     ),
     WorkflowInfo(
         slug="analysis-selection",
@@ -160,7 +160,7 @@ WORKFLOWS: Tuple[WorkflowInfo, ...] = (
         purpose="Inspect data, projection, outliers, clusters, and selection on one shared visual layer.",
         modules=("data-workspace", "projection", "algorithm-adapters", "selection"),
         status="working",
-        blueprint_factory=create_analysis_selection_blueprint,
+        blueprint_factory=_lazy_blueprint("app.workflows.analysis_selection"),
     ),
     WorkflowInfo(
         slug="selection-labeling",
@@ -168,7 +168,7 @@ WORKFLOWS: Tuple[WorkflowInfo, ...] = (
         purpose="Inspect selected points converted into manual label instructions.",
         modules=("data-workspace", "selection", "labeling"),
         status="working",
-        blueprint_factory=create_selection_labeling_blueprint,
+        blueprint_factory=_lazy_blueprint("app.workflows.selection_labeling"),
     ),
     WorkflowInfo(
         slug="analysis-labeling",
@@ -176,7 +176,7 @@ WORKFLOWS: Tuple[WorkflowInfo, ...] = (
         purpose="Inspect data, projection, outliers, clusters, selection, and labeling on one shared visual layer.",
         modules=("data-workspace", "projection", "algorithm-adapters", "selection", "labeling"),
         status="working",
-        blueprint_factory=create_analysis_labeling_blueprint,
+        blueprint_factory=_lazy_blueprint("app.workflows.analysis_labeling"),
     ),
     WorkflowInfo(
         slug="scatter-selection",
@@ -184,7 +184,7 @@ WORKFLOWS: Tuple[WorkflowInfo, ...] = (
         purpose="Inspect scatterplot interactions with selection and label state.",
         modules=("projection", "algorithm-adapters", "selection", "labeling", "scatterplot"),
         status="working",
-        blueprint_factory=create_scatter_selection_blueprint,
+        blueprint_factory=_lazy_blueprint("app.workflows.scatter_selection"),
     ),
     WorkflowInfo(
         slug="scatter-labeling",
@@ -192,7 +192,7 @@ WORKFLOWS: Tuple[WorkflowInfo, ...] = (
         purpose="Inspect visual point selection converted into label annotations.",
         modules=("projection", "algorithm-adapters", "selection", "labeling", "scatterplot"),
         status="working",
-        blueprint_factory=create_scatter_labeling_blueprint,
+        blueprint_factory=_lazy_blueprint("app.workflows.scatter_labeling"),
     ),
     WorkflowInfo(
         slug="chat-selection",

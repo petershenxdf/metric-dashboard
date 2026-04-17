@@ -33,7 +33,7 @@ This is a local Flask dashboard for human-in-the-loop metric learning. The stack
 
 ### Module Registry
 
-Each module is declared as a `ModuleInfo` entry (slug, package_name, title, purpose, status, blueprint_factory). The dashboard shell reads this registry; modules never import the dashboard shell.
+Each module is declared as a `ModuleInfo` entry (slug, package_name, title, purpose, status, blueprint_factory) in `app/module_registry.py`. Blueprint factories are lazy-loaded via `importlib.import_module` — modules are only imported when their blueprint is actually registered. The dashboard shell reads this registry; modules never import the dashboard shell.
 
 ### Module Contract
 
@@ -106,7 +106,7 @@ The main manual test page for the full Step 1-6 path is `/workflows/scatter-labe
 - The debug page includes multiple deterministic fixtures (`demo`, `moons`, `circles`) selected by `dataset_id`; selection, labels, and SSDBCODI store state are scoped per dataset.
 - GET `/modules/ssdbcodi/` previews the current result without writing run history. `POST /modules/ssdbcodi/api/label` saves pending feedback only; `POST /modules/ssdbcodi/api/run` recomputes and stores results in `SsdbcodiStore`.
 - Per-point scores `rScore`, `lScore`, `simScore`, `tScore` are persisted in `SsdbcodiStore` for downstream metric-learning consumption.
-- Output schemas (`ClusterResult`, `OutlierResult`) are reused from `algorithm_adapters`, so downstream modules (scatterplot, metric_learning_adapter) can consume SSDBCODI results without changes.
+- Output schemas (`ClusterResult`, `OutlierResult`) live in `app/shared/schemas.py` (re-exported by `algorithm_adapters/schemas.py`), so downstream modules consume SSDBCODI results without changes.
 - The debug page is at `/modules/ssdbcodi/`. See `docs/modules/ssdbcodi/design.md` for the full contract.
 
 ### Workflows
@@ -120,6 +120,20 @@ Key workflows:
 - `/workflows/analysis-labeling/` - Steps 1-5 (main test page pre-scatterplot)
 - `/workflows/scatter-labeling/` - Steps 1-6 (current main manual test page)
 
+### Shared Layer (`app/shared/`)
+
+Code that multiple modules or workflows need lives in `app/shared/`:
+
+| File | Purpose |
+|------|---------|
+| `schemas.py` | `Dataset`, `FeatureMatrix`, `AnalysisResult`, `ClusterResult`, `OutlierResult`, etc. |
+| `flask_helpers.py` | `api_success`, `api_error` response envelope helpers |
+| `fixtures.py` | Cross-module fixture datasets (wide-gap, default analysis) used by workflows and scatterplot |
+| `request_helpers.py` | Shared Flask request parsing (`n_clusters_from_request`, `dataset_id_from_request`, `apply_selection_action_or_error`) |
+| `effective_analysis.py` | Pure logic to overlay manual labels on raw algorithm output |
+
+**Layering rule:** `modules → shared` is OK. `modules → workflows` is a violation. When both modules and workflows need the same code, it belongs in `app/shared/`. Workflow files (`app/workflows/fixtures.py`, `app/workflows/effective_analysis.py`) are thin re-export shims pointing to `app/shared/` for backward compatibility.
+
 ### Module Boundaries (never cross these)
 
 1. Scatterplot does not parse chat text and does not own selection or label truth.
@@ -128,6 +142,7 @@ Key workflows:
 4. Labeling owns manual annotations; scatterplot sends label actions *to* labeling.
 5. Existing clustering/outlier algorithms are only accessed through `algorithm_adapters`.
 6. Modules do not import unrelated module internals - use schemas, services, APIs, or workflow pages.
+7. Modules never import from `app/workflows/` - shared code goes in `app/shared/`.
 
 ### Definition of Done for a Module
 

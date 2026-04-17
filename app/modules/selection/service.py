@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from app.shared.schemas import Dataset
+from app.shared.schemas import Dataset, clean_text
 
 from .schemas import SelectionAction, SelectionActionResult, SelectionContext, SelectionGroup, SelectionState
 from .store import SelectionStore
@@ -183,18 +183,8 @@ def _next_group_id(store: SelectionStore) -> str:
 
 
 def _group_name_key(group_name: str) -> str:
-    return SelectionGroup(
-        group_id="name_check",
-        group_name=group_name,
-        dataset_id="name_check_dataset",
-        point_ids=("name_check_point",),
-    ).group_name.casefold()
+    return clean_text(group_name, "group_name").casefold()
 
 
 def _clean_group_id(group_id: str) -> str:
-    return SelectionGroup(
-        group_id=group_id,
-        group_name="group_id_check",
-        dataset_id="group_id_check_dataset",
-        point_ids=("group_id_check_point",),
-    ).group_id
+    return clean_text(group_id, "group_id")

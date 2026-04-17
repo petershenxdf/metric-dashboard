@@ -110,6 +110,8 @@ metric-dashboard/
       schemas.py
       flask_helpers.py
       fixtures.py
+      request_helpers.py
+      effective_analysis.py
 
     templates/
       base.html
@@ -230,11 +232,13 @@ metric-dashboard/
         templates/refinement_orchestrator/
 
     workflows/
+      fixtures.py               re-exports from app.shared.fixtures
+      effective_analysis.py      re-exports from app.shared.effective_analysis
       data_projection.py
       default_analysis.py
       selection_context.py
-      analysis_selection.py
       selection_labeling.py
+      analysis_selection.py
       analysis_labeling.py
       scatter_selection.py
       scatter_labeling.py
@@ -249,6 +253,7 @@ metric-dashboard/
       selection/
       labeling/
       scatterplot/
+      ssdbcodi/
       chatbox/
       intent_instruction/
       metric_learning_adapter/

@@ -253,4 +253,4 @@ Route tests (`test_routes.py`):
 - [x] Flask route smoke tests.
 - [x] Module registered in `app/module_registry.py`.
 - [x] This design document exists.
-- [ ] Manual browser inspection on the debug page.
+- [x] Manual browser inspection on the debug page.

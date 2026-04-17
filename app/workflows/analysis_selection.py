@@ -7,11 +7,8 @@ from app.modules.data_workspace.service import create_feature_matrix
 from app.modules.projection.service import project_feature_matrix, scaled_projection_points
 from app.modules.selection.http_helpers import (
     optional_point_ids_from_payload,
-    request_payload,
-    selection_action_from_payload,
 )
 from app.modules.selection.service import (
-    apply_selection_action,
     delete_selection_group,
     get_selection_context,
     get_selection_state,
@@ -21,6 +18,13 @@ from app.modules.selection.service import (
 )
 from app.modules.selection.state import get_debug_store_for_dataset, reset_debug_store_for_dataset
 from app.shared.flask_helpers import api_error, api_success
+from app.shared.request_helpers import (
+    apply_selection_action_or_error,
+    dataset_id_from_request,
+    n_clusters_from_request,
+    request_payload,
+    selection_groups_payload,
+)
 from .fixtures import (
     ANALYSIS_SELECTION_DATASET_OPTIONS,
     DEFAULT_WORKFLOW_DATASET_ID,
@@ -113,7 +117,7 @@ def create_blueprint() -> Blueprint:
 
         return jsonify(
             api_success(
-                {"group": group.to_dict(), "groups": _selection_groups_payload()},
+                {"group": group.to_dict(), "groups": selection_groups_payload(_workflow_store())},
                 diagnostics={"dependency_mode": "real Step 1-4 workflow fixture"},
             )
         )
@@ -127,7 +131,7 @@ def create_blueprint() -> Blueprint:
 
         return jsonify(
             api_success(
-                {"selection": result.to_dict(), "groups": _selection_groups_payload()},
+                {"selection": result.to_dict(), "groups": selection_groups_payload(_workflow_store())},
                 diagnostics={"dependency_mode": "real Step 1-4 workflow fixture"},
             )
         )
@@ -141,7 +145,7 @@ def create_blueprint() -> Blueprint:
 
         return jsonify(
             api_success(
-                {"deleted_group": group.to_dict(), "groups": _selection_groups_payload()},
+                {"deleted_group": group.to_dict(), "groups": selection_groups_payload(_workflow_store())},
                 diagnostics={"dependency_mode": "real Step 1-4 workflow fixture"},
             )
         )
@@ -220,15 +224,14 @@ def _workflow_store_for_dataset(dataset):
 
 def _selection_action_response(action_name: str):
     payload = request_payload(request)
-    try:
-        action = selection_action_from_payload(
-            action_name,
-            payload,
-            metadata={"workflow": "analysis-selection"},
-        )
-        result = apply_selection_action(_workflow_store(), action)
-    except ValueError as exc:
-        return jsonify(api_error("invalid_selection_action", str(exc))), 400
+    result, error = apply_selection_action_or_error(
+        _workflow_store(),
+        action_name,
+        payload,
+        metadata={"workflow": "analysis-selection"},
+    )
+    if error is not None:
+        return jsonify(api_error("invalid_selection_action", error)), 400
 
     return jsonify(
         api_success(
@@ -252,28 +255,11 @@ def _state_payload(view_model):
 
 
 def _n_clusters_from_request() -> int:
-    raw_value = request.args.get("n_clusters")
-    if raw_value is None:
-        return DEFAULT_N_CLUSTERS
-
-    try:
-        value = int(raw_value)
-    except ValueError:
-        return DEFAULT_N_CLUSTERS
-
-    return max(value, 1)
+    return n_clusters_from_request()
 
 
 def _dataset_id_from_request() -> str:
-    payload = {}
-    if request.is_json:
-        payload = request.get_json(silent=True) or {}
-
-    raw_value = payload.get("dataset_id") or request.args.get("dataset_id") or request.form.get("dataset_id")
-    if is_analysis_selection_dataset_id(raw_value):
-        return raw_value
-    return DEFAULT_WORKFLOW_DATASET_ID
-
-
-def _selection_groups_payload():
-    return [group.to_dict() for group in list_selection_groups(_workflow_store())]
+    return dataset_id_from_request(
+        DEFAULT_WORKFLOW_DATASET_ID,
+        is_analysis_selection_dataset_id,
+    )

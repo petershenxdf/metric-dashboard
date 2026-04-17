@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Blueprint, render_template, request
+from flask import Blueprint, render_template
 
 from app.modules.algorithm_adapters.fixtures import (
     default_analysis_feature_names,
@@ -9,6 +9,7 @@ from app.modules.algorithm_adapters.fixtures import (
 from app.modules.algorithm_adapters.service import DEFAULT_N_CLUSTERS, run_default_analysis
 from app.modules.data_workspace.service import create_dataset, create_feature_matrix
 from app.modules.projection.service import project_feature_matrix, scaled_projection_points
+from app.shared.request_helpers import n_clusters_from_request
 
 
 def create_blueprint() -> Blueprint:
@@ -59,13 +60,4 @@ def create_blueprint() -> Blueprint:
 
 
 def _n_clusters_from_request() -> int:
-    raw_value = request.args.get("n_clusters")
-    if raw_value is None:
-        return DEFAULT_N_CLUSTERS
-
-    try:
-        value = int(raw_value)
-    except ValueError:
-        return DEFAULT_N_CLUSTERS
-
-    return max(value, 1)
+    return n_clusters_from_request()

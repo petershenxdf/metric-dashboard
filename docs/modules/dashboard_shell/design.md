@@ -1,4 +1,9 @@
-# Dashboard Shell Module Design
+# Dashboard Shell Design
+
+> **Note:** The dashboard shell is _not_ a module package under
+> `app/modules/`. It is the top-level app factory and infrastructure layer
+> (`app/__init__.py`, `app/module_registry.py`, `app/routes.py`). This doc
+> lives under `docs/modules/` for organizational convenience.
 
 ## Purpose
 
@@ -84,7 +89,7 @@ ModuleInfo(
     title="Data Workspace",
     purpose="Dataset loading, point IDs, metadata, and feature matrix.",
     status="working",
-    blueprint_factory=data_workspace.create_blueprint,
+    blueprint_factory=_lazy_blueprint("app.modules.data_workspace"),
 )
 ```
 

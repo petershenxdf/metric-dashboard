@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, render_template, request
 
-from app.modules.algorithm_adapters.service import DEFAULT_N_CLUSTERS, run_default_analysis
+from app.modules.algorithm_adapters.service import run_default_analysis
 from app.modules.data_workspace.service import create_feature_matrix
 from app.modules.labeling.service import apply_labeling_action, clear_annotations, get_labeling_state
 from app.modules.labeling.state import (
@@ -11,9 +11,8 @@ from app.modules.labeling.state import (
 )
 from app.modules.projection.service import project_feature_matrix
 from app.modules.scatterplot.service import build_render_payload
-from app.modules.selection.http_helpers import optional_point_ids_from_payload, request_payload, selection_action_from_payload
+from app.modules.selection.http_helpers import optional_point_ids_from_payload
 from app.modules.selection.service import (
-    apply_selection_action,
     delete_selection_group,
     get_selection_context,
     get_selection_state,
@@ -23,7 +22,13 @@ from app.modules.selection.service import (
 )
 from app.modules.selection.state import get_debug_store_for_dataset
 from app.shared.flask_helpers import api_error, api_success
-from app.workflows.effective_analysis import apply_manual_labels_to_analysis
+from app.shared.request_helpers import (
+    apply_selection_action_or_error,
+    n_clusters_from_request,
+    request_payload,
+    selection_groups_payload,
+)
+from app.shared.effective_analysis import apply_manual_labels_to_analysis
 from app.workflows.fixtures import (
     DEFAULT_WORKFLOW_DATASET_ID,
     analysis_selection_dataset,
@@ -98,7 +103,7 @@ def create_blueprint() -> Blueprint:
 
         return jsonify(
             api_success(
-                {"group": group.to_dict(), "groups": _selection_groups_payload()},
+                {"group": group.to_dict(), "groups": selection_groups_payload(state["selection_store"])},
                 diagnostics={"dependency_mode": DEPENDENCY_MODE},
             )
         )
@@ -113,7 +118,7 @@ def create_blueprint() -> Blueprint:
 
         return jsonify(
             api_success(
-                {"selection": result.to_dict(), "groups": _selection_groups_payload()},
+                {"selection": result.to_dict(), "groups": selection_groups_payload(state["selection_store"])},
                 diagnostics={"dependency_mode": DEPENDENCY_MODE},
             )
         )
@@ -128,7 +133,7 @@ def create_blueprint() -> Blueprint:
 
         return jsonify(
             api_success(
-                {"deleted_group": group.to_dict(), "groups": _selection_groups_payload()},
+                {"deleted_group": group.to_dict(), "groups": selection_groups_payload(state["selection_store"])},
                 diagnostics={"dependency_mode": DEPENDENCY_MODE},
             )
         )
@@ -231,17 +236,16 @@ def _workflow_state(n_clusters: int):
 def _selection_action_response(action_name: str):
     state = _workflow_state(_n_clusters_from_request())
     payload = request_payload(request)
-    try:
-        action = selection_action_from_payload(
-            action_name,
-            payload,
-            metadata={"workflow": "scatter-labeling"},
-        )
-        result = apply_selection_action(state["selection_store"], action)
-        refreshed = _workflow_state(state["n_clusters"])
-    except ValueError as exc:
-        return jsonify(api_error("invalid_selection_action", str(exc))), 400
+    result, error = apply_selection_action_or_error(
+        state["selection_store"],
+        action_name,
+        payload,
+        metadata={"workflow": "scatter-labeling"},
+    )
+    if error is not None:
+        return jsonify(api_error("invalid_selection_action", error)), 400
 
+    refreshed = _workflow_state(state["n_clusters"])
     return jsonify(
         api_success(
             {
@@ -289,24 +293,4 @@ def _allowed_labels(n_clusters: int):
 
 
 def _n_clusters_from_request() -> int:
-    payload = {}
-    if request.is_json:
-        payload = request.get_json(silent=True) or {}
-
-    raw_value = payload.get("n_clusters") or request.args.get("n_clusters") or request.form.get("n_clusters")
-    if raw_value is None:
-        return DEFAULT_N_CLUSTERS
-
-    try:
-        value = int(raw_value)
-    except ValueError:
-        return DEFAULT_N_CLUSTERS
-
-    return max(value, 1)
-
-
-def _selection_groups_payload():
-    return [
-        group.to_dict()
-        for group in list_selection_groups(_workflow_state(_n_clusters_from_request())["selection_store"])
-    ]
+    return n_clusters_from_request()

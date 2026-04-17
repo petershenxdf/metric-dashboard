@@ -7,15 +7,15 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 
 from app.modules.algorithm_adapters.clustering import kmeans
-from app.modules.algorithm_adapters.schemas import (
+from app.modules.labeling.schemas import LabelingState
+from app.shared.schemas import (
     AnalysisResult,
     ClusterAssignment,
     ClusterResult,
+    FeatureMatrix,
     OutlierResult,
     OutlierScore,
 )
-from app.modules.labeling.schemas import LabelingState
-from app.shared.schemas import FeatureMatrix
 
 from .algorithm import (
     SSDBCODI_ALGORITHM_NAME,
@@ -33,6 +33,10 @@ DEFAULT_CONTAMINATION = 0.13
 PROVIDER_NAME = "ssdbcodi"
 SEED_SOURCE_BOOTSTRAP = "kmeans_bootstrap"
 SEED_SOURCE_LABEL = "manual_label"
+
+# Kept in sync with algorithm_adapters.DEFAULT_OUTLIER_N_NEIGHBORS; duplicated
+# as a local constant so this module does not depend on the LOF provider.
+_PROTOCOL_DEFAULT_OUTLIER_N_NEIGHBORS = 5
 
 
 def bootstrap_seeds_from_kmeans(
@@ -350,14 +354,22 @@ class SsdbcodiProvider:
         self,
         feature_matrix: FeatureMatrix,
         n_clusters: int = DEFAULT_BOOTSTRAP_K,
-        outlier_n_neighbors: int = DEFAULT_MIN_PTS,
+        outlier_n_neighbors: int = _PROTOCOL_DEFAULT_OUTLIER_N_NEIGHBORS,
         outlier_contamination: float = DEFAULT_CONTAMINATION,
     ) -> AnalysisResult:
+        # `outlier_n_neighbors` is the AnalysisProvider knob shared with LOF.
+        # SSDBCODI maps it onto `min_pts`. Callers that leave it at the LOF
+        # protocol default fall back to the provider's configured min_pts.
+        effective_min_pts = (
+            self._min_pts
+            if outlier_n_neighbors == _PROTOCOL_DEFAULT_OUTLIER_N_NEIGHBORS
+            else outlier_n_neighbors
+        )
         result = run_ssdbcodi(
             feature_matrix=feature_matrix,
             labeling_state=self._labeling_state,
             n_clusters=n_clusters,
-            min_pts=self._min_pts if outlier_n_neighbors == DEFAULT_MIN_PTS else outlier_n_neighbors,
+            min_pts=effective_min_pts,
             alpha=self._alpha,
             beta=self._beta,
             contamination=outlier_contamination,

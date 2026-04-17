@@ -21,6 +21,7 @@ class AppState:
     projection = None
     cluster_result = None
     outlier_result = None
+    ssdbcodi_result = None               # SsdbcodiResult with per-point scores
     selection = None
     selection_groups = []
     annotations = []

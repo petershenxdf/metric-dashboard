@@ -3,15 +3,19 @@ from __future__ import annotations
 from flask import Blueprint, jsonify, render_template, request
 
 from app.modules.scatterplot.fixtures import scatterplot_fixture_state
-from app.modules.selection.http_helpers import optional_point_ids_from_payload, request_payload, selection_action_from_payload
+from app.modules.selection.http_helpers import optional_point_ids_from_payload
 from app.modules.selection.service import (
-    apply_selection_action,
     delete_selection_group,
-    list_selection_groups,
     save_selection_group,
     select_selection_group,
 )
 from app.shared.flask_helpers import api_error, api_success
+from app.shared.request_helpers import (
+    apply_selection_action_or_error,
+    n_clusters_from_request,
+    request_payload,
+    selection_groups_payload,
+)
 
 
 DEPENDENCY_MODE = "real scatterplot plus selection workflow fixture"
@@ -90,7 +94,7 @@ def create_blueprint() -> Blueprint:
 
         return jsonify(
             api_success(
-                {"group": group.to_dict(), "groups": _selection_groups_payload()},
+                {"group": group.to_dict(), "groups": selection_groups_payload(scatterplot_fixture_state(_n_clusters_from_request())["selection_store"])},
                 diagnostics={"dependency_mode": DEPENDENCY_MODE},
             )
         )
@@ -104,7 +108,7 @@ def create_blueprint() -> Blueprint:
 
         return jsonify(
             api_success(
-                {"selection": result.to_dict(), "groups": _selection_groups_payload()},
+                {"selection": result.to_dict(), "groups": selection_groups_payload(scatterplot_fixture_state(_n_clusters_from_request())["selection_store"])},
                 diagnostics={"dependency_mode": DEPENDENCY_MODE},
             )
         )
@@ -118,7 +122,7 @@ def create_blueprint() -> Blueprint:
 
         return jsonify(
             api_success(
-                {"deleted_group": group.to_dict(), "groups": _selection_groups_payload()},
+                {"deleted_group": group.to_dict(), "groups": selection_groups_payload(scatterplot_fixture_state(_n_clusters_from_request())["selection_store"])},
                 diagnostics={"dependency_mode": DEPENDENCY_MODE},
             )
         )
@@ -129,17 +133,16 @@ def create_blueprint() -> Blueprint:
 def _selection_action_response(action_name: str):
     state = scatterplot_fixture_state(_n_clusters_from_request())
     payload = request_payload(request)
-    try:
-        action = selection_action_from_payload(
-            action_name,
-            payload,
-            metadata={"workflow": "scatter-selection"},
-        )
-        result = apply_selection_action(state["selection_store"], action)
-        refreshed = scatterplot_fixture_state(_n_clusters_from_request())
-    except ValueError as exc:
-        return jsonify(api_error("invalid_selection_action", str(exc))), 400
+    result, error = apply_selection_action_or_error(
+        state["selection_store"],
+        action_name,
+        payload,
+        metadata={"workflow": "scatter-selection"},
+    )
+    if error is not None:
+        return jsonify(api_error("invalid_selection_action", error)), 400
 
+    refreshed = scatterplot_fixture_state(_n_clusters_from_request())
     return jsonify(
         api_success(
             {
@@ -152,24 +155,4 @@ def _selection_action_response(action_name: str):
 
 
 def _n_clusters_from_request() -> int:
-    payload = {}
-    if request.is_json:
-        payload = request.get_json(silent=True) or {}
-
-    raw_value = payload.get("n_clusters") or request.args.get("n_clusters") or request.form.get("n_clusters")
-    if raw_value is None:
-        return 3
-
-    try:
-        value = int(raw_value)
-    except ValueError:
-        return 3
-
-    return max(value, 1)
-
-
-def _selection_groups_payload():
-    return [
-        group.to_dict()
-        for group in list_selection_groups(scatterplot_fixture_state(_n_clusters_from_request())["selection_store"])
-    ]
+    return n_clusters_from_request()

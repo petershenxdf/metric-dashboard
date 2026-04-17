@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, render_template
 
-from app.modules.data_workspace.fixtures import iris_feature_names, iris_raw_points
-from app.modules.data_workspace.service import create_dataset, create_feature_matrix
 from app.shared.flask_helpers import api_success
 
-from .service import project_feature_matrix, scaled_projection_points
+from .fixtures import fixture_projection, labels_by_point_id
+from .service import scaled_projection_points
 
 
 def create_blueprint() -> Blueprint:
@@ -19,8 +18,8 @@ def create_blueprint() -> Blueprint:
 
     @blueprint.get("/")
     def index():
-        dataset, projection = _fixture_projection()
-        labels = _labels_by_point_id(dataset)
+        dataset, projection = fixture_projection()
+        labels = labels_by_point_id(dataset)
         return render_template(
             "projection/index.html",
             dataset=dataset,
@@ -40,7 +39,7 @@ def create_blueprint() -> Blueprint:
 
     @blueprint.get("/api/projection")
     def projection_api():
-        dataset, projection = _fixture_projection()
+        dataset, projection = fixture_projection()
         return jsonify(
             api_success(
                 projection.to_dict(),
@@ -53,7 +52,7 @@ def create_blueprint() -> Blueprint:
 
     @blueprint.get("/api/state")
     def state_api():
-        dataset, projection = _fixture_projection()
+        dataset, projection = fixture_projection()
         return jsonify(
             api_success(
                 {
@@ -69,21 +68,3 @@ def create_blueprint() -> Blueprint:
         )
 
     return blueprint
-
-
-def _fixture_projection():
-    dataset = create_dataset(
-        iris_raw_points(),
-        dataset_id="iris_debug_sample",
-        feature_names=iris_feature_names(),
-    )
-    matrix = create_feature_matrix(dataset)
-    projection = project_feature_matrix(matrix)
-    return dataset, projection
-
-
-def _labels_by_point_id(dataset):
-    return {
-        point.point_id: str(point.metadata.get("label", ""))
-        for point in dataset.points
-    }
