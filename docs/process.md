@@ -599,7 +599,17 @@ chatbox
 chatbox Flask page
 mock selection, label, and instruction context
 refinement strategy selector (metric_learning | direct_ssdbcodi)
+chat-selection workflow page
 ```
+
+Current implementation:
+
+1. `/modules/chatbox/` renders chat history, selection context, selection groups, label context, a mock `StructuredInstruction` preview panel, strategy-filtered suggestion chips, example messages, and a `metric_learning` / `direct_ssdbcodi` toggle.
+2. Selection context, selection groups, and label context are read from the real `selection` and `labeling` debug stores — chatbox never mutates them.
+3. The intent provider is pluggable via the `IntentProvider` protocol. Step 7 ships `MockIntentProvider` (deterministic keyword-based router + intent extractor); Step 8 will replace it with the real `intent_instruction` module.
+4. The mock `StructuredInstruction` state lives in the provider, not in chatbox, so the chatbox service can be tested (and verified) to not mutate instruction state.
+5. `/modules/chatbox/api/messages` builds a `ChatMessagePayload` containing the last N turns (default 3), the selection context, selection groups, label context, and active strategy, then returns the provider's `ChatResponse` with `router_category`, optional `delta`, `current_instruction_version`, and optional `intent_type`.
+6. `/workflows/chat-selection/` combines selection, labeling, and chatbox state on one page for Step 7 acceptance.
 
 Why:
 

@@ -196,6 +196,9 @@ Interactive modules should expose action APIs:
 /workflows/provider-feedback/api/state
 /modules/chatbox/api/messages
 /modules/chatbox/api/history
+/modules/chatbox/api/strategy
+/modules/chatbox/api/reset
+/modules/chatbox/api/clear
 /modules/intent-instruction/api/route
 /modules/intent-instruction/api/compile
 /modules/intent-instruction/api/state

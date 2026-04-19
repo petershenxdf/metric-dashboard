@@ -57,6 +57,16 @@ This page verifies Step 6.5 provider promotion and score availability.
 | --- | --- | --- |
 | 6.5 | `/workflows/provider-feedback/` | Compare the `algorithm_adapters` boundary with standalone SSDBCODI scores and seed diagnostics. |
 
+### Feedback Pipeline
+
+Step 7 ships the chatbox module and its selection-context workflow. The
+workflow exercises the chatbox read-only dependency on selection and labeling
+state plus the `MockIntentProvider` keyword router.
+
+| Step | Route | Purpose |
+| --- | --- | --- |
+| 7 | `/workflows/chat-selection/` | Chat UI reads current selection and labeling context and records mock intents without mutating upstream state. |
+
 ### Future Workflows
 
 These placeholders are intentionally visible so future work has a planned
@@ -66,7 +76,6 @@ independently.
 
 | Step | Route | Purpose |
 | --- | --- | --- |
-| 7 | `/workflows/chat-selection/` | Chat UI receives current selection context. |
 | 8 | `/workflows/chat-intent/` | Chat text becomes structured instruction deltas (same deltas used by both paths). |
 | 9A | `/workflows/instruction-constraints/` | **Path A**: structured instructions and labels become metric-learning constraints. |
 | 9B | `/workflows/instruction-ssdbcodi/` | **Path B**: structured instructions and labels become a `DirectFeedbackPlan` (seeds, feature_scale, param_overrides). |

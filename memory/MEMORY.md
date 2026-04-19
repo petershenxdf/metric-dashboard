@@ -1,0 +1,1 @@
+- [Template tojson pattern](feedback_tojson_attribute_map.md) — jinja `map(attribute='to_dict')` returns bound methods and crashes `tojson`; pass pre-dictified payloads from the route instead.

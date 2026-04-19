@@ -180,6 +180,15 @@ The default algorithm-adapter fixture is `default_analysis_outlier_debug`, not I
    - returns dashboard-compatible `ClusterResult` and `OutlierResult` schemas and now backs the default `algorithm_adapters` provider boundary.
    - `/workflows/provider-feedback/` verifies the promoted provider boundary beside standalone SSDBCODI score diagnostics.
 
+9. `chatbox`
+   - dialogue UI that reads selection, selection groups, and label context from the real `selection` and `labeling` debug stores without mutating them.
+   - forwards messages through a pluggable `IntentProvider` protocol; Step 7 ships `MockIntentProvider` (deterministic keyword-based router + intent extractor) so the chatbox can be tested standalone. Step 8 (`intent_instruction`) will swap in the real LLM-backed provider through the same protocol without changing chatbox code.
+   - owns chat history and the active refinement strategy toggle (`metric_learning` / `direct_ssdbcodi`); the mock `StructuredInstruction` snapshot lives inside the provider, not inside chatbox, so the module never owns instruction truth.
+   - forwards a truncated history window (default last 3 turns) plus selection/label/instruction context with each message.
+   - renders strategy-filtered suggestion chips: `split_cluster` and `reclassify_outlier` chips only appear under `direct_ssdbcodi`; Path A-only runs hide them.
+   - fallback responses explicitly mark themselves as coming from the mock provider so users aren't confused by keyword-matcher limitations.
+   - `/workflows/chat-selection/` combines selection, labeling, and chatbox state on one page.
+
 ## Workflow Debug Map
 
 The workflow index is grouped by debugging purpose, not just build order:
@@ -197,8 +206,9 @@ The workflow index is grouped by debugging purpose, not just build order:
    - `/workflows/scatter-labeling/`
 4. Provider diagnostics:
    - `/workflows/provider-feedback/`
-5. Future workflows:
-   - `/workflows/chat-selection/`
+5. Feedback pipeline:
+   - `/workflows/chat-selection/` (Step 7 chatbox + selection + labeling context)
+6. Future workflows:
    - `/workflows/chat-intent/`
    - `/workflows/instruction-constraints/` (Path A: metric learning constraints preview)
    - `/workflows/instruction-ssdbcodi/` (Path B: DirectFeedbackPlan preview)

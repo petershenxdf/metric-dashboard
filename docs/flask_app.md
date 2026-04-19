@@ -124,7 +124,7 @@ For example:
 5. `analysis-labeling` shows Steps 1-5 together on one visual debug page.
 6. `scatterplot` shows the Step 1-6 render payload with click/rectangle selection, saved groups, adjustable clusters, and labeling workflows.
 7. `provider-feedback` shows the Step 6.5 provider contract between `algorithm_adapters` and SSDBCODI score diagnostics.
-8. `chatbox` shows a chat UI with mock or real selection and label context.
+8. `chatbox` shows a chat UI with read-only selection and labeling context, refinement-strategy toggle, suggestion chips, and the `MockIntentProvider` instruction snapshot.
 
 ## 7. Testing Layers
 

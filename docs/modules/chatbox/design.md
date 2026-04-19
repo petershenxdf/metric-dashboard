@@ -38,16 +38,24 @@ app/modules/chatbox/
   __init__.py
   schemas.py
   service.py
+  store.py
+  state.py
   fixtures.py
   routes.py
   templates/chatbox/index.html
-  static/chatbox/chatbox.js
-  static/chatbox/chatbox.css
+  providers/
+    __init__.py
+    base.py      # IntentProvider protocol
+    mock.py      # Step 7 MockIntentProvider (keyword-based)
 
 tests/modules/chatbox/
   test_service.py
   test_routes.py
 ```
+
+The real intent module (`intent_instruction`, Step 8) will later satisfy the
+`IntentProvider` protocol and replace `MockIntentProvider` without changing
+chatbox-side code.
 
 ## Chat History Policy
 
@@ -173,3 +181,19 @@ Manual browser check:
 ## Completion Criteria
 
 This module is complete when chat interaction can be tested visibly through Flask without depending on the full dashboard, and when the UI clearly separates raw chat history from the accumulated structured instruction state.
+
+## Step 7 Status
+
+Implemented. Current behavior:
+
+1. `/modules/chatbox/` and `/workflows/chat-selection/` render selection
+   context, selection groups, label context, instruction snapshot (mocked),
+   suggestion chips filtered by active strategy, example messages, and chat
+   history.
+2. The intent provider is pluggable via the `IntentProvider` protocol; Step 7
+   ships `MockIntentProvider` (deterministic keyword router + intent extractor).
+   Step 8 will swap in the real `intent_instruction` module through the same
+   protocol.
+3. Chatbox reads selection/label context from the real `selection` and
+   `labeling` debug stores and never mutates them. The mock
+   `StructuredInstruction` snapshot is owned by the provider, not by chatbox.

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Chat Selection Workflow{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Step 7 Chat Selection</p>
+    <h1>Chatbox with Selection + Label Context</h1>
+    <p>
+      Shows how the chatbox reads selection, selection groups, and label
+      context without owning or mutating any of them. The intent provider is
+      mocked until Step 8.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Workflow State</h2>
+    <dl class="details">
+      <dt>Dataset</dt>
+      <dd>{{ selection_context.dataset_id }}</dd>
+      <dt>Strategy</dt>
+      <dd><code>{{ state.strategy }}</code></dd>
+      <dt>Provider</dt>
+      <dd><code>{{ provider_label }}</code> (mocked)</dd>
+      <dt>Selected points</dt>
+      <dd>{{ selection_context.selected_point_ids | length }}</dd>
+      <dt>Label annotations</dt>
+      <dd>{{ label_context.annotation_count }}</dd>
+      <dt>Chat turns</dt>
+      <dd>{{ state.turns | length }}</dd>
+    </dl>
+    <div class="actions">
+      <a href="/modules/chatbox/">Open Chatbox Module</a>
+      <a href="/modules/selection/">Open Selection Module</a>
+      <a href="/modules/labeling/">Open Labeling Module</a>
+      <a href="/modules/chatbox/api/context">Chat Context API</a>
+    </div>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Selection Context</h2>
+      <pre>{{ selection_context.to_dict() | tojson(indent=2) }}</pre>
+      <h3>Selection Groups</h3>
+      <pre>{{ selection_groups_payload | tojson(indent=2) }}</pre>
+    </article>
+    <article>
+      <h2>Label Context</h2>
+      <pre>{{ label_context | tojson(indent=2) }}</pre>
+    </article>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Suggestion Chips (filtered by strategy)</h2>
+      <pre>{{ chips_payload | tojson(indent=2) }}</pre>
+    </article>
+    <article>
+      <h2>Instruction Snapshot (mock, read-only)</h2>
+      <pre>{{ state.instruction_snapshot.to_dict() | tojson(indent=2) }}</pre>
+    </article>
+  </section>
+
+  <section class="panel">
+    <h2>Chat History</h2>
+    <pre>{{ state.to_dict().turns | tojson(indent=2) }}</pre>
+  </section>
+{% endblock %}

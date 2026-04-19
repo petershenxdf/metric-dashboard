@@ -85,20 +85,34 @@ State is owned by exactly one module - other modules read through contracts, nev
 | Path A refinement history (`metric_refinement_runs`) | `metric_refinement_orchestrator` |
 | Path B refinement history (`direct_refinement_runs`) | `direct_refinement_orchestrator` |
 
-### Current Pipeline (Steps 1-6, all implemented)
+### Current Pipeline (Steps 1-6, all implemented; Step 7 chatbox implemented with mock intent provider)
 
 ```
 data_workspace -> projection -> algorithm_adapters -> selection -> labeling -> scatterplot
+                                                                            \-> chatbox (Step 7, mock intent provider)
 ```
 
 - `algorithm_adapters`: defaults to `SsdbcodiProvider`, preserving the same dashboard-facing `ClusterResult`, `OutlierResult`, and `AnalysisResult` schemas. `SequentialLofThenKMeansProvider` remains as an explicit legacy provider.
 - `selection`: supports `select`/`deselect`/`replace`/`toggle`/`clear`, named selection groups (not semantic labels), sources include `point_click`, `rectangle`, `lasso`, `api`, `workflow_fixture`, `selection_group`.
 - `labeling`: converts selected points into `assign_cluster`, `assign_new_class`, `mark_outlier`, `mark_not_outlier` annotations -> structured feedback instructions.
 - `scatterplot`: builds a render payload from upstream state; does not own selection or label truth.
+- `chatbox`: reads selection/selection-groups/label context from their owning modules without mutating them, forwards messages through an `IntentProvider` protocol (Step 7 ships `MockIntentProvider`; Step 8 swaps in the real `intent_instruction` module), and owns the refinement strategy toggle. The mock `StructuredInstruction` snapshot lives inside the provider, not chatbox.
 
-The main manual test page for the full Step 1-6 path is `/workflows/scatter-labeling/`.
+The main manual test page for the full Step 1-6 path is `/workflows/scatter-labeling/`. The Step 7 page is `/workflows/chat-selection/`.
 
-### Planned Refinement Pipeline (Steps 7-11, A/B fork)
+### Chatbox Module (Step 7)
+
+`app/modules/chatbox/` is the dialogue UI for user feedback.
+
+- Target files: `schemas.py`, `service.py`, `store.py`, `state.py`, `fixtures.py`, `routes.py`, `templates/chatbox/index.html`, `providers/{base.py,mock.py}`.
+- `IntentProvider` protocol decouples chatbox from the LLM pipeline: `respond(payload) -> ChatResponse`, `current_snapshot(dataset_id)`, `reset(dataset_id)`. Step 8 (`intent_instruction`) will satisfy the same protocol.
+- `ChatMessagePayload` includes: the message, dataset_id, selection context (selected/unselected point IDs), selection groups, label context, truncated history window (default last 3 turns), and the active refinement strategy.
+- `ChatResponse` includes: `reply`, `router_category`, optional `delta`, `current_instruction_version`, optional `intent_type`, optional followup question, and `provider_label`.
+- Strategy toggle (`metric_learning` / `direct_ssdbcodi`) is stored on the chatbox store and attached to outgoing payloads; it does not mutate any instruction state.
+- Suggestion chips for `split_cluster` and `reclassify_outlier` are hidden under Path A (`metric_learning`).
+- Debug page at `/modules/chatbox/`, workflow at `/workflows/chat-selection/`. See `docs/modules/chatbox/design.md`.
+
+### Planned Refinement Pipeline (Steps 8-11, A/B fork)
 
 After Step 6.5 the feedback loop forks into two parallel update strategies so they can be compared experimentally. The shared upstream stages are identical:
 
@@ -146,6 +160,7 @@ Key workflows:
 - `/workflows/analysis-selection/` and `/workflows/analysis-labeling/` - visual integration through Step 1-5.
 - `/workflows/scatter-selection/` and `/workflows/scatter-labeling/` - Step 1-6 render/selection/labeling checks.
 - `/workflows/provider-feedback/` - Step 6.5 provider diagnostics for adapter boundary plus standalone SSDBCODI scores.
+- `/workflows/chat-selection/` - Step 7 chatbox reading selection, selection groups, and labeling context through a mocked intent provider.
 
 ### Shared Layer (`app/shared/`)
 

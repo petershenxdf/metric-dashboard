@@ -111,6 +111,8 @@ MODULES: Tuple[ModuleInfo, ...] = (
         package_name="chatbox",
         title="Chatbox",
         purpose="Dialogue UI for user feedback and clarification.",
+        status="working",
+        blueprint_factory=_lazy_blueprint("app.modules.chatbox"),
     ),
     ModuleInfo(
         slug="intent-instruction",
@@ -235,11 +237,13 @@ WORKFLOWS: Tuple[WorkflowInfo, ...] = (
     WorkflowInfo(
         slug="chat-selection",
         title="Step 7 Chat Selection",
-        purpose="Inspect chatbox behavior with selection context.",
-        modules=("selection", "chatbox"),
-        group="Future Workflows",
+        purpose="Inspect chatbox behavior with selection, selection groups, and label context.",
+        modules=("selection", "labeling", "chatbox"),
+        group="Feedback Pipeline",
         step="7",
-        debug_focus="chat UI receives current selection context",
+        debug_focus="chat UI receives current selection, label, and instruction context",
+        status="working",
+        blueprint_factory=_lazy_blueprint("app.workflows.chat_selection"),
     ),
     WorkflowInfo(
         slug="chat-intent",
