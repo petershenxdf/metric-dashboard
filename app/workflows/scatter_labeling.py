@@ -198,7 +198,6 @@ def _workflow_state(n_clusters: int):
     dataset = analysis_selection_dataset(DEFAULT_WORKFLOW_DATASET_ID)
     matrix = create_feature_matrix(dataset)
     projection = project_feature_matrix(matrix)
-    raw_analysis = run_default_analysis(matrix, n_clusters=n_clusters)
     selection_store = get_debug_store_for_dataset(
         dataset,
         analysis_selection_initial_selected_point_ids(dataset.dataset_id),
@@ -206,7 +205,14 @@ def _workflow_state(n_clusters: int):
     selection_state = get_selection_state(selection_store)
     context = get_selection_context(selection_store)
     labeling_state = get_labeling_state(get_labeling_store_for_context(context))
-    analysis = apply_manual_labels_to_analysis(dataset, raw_analysis, labeling_state)
+    provider_labeling_state = labeling_state if labeling_state.annotations else None
+    raw_analysis = run_default_analysis(matrix, n_clusters=n_clusters)
+    provider_analysis = run_default_analysis(
+        matrix,
+        n_clusters=n_clusters,
+        labeling_state=provider_labeling_state,
+    )
+    analysis = apply_manual_labels_to_analysis(dataset, provider_analysis, labeling_state)
     render_payload = build_render_payload(
         dataset=dataset,
         projection=projection,
@@ -221,6 +227,7 @@ def _workflow_state(n_clusters: int):
         "matrix": matrix,
         "projection": projection,
         "raw_analysis": raw_analysis,
+        "provider_analysis": provider_analysis,
         "analysis": analysis,
         "selection_store": selection_store,
         "selection_state": selection_state,
@@ -263,6 +270,8 @@ def _state_payload(state):
         "projection": state["projection"].to_dict(),
         "raw_clusters": state["raw_analysis"].cluster_result.to_dict(),
         "raw_outliers": state["raw_analysis"].outlier_result.to_dict(),
+        "provider_clusters": state["provider_analysis"].cluster_result.to_dict(),
+        "provider_outliers": state["provider_analysis"].outlier_result.to_dict(),
         "clusters": state["analysis"].cluster_result.to_dict(),
         "outliers": state["analysis"].outlier_result.to_dict(),
         "selection": state["selection_state"].to_dict(),

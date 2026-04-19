@@ -39,6 +39,7 @@ app/
   __init__.py
   module_registry.py
   routes.py
+  workflows/
   templates/
     base.html
     home.html
@@ -115,29 +116,34 @@ The shell should also expose workflow pages:
 /workflows/data-projection/
 /workflows/default-analysis/
 /workflows/selection-context/
-/workflows/analysis-selection/
 /workflows/selection-labeling/
+/workflows/analysis-selection/
 /workflows/analysis-labeling/
 /workflows/scatter-selection/
 /workflows/scatter-labeling/
+/workflows/provider-feedback/
 /workflows/chat-selection/
 /workflows/chat-intent/
 /workflows/instruction-constraints/
 /workflows/refinement-loop/
 ```
 
-These pages combine a few modules at a time, not the entire system.
+These pages combine a few modules at a time, not the entire system. The
+workflow registry includes `group`, `step`, and `debug_focus` metadata so the
+index can be used as a debugging map. The detailed contract lives in
+`docs/workflows.md`.
 
 Current working workflow pages:
 
 1. `/workflows/data-projection/`
 2. `/workflows/default-analysis/`
 3. `/workflows/selection-context/`
-4. `/workflows/analysis-selection/`
-5. `/workflows/selection-labeling/`
+4. `/workflows/selection-labeling/`
+5. `/workflows/analysis-selection/`
 6. `/workflows/analysis-labeling/`
 7. `/workflows/scatter-selection/`
 8. `/workflows/scatter-labeling/`
+9. `/workflows/provider-feedback/`
 
 ## Testing
 

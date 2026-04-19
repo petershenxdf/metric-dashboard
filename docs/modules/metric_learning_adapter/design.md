@@ -88,7 +88,7 @@ Projection and algorithm adapters are not changed. They receive a transformed fe
 The following intents are not converted to constraints in Phase 1:
 
 1. `split_cluster` - would require intra-cluster cannot-link pairs plus a `k` increment in the clustering provider. The metric change alone cannot force KMeans to split a cluster, so this is deferred until the clustering algorithm can accept a split hint directly.
-2. `reclassify_outlier` - LOF's fixed contamination threshold means metric changes may not move a point across the outlier boundary. Users should use labeling's `mark_outlier` / `mark_not_outlier` directly until the outlier algorithm can be updated.
+2. `reclassify_outlier` - SSDBCODI's automatic outlier decision still depends on score ranking and contamination. Users should use labeling's `mark_outlier` / `mark_not_outlier` directly until the provider contract accepts reclassification hints.
 
 The constraint builder must reject these intents with a clear error code (`intent_deferred`) if they ever appear in a `StructuredInstruction`. The intent module should not emit them in Phase 1.
 

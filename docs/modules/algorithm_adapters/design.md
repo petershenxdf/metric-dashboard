@@ -2,15 +2,15 @@
 
 ## Purpose
 
-The algorithm adapters module wraps existing clustering and outlier detection algorithms.
+The algorithm adapters module exposes the dashboard's clustering and outlier provider boundary.
 
-The existing algorithms are treated as fixed external dependencies. This module adapts their input and output to dashboard schemas.
+The active provider is SSDBCODI. The legacy LOF-then-KMeans provider remains available for comparison, but downstream modules should call the adapter boundary rather than importing a concrete algorithm.
 
 ## Responsibilities
 
 1. Convert dashboard feature or representation schemas into algorithm inputs.
-2. Call existing clustering logic.
-3. Call existing outlier detection logic.
+2. Call the active analysis provider.
+3. Keep legacy clustering and outlier functions available behind explicit provider selection.
 4. Convert algorithm outputs back to point-ID-based schemas.
 5. Surface diagnostics in Flask.
 6. Make mock adapter output visible before real algorithms are connected.
@@ -48,21 +48,15 @@ Status: `working`
 
 Step 3 implementation is complete enough for local inspection:
 
-1. Local Outlier Factor runs first over the feature matrix.
-2. Detected outliers are excluded from clustering.
-3. deterministic KMeans runs on the remaining non-outlier points.
-4. Flask debug page exposes adjustable `n_clusters`.
-5. cluster, outlier, analysis, and state APIs exist.
-6. `/workflows/default-analysis/` combines data, projection, outliers, and clusters.
+1. `run_default_analysis()` uses `SsdbcodiProvider` by default.
+2. SSDBCODI emits both cluster assignments and outlier flags in one provider run.
+3. The debug page exposes adjustable bootstrap cluster count, MinPts, and contamination.
+4. cluster, outlier, analysis, and state APIs exist.
+5. `/workflows/default-analysis/` combines data, projection, outliers, and clusters.
 
-The current algorithms are intentionally wrapped as replaceable adapters. The future
-algorithm slot is reserved for integrated algorithms such as
-[SSDBCODI](https://arxiv.org/abs/2208.05561), but SSDBCODI is not used in the
-current implementation.
-
-The service exposes an `AnalysisProvider` boundary. The current provider is
-`SequentialLofThenKMeansProvider`; a future SSDBCODI provider should implement
-the same boundary and return the same dashboard-facing result schemas.
+The service exposes an `AnalysisProvider` boundary. The default provider is
+`SsdbcodiProvider`, while `SequentialLofThenKMeansProvider` is retained as a
+legacy explicit provider. Both return the same dashboard-facing result schemas.
 
 The default Flask fixture is `default_analysis_outlier_debug`, not Iris. It uses
 three compact two-dimensional clusters plus three distant outlier candidates so
@@ -109,6 +103,7 @@ Outlier result:
 /modules/algorithm-adapters/api/analysis      combined outlier and cluster JSON
 /modules/algorithm-adapters/api/state         module summary JSON
 /workflows/default-analysis/                  projection plus default analysis
+/workflows/provider-feedback/                 adapter boundary plus standalone SSDBCODI diagnostics
 ```
 
 ## Flask Debug Page Requirements

@@ -41,8 +41,8 @@ Each state area has one owner:
 | --- | --- |
 | dataset and feature matrix | `data_workspace` |
 | projection coordinates | `projection` |
-| cluster assignments | `algorithm_adapters`; `ssdbcodi` when the future integrated provider is used |
-| outlier scores | `algorithm_adapters`; `ssdbcodi` when the future integrated provider is used |
+| cluster assignments | `algorithm_adapters` backed by SSDBCODI; `ssdbcodi` debug store for standalone runs |
+| outlier scores | `algorithm_adapters` backed by SSDBCODI `tScore`; `ssdbcodi` debug store for standalone runs |
 | SSDBCODI intermediate scores (`rScore`, `lScore`, `simScore`, `tScore`) | `ssdbcodi` |
 | selected point IDs | `selection` |
 | manual cluster/outlier annotations | `labeling` |
@@ -53,9 +53,10 @@ Each state area has one owner:
 
 Other modules may read state through contracts, but should not mutate state they do not own.
 
-SSDBCODI follows the same ownership split on its debug page: selection remains
-owned by `selection`, manual labels remain owned by `labeling`, and
-`ssdbcodi` owns only its computed result/history/scores. `POST
+SSDBCODI follows the same ownership split on its debug page and when used
+through `algorithm_adapters`: selection remains owned by `selection`, manual
+labels remain owned by `labeling`, and `ssdbcodi` owns only its computed
+result/history/scores. `POST
 /modules/ssdbcodi/api/label` records pending labeling feedback; `POST
 /modules/ssdbcodi/api/run` is the explicit boundary that recomputes and stores
 SSDBCODI output. These states are scoped by `dataset_id` for the module's
@@ -177,6 +178,7 @@ Interactive modules should expose action APIs:
 /workflows/scatter-labeling/api/select
 /workflows/scatter-labeling/api/label
 /workflows/scatter-labeling/api/groups
+/workflows/provider-feedback/api/state
 /modules/chatbox/api/messages
 /modules/chatbox/api/history
 /modules/intent-instruction/api/route
@@ -313,9 +315,11 @@ The Step 1-5 workflow exposes a combined state payload at:
 That payload includes dataset, feature matrix, projection, outliers, clusters,
 selection state, selection context, selection groups, and labeling state.
 
-For `/workflows/analysis-labeling/`, `clusters` and `outliers` are effective
-analysis state after manual labels are applied. The raw algorithm outputs remain
-available as `raw_clusters` and `raw_outliers`.
+For `/workflows/analysis-labeling/`, `clusters` and `outliers` are the final
+display state after manual labels are passed into SSDBCODI and explicit label
+overrides are applied for UI consistency. Baseline provider outputs remain
+available as `raw_clusters` and `raw_outliers`; label-aware provider outputs
+remain available as `provider_clusters` and `provider_outliers`.
 
 Allowed labels in this workflow are:
 
@@ -358,6 +362,15 @@ modules. Scatterplot points include:
   "color": "#2f6fed"
 }
 ```
+
+The Step 6.5 provider diagnostics workflow exposes:
+
+```text
+/workflows/provider-feedback/api/state
+```
+
+That payload includes the adapter-facing `AnalysisResult`, standalone
+`SsdbcodiResult`, cluster counts for both views, and the active provider name.
 
 Scatterplot selection actions must preserve the same selection action contract
 as the selection module, including `source: "point_click"` and

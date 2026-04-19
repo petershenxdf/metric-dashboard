@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Step 6.5 Provider Feedback Lab{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Workflow Demo</p>
+    <h1>Step 6.5 Provider Feedback Lab</h1>
+    <p>
+      Checks that algorithm_adapters now resolves to SSDBCODI while the standalone
+      SSDBCODI module still exposes per-point score diagnostics for future metric learning.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Provider Controls</h2>
+    <form class="debug-form" method="get">
+      <label>
+        SSDBCODI bootstrap clusters
+        <input type="number" name="n_clusters" min="1" value="{{ n_clusters }}">
+      </label>
+      <button class="button" type="submit">Run Provider Check</button>
+    </form>
+    {% if error %}
+      <p class="error-text">{{ error }} Reverted to the default cluster count.</p>
+    {% endif %}
+    <dl class="details">
+      <dt>Dependency mode</dt>
+      <dd>{{ dependency_mode }}</dd>
+      <dt>Adapter provider</dt>
+      <dd>{{ adapter_analysis.diagnostics.provider }}</dd>
+      <dt>Adapter boundary</dt>
+      <dd>{{ adapter_analysis.diagnostics.adapter_boundary }}</dd>
+      <dt>Standalone algorithm</dt>
+      <dd>{{ ssdbcodi_result.algorithm }}</dd>
+      <dt>Score fields</dt>
+      <dd>rScore, lScore, simScore, tScore</dd>
+    </dl>
+    <div class="actions">
+      <a href="{{ url_for('provider_feedback_workflow.state_api', n_clusters=n_clusters) }}">State API</a>
+      <a href="/modules/algorithm-adapters/">Algorithm Adapter Debug</a>
+      <a href="/modules/ssdbcodi/">SSDBCODI Debug</a>
+      <a href="/workflows/scatter-labeling/">Step 1-6 Scatter Labeling</a>
+    </div>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Adapter Boundary Result</h2>
+      <p class="small">
+        `run_default_analysis()` returns the same dashboard-facing schemas while using SSDBCODI internally.
+      </p>
+      <dl>
+        <dt>Dataset</dt>
+        <dd>default_analysis_outlier_debug</dd>
+        <dt>Cluster counts</dt>
+        <dd>{{ adapter_cluster_counts }}</dd>
+        <dt>Outliers</dt>
+        <dd>{{ adapter_analysis.outlier_result.outlier_point_ids | join(", ") or "none" }}</dd>
+      </dl>
+      <pre>{{ adapter_analysis.to_dict() | tojson(indent=2) }}</pre>
+    </article>
+
+    <article>
+      <h2>Standalone SSDBCODI Scores</h2>
+      <p class="small">
+        The module-owned result keeps seed records and intermediate scores for downstream refinement.
+      </p>
+      <dl>
+        <dt>Dataset</dt>
+        <dd>{{ ssdbcodi_matrix.point_ids | length }} points from ssdbcodi_demo_fixture</dd>
+        <dt>Cluster counts</dt>
+        <dd>{{ ssdbcodi_cluster_counts }}</dd>
+        <dt>Outliers</dt>
+        <dd>{{ ssdbcodi_result.outlier_result.outlier_point_ids | join(", ") or "none" }}</dd>
+      </dl>
+      <pre>{{ ssdbcodi_result.to_dict() | tojson(indent=2) }}</pre>
+    </article>
+  </section>
+{% endblock %}

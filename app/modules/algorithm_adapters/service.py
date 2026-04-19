@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Dict, Iterable, Mapping, Protocol
+from typing import Dict, Iterable, Mapping, Protocol, TYPE_CHECKING
 
 from app.shared.schemas import FeatureMatrix
 
@@ -15,8 +15,12 @@ DEFAULT_OUTLIER_N_NEIGHBORS = 5
 DEFAULT_OUTLIER_CONTAMINATION = 0.13
 KMEANS_ALGORITHM_NAME = "kmeans_numpy_deterministic"
 LOF_ALGORITHM_NAME = "local_outlier_factor_numpy"
-ANALYSIS_PROVIDER = "sequential_lof_then_kmeans"
-FUTURE_PROVIDER_SLOT = "ssdbcodi"
+LEGACY_ANALYSIS_PROVIDER = "sequential_lof_then_kmeans"
+ANALYSIS_PROVIDER = "ssdbcodi"
+ACTIVE_PROVIDER_SLOT = "ssdbcodi"
+
+if TYPE_CHECKING:
+    from app.modules.labeling.schemas import LabelingState
 
 
 class AnalysisProvider(Protocol):
@@ -33,7 +37,7 @@ class AnalysisProvider(Protocol):
 
 
 class SequentialLofThenKMeansProvider:
-    name = ANALYSIS_PROVIDER
+    name = LEGACY_ANALYSIS_PROVIDER
 
     def run(
         self,
@@ -67,11 +71,8 @@ class SequentialLofThenKMeansProvider:
             diagnostics={
                 "provider": self.name,
                 "execution_order": ["local_outlier_factor", "kmeans_on_non_outliers"],
-                "future_provider_slot": FUTURE_PROVIDER_SLOT,
-                "future_algorithm_note": (
-                    "SSDBCODI can replace this sequential provider with an integrated "
-                    "semi-supervised density-based clustering and outlier-detection provider."
-                ),
+                "active_provider_slot": ACTIVE_PROVIDER_SLOT,
+                "legacy_provider": LEGACY_ANALYSIS_PROVIDER,
             },
         )
 
@@ -185,14 +186,21 @@ def run_default_analysis(
     outlier_n_neighbors: int = DEFAULT_OUTLIER_N_NEIGHBORS,
     outlier_contamination: float = DEFAULT_OUTLIER_CONTAMINATION,
     provider: AnalysisProvider | None = None,
+    labeling_state: "LabelingState | None" = None,
 ) -> AnalysisResult:
-    selected_provider = provider or SequentialLofThenKMeansProvider()
+    selected_provider = provider or _default_provider(labeling_state)
     return selected_provider.run(
         feature_matrix,
         n_clusters=n_clusters,
         outlier_n_neighbors=outlier_n_neighbors,
         outlier_contamination=outlier_contamination,
     )
+
+
+def _default_provider(labeling_state: "LabelingState | None" = None) -> AnalysisProvider:
+    from app.modules.ssdbcodi.service import SsdbcodiProvider
+
+    return SsdbcodiProvider(labeling_state=labeling_state)
 
 
 def cluster_counts(cluster_result: ClusterResult) -> Dict[str, int]:

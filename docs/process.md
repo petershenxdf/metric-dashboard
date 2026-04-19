@@ -16,6 +16,7 @@ For every module, follow this loop:
    - `README.md`
    - `docs/overview.md`
    - `docs/flask_app.md`
+   - `docs/workflows.md`
    - `docs/modules/<module_name>/design.md`
    - `docs/module_debug_checklist.md`
    - `docs/integration_testing.md`
@@ -267,19 +268,17 @@ Tasks:
 
 Current implementation:
 
-1. Local Outlier Factor runs first.
-2. Detected outliers are excluded from clustering.
-3. deterministic KMeans runs on the remaining non-outlier points.
+1. `run_default_analysis()` now uses `SsdbcodiProvider`.
+2. SSDBCODI emits cluster assignments and outlier flags in one provider run.
+3. The legacy `SequentialLofThenKMeansProvider` remains available explicitly.
 4. `n_clusters` can be adjusted through the Flask page or query string.
-5. The current provider is `SequentialLofThenKMeansProvider`.
-6. The `ssdbcodi` module now exists as a parallel future provider. It preserves
+5. The `ssdbcodi` module also exists as a dedicated debug page. It preserves
    dashboard-facing `ClusterResult` / `OutlierResult` schemas while exposing
-   paper-aligned intermediate scores and selection/labeling integration for
-   local testing before it replaces `SequentialLofThenKMeansProvider`. Its
+   paper-aligned intermediate scores and selection/labeling integration. Its
    debug page keeps bootstrap anchors stable under manual labels, separates
    pending label entry from Run and Store execution, and includes demo/moons/
    circles fixtures for shape-specific testing.
-7. The debug fixture is `default_analysis_outlier_debug`, which intentionally contains visible outlier candidates.
+6. The debug fixture is `default_analysis_outlier_debug`, which intentionally contains visible outlier candidates.
 
 Unit tests:
 
@@ -298,7 +297,7 @@ Open `/modules/algorithm-adapters/` and confirm:
 2. outlier scores are visible.
 3. diagnostics show which algorithm is being called.
 4. execution order is clearly shown as outlier detection before clustering.
-5. changing `n_clusters` updates KMeans output.
+5. changing `n_clusters` updates SSDBCODI bootstrap cluster output.
 6. the page explains the current provider and future algorithm slot.
 
 Open `/workflows/default-analysis/` and confirm:
@@ -459,7 +458,7 @@ Open `/workflows/selection-labeling/` and confirm:
 
 Open `/workflows/analysis-labeling/` and confirm:
 
-1. one SVG shows projected points, cluster colors, LOF outliers, and selected points.
+1. one SVG shows projected points, cluster colors, SSDBCODI outliers, and selected points.
 2. click selection and rectangle selection add points to the active selection.
 3. labeling controls only allow `cluster_1...cluster_n` and `outlier`.
 4. assigning `cluster_N` updates effective cluster state and frontend point colors.
@@ -534,22 +533,23 @@ labeling.
 
 ---
 
-### Step 6.5: SSDBCODI (Parallel Clustering / Outlier Provider)
+### Step 6.5: Provider Feedback Diagnostics
 
 Build:
 
 ```text
 ssdbcodi
 ssdbcodi Flask page
+provider-feedback workflow page
 selection + labeling integration
 per-point score persistence
 ```
 
 Why:
 
-The project plans to replace `SequentialLofThenKMeansProvider` with SSDBCODI.
-Building it as a parallel registered module lets the team test interactively
-before the swap, while keeping all existing Step 1-6 workflows untouched.
+SSDBCODI is the active default provider behind `algorithm_adapters`. Keeping it
+as a separate registered module lets the team inspect scores and feedback
+behavior interactively while the adapter boundary remains stable.
 
 Current implementation:
 
@@ -563,15 +563,16 @@ Current implementation:
 6. Per-point scores persisted in `SsdbcodiStore` for downstream metric-learning
    consumption.
 7. Output schemas reuse `ClusterResult` / `OutlierResult` from shared schemas.
-8. The `SsdbcodiProvider` implements the `AnalysisProvider` protocol so it can
-   replace `SequentialLofThenKMeansProvider` by changing one config value.
+8. The `SsdbcodiProvider` implements the `AnalysisProvider` protocol and backs
+   `algorithm_adapters.run_default_analysis()` by default.
+9. `/workflows/provider-feedback/` compares the adapter-facing
+   `AnalysisResult` with standalone `SsdbcodiResult` score diagnostics.
 
-Provider swap plan:
+Provider boundary:
 
 - `algorithm_adapters` already defines the `AnalysisProvider` protocol.
-- When SSDBCODI is promoted, the app factory instantiates `SsdbcodiProvider`
-  instead of `SequentialLofThenKMeansProvider` and passes it to the adapter
-  service.
+- The default provider is `SsdbcodiProvider`; `SequentialLofThenKMeansProvider`
+  remains as an explicit legacy provider for comparison.
 - All downstream code (scatterplot, workflows, metric-learning) continues to
   work because the output schemas are unchanged.
 
@@ -876,7 +877,7 @@ Data workspace and projection can be opened in Flask, and `/workflows/data-proje
 
 Goal:
 
-Algorithm adapters can be opened in Flask, Local Outlier Factor and KMeans outputs are visible, and `/workflows/default-analysis/` shows data, projection, outliers, and clusters together.
+Algorithm adapters can be opened in Flask, SSDBCODI outputs are visible through the adapter schemas, and `/workflows/default-analysis/` shows data, projection, outliers, and clusters together.
 
 ### Milestone 3: Selection and Labeling
 
@@ -898,11 +899,11 @@ Current status:
 
 Scatterplot has a working module page, render-payload API, scatter-selection workflow, and scatter-labeling workflow. It renders state owned by previous modules and sends selection/label actions back through their module boundaries. Step 6 must preserve prior workflow capabilities when integrated: rectangle selection, saved selection groups, and adjustable cluster count are part of the acceptance check.
 
-### Milestone 4.5: SSDBCODI Parallel Provider
+### Milestone 4.5: Provider Feedback Diagnostics
 
 Goal:
 
-SSDBCODI module works as a standalone debug page, uses the same selection/labeling stores as Step 4-5, persists per-point scores, and implements the `AnalysisProvider` protocol for future provider swap.
+SSDBCODI module works as a standalone debug page, uses the same selection/labeling stores as Step 4-5, persists per-point scores, implements the active `AnalysisProvider` default, and is visible through `/workflows/provider-feedback/`.
 
 Current status:
 

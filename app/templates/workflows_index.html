@@ -5,19 +5,28 @@
 {% block content %}
   <section class="intro">
     <p class="eyebrow">Workflow Demos</p>
-    <h1>Incremental Integration Pages</h1>
-    <p>Use these pages to test how completed modules interact with each other.</p>
+    <h1>Debug Workflow Map</h1>
+    <p>
+      Move from small schema checks to full visual loops. The URLs stay stable;
+      the groups explain what each page is meant to prove.
+    </p>
   </section>
 
-  <div class="card-grid">
-    {% for workflow in workflows %}
-      <article class="card">
-        <p class="status">{{ workflow.status }}</p>
-        <h2>{{ workflow.title }}</h2>
-        <p>{{ workflow.purpose }}</p>
-        <p class="small">Modules: {{ workflow.modules | join(", ") }}</p>
-        <a class="button" href="/workflows/{{ workflow.slug }}/">Open</a>
-      </article>
-    {% endfor %}
-  </div>
+  {% for group in workflow_groups %}
+    <section>
+      <h2>{{ group.title }}</h2>
+      <div class="card-grid">
+        {% for workflow in group.workflows %}
+          <article class="card">
+            <p class="status">Step {{ workflow.step }} · {{ workflow.status }}</p>
+            <h3>{{ workflow.title }}</h3>
+            <p>{{ workflow.purpose }}</p>
+            <p class="small">Debug focus: {{ workflow.debug_focus }}</p>
+            <p class="small">Modules: {{ workflow.modules | join(", ") }}</p>
+            <a class="button" href="/workflows/{{ workflow.slug }}/">Open</a>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  {% endfor %}
 {% endblock %}

@@ -1,6 +1,8 @@
 # Module Debug Page Checklist
 
 Use this checklist for every module page under `/modules/<module_name>/`.
+For multi-module workflow pages, use `docs/workflows.md` alongside this
+module-level checklist.
 
 ## Required Page Content
 

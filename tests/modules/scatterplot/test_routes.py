@@ -32,7 +32,7 @@ class ScatterplotRouteTests(unittest.TestCase):
         self.assertIn(b"wide_gap_analysis_debug", response.data)
         self.assertIn(b"data-selection-rect", response.data)
         self.assertIn(b"Saved Selection Groups", response.data)
-        self.assertIn(b"KMeans clusters", response.data)
+        self.assertIn(b"SSDBCODI bootstrap clusters", response.data)
 
     def test_health_api_reports_working_module(self):
         response = self.client.get("/modules/scatterplot/health")

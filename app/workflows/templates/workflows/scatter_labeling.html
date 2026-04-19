@@ -4,7 +4,7 @@
 
 {% block content %}
   <section class="intro">
-    <p class="eyebrow">Workflow Demo</p>
+    <p class="eyebrow">Step 1-6 Scatter Labeling</p>
     <h1>Scatter Labeling</h1>
     <p>Checks that scatterplot selection can become manual labels through the labeling module.</p>
   </section>
@@ -13,7 +13,7 @@
     <h2>Workflow State</h2>
     <form class="debug-form" method="get">
       <label>
-        KMeans clusters
+        SSDBCODI bootstrap clusters
         <input type="number" name="n_clusters" min="1" value="{{ n_clusters }}">
       </label>
       <button class="button" type="submit">Run Step 1-6</button>
@@ -43,7 +43,7 @@
     <p class="small">
       Click a point to toggle selection, or drag a rectangle to add every point inside it.
       Apply a cluster label or outlier label to selected points. The render payload reflects
-      effective cluster/outlier state after manual labels.
+      SSDBCODI cluster/outlier state after manual labels.
     </p>
     <svg
       class="debug-plot workflow-selection-plot"

@@ -73,8 +73,8 @@ State is owned by exactly one module - other modules read through contracts, nev
 |-------|-------|
 | dataset / feature matrix | `data_workspace` |
 | projection coordinates | `projection` |
-| cluster assignments | `algorithm_adapters` (legacy LOF+KMeans) and `ssdbcodi` (new integrated provider) |
-| outlier scores | `algorithm_adapters` (LOF score) and `ssdbcodi` (`tScore`) |
+| cluster assignments | `algorithm_adapters` backed by SSDBCODI; legacy LOF+KMeans remains available explicitly |
+| outlier scores | `algorithm_adapters` backed by SSDBCODI `tScore`; legacy LOF score remains available explicitly |
 | ssdbcodi per-point intermediate scores (`rScore`, `lScore`, `simScore`, `tScore`) | `ssdbcodi` |
 | selected point IDs | `selection` |
 | manual annotations | `labeling` |
@@ -89,16 +89,16 @@ State is owned by exactly one module - other modules read through contracts, nev
 data_workspace -> projection -> algorithm_adapters -> selection -> labeling -> scatterplot
 ```
 
-- `algorithm_adapters`: LOF outlier detection runs first, then deterministic KMeans on non-outlier points via `SequentialLofThenKMeansProvider`. Future providers replace this while preserving the same dashboard-facing schemas.
+- `algorithm_adapters`: defaults to `SsdbcodiProvider`, preserving the same dashboard-facing `ClusterResult`, `OutlierResult`, and `AnalysisResult` schemas. `SequentialLofThenKMeansProvider` remains as an explicit legacy provider.
 - `selection`: supports `select`/`deselect`/`replace`/`toggle`/`clear`, named selection groups (not semantic labels), sources include `point_click`, `rectangle`, `lasso`, `api`, `workflow_fixture`, `selection_group`.
 - `labeling`: converts selected points into `assign_cluster`, `assign_new_class`, `mark_outlier`, `mark_not_outlier` annotations -> structured feedback instructions.
 - `scatterplot`: builds a render payload from upstream state; does not own selection or label truth.
 
 The main manual test page for the full Step 1-6 path is `/workflows/scatter-labeling/`.
 
-### SSDBCODI Module (parallel clustering/outlier provider)
+### SSDBCODI Module (active clustering/outlier provider)
 
-`app/modules/ssdbcodi/` implements *Semi-Supervised Density-Based Clustering with Outlier Detection Integrated* ([arXiv:2208.05561](https://arxiv.org/abs/2208.05561)) as a separate, registered module. It is the algorithm the project plans to adopt in place of the existing `SequentialLofThenKMeansProvider`.
+`app/modules/ssdbcodi/` implements *Semi-Supervised Density-Based Clustering with Outlier Detection Integrated* ([arXiv:2208.05561](https://arxiv.org/abs/2208.05561)) as both a separate debug module and the default provider behind `algorithm_adapters.run_default_analysis()`.
 
 - Bootstrap: density-safe KMeans (default `k=3`, user-configurable) seeds SSDBCODI by promoting each dense cluster's centroid-nearest point to a labeled normal seed. These bootstrap anchors remain active as a stable baseline; manual labels override only the explicitly labeled point.
 - Algorithm formulas follow the paper contract: symmetric `rDist = max(cDist(p), cDist(q), dist(p,q))`, `lScore` from nearest-neighbor `rDist`, `simScore` from nearest labeled outlier distance, and `tScore = alpha(1-rScore) + beta(1-lScore) + gamma*simScore`.
@@ -113,12 +113,15 @@ The main manual test page for the full Step 1-6 path is `/workflows/scatter-labe
 
 Workflow files live in `app/workflows/`. A workflow page connects multiple modules on one visual debug page. It does not own module internals - it orchestrates through module schemas and service calls.
 
+The workflow registry includes `group`, `step`, and `debug_focus` metadata so `/workflows/` can act as a debug map rather than a flat link list. See `docs/workflows.md`.
+
 Key workflows:
-- `/workflows/data-projection/` - Steps 1-2
-- `/workflows/default-analysis/` - Steps 1-3 (uses `default_analysis_outlier_debug` fixture with visible outliers)
-- `/workflows/analysis-selection/` - Steps 1-4 with click + rectangle selection
-- `/workflows/analysis-labeling/` - Steps 1-5 (main test page pre-scatterplot)
-- `/workflows/scatter-labeling/` - Steps 1-6 (current main manual test page)
+- `/workflows/data-projection/` - Step 1-2 core smoke test.
+- `/workflows/default-analysis/` - Step 1-3 SSDBCODI-backed analysis provider smoke test.
+- `/workflows/selection-context/` and `/workflows/selection-labeling/` - state boundary probes.
+- `/workflows/analysis-selection/` and `/workflows/analysis-labeling/` - visual integration through Step 1-5.
+- `/workflows/scatter-selection/` and `/workflows/scatter-labeling/` - Step 1-6 render/selection/labeling checks.
+- `/workflows/provider-feedback/` - Step 6.5 provider diagnostics for adapter boundary plus standalone SSDBCODI scores.
 
 ### Shared Layer (`app/shared/`)
 
@@ -130,7 +133,7 @@ Code that multiple modules or workflows need lives in `app/shared/`:
 | `flask_helpers.py` | `api_success`, `api_error` response envelope helpers |
 | `fixtures.py` | Cross-module fixture datasets (wide-gap, default analysis) used by workflows and scatterplot |
 | `request_helpers.py` | Shared Flask request parsing (`n_clusters_from_request`, `dataset_id_from_request`, `apply_selection_action_or_error`) |
-| `effective_analysis.py` | Pure logic to overlay manual labels on raw algorithm output |
+| `effective_analysis.py` | Pure logic to apply explicit label overrides on top of provider output |
 
 **Layering rule:** `modules → shared` is OK. `modules → workflows` is a violation. When both modules and workflows need the same code, it belongs in `app/shared/`. Workflow files (`app/workflows/fixtures.py`, `app/workflows/effective_analysis.py`) are thin re-export shims pointing to `app/shared/` for backward compatibility.
 

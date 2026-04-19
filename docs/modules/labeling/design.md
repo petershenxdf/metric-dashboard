@@ -58,7 +58,7 @@ Step 5 implementation is complete enough for local inspection:
 6. `/workflows/selection-labeling/` shows selection context beside labeling output.
 7. `/workflows/analysis-labeling/` connects data, projection, outliers, clusters, selection, and labeling on one visual test page.
 8. On `/workflows/analysis-labeling/`, labels are restricted to the active `cluster_1...cluster_n` set plus `outlier`.
-9. The Step 1-5 workflow applies manual labels as effective analysis-state overrides while preserving raw algorithm output for debugging.
+9. The Step 1-5 workflow passes manual labels into SSDBCODI, then applies explicit label overrides for display consistency while preserving baseline provider output for debugging.
 10. `/workflows/scatter-labeling/` connects Step 1-6 and sends scatterplot label actions through this module while scatterplot only renders effective state.
 
 ## Annotation Contract
@@ -161,7 +161,7 @@ Step 1-5 effective-state behavior:
 
 1. assigning selected points to `cluster_N` updates effective cluster assignments and clears effective outlier status for those points.
 2. assigning selected points to `outlier` updates effective outlier status and removes those points from effective cluster assignments.
-3. `/workflows/analysis-labeling/api/state` returns effective `clusters` and `outliers` plus raw `raw_clusters` and `raw_outliers`.
+3. `/workflows/analysis-labeling/api/state` returns final display `clusters` and `outliers`, baseline `raw_clusters` and `raw_outliers`, and label-aware provider outputs as `provider_clusters` and `provider_outliers`.
 
 Step 1-6 scatter-labeling behavior follows the same labeling rules, but renders
 the result through scatterplot's render payload at

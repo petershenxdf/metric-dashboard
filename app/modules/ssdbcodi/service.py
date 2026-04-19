@@ -375,11 +375,21 @@ class SsdbcodiProvider:
             contamination=outlier_contamination,
         )
         self._latest_result = result
+        diagnostics = dict(result.diagnostics)
+        diagnostics.update(
+            {
+                "provider": self.name,
+                "adapter_boundary": "algorithm_adapters",
+                "execution_order": ["kmeans_bootstrap", "ssdbcodi_integrated"],
+                "legacy_provider": "sequential_lof_then_kmeans",
+                "score_fields": ("r_score", "l_score", "sim_score", "t_score"),
+            }
+        )
         return AnalysisResult(
             analysis_run_id=result.run_id,
             outlier_result=result.outlier_result,
             cluster_result=result.cluster_result,
-            diagnostics=dict(result.diagnostics),
+            diagnostics=diagnostics,
         )
 
 

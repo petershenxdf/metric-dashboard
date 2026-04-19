@@ -103,10 +103,11 @@ The module lab is important. It lets the developer open one module at a time and
 | `dashboard_shell` | Flask app, module registry, shared layout, workflow links | `/`, `/modules/`, `/workflows/` |
 | `data_workspace` | Dataset loading, point IDs, feature matrix | `/modules/data-workspace/` |
 | `projection` | MDS projection into 2D | `/modules/projection/` |
-| `algorithm_adapters` | Existing clustering and outlier wrappers | `/modules/algorithm-adapters/` |
+| `algorithm_adapters` | Adapter boundary for clustering and outlier providers, currently backed by SSDBCODI | `/modules/algorithm-adapters/` |
 | `selection` | Selected and unselected point state | `/modules/selection/` |
 | `labeling` | Manual point annotations, cluster labels, and outlier labels | `/modules/labeling/` |
 | `scatterplot` | Point rendering, clusters, outliers, visual selection | `/modules/scatterplot/` |
+| `ssdbcodi` | Active semi-supervised clustering/outlier provider plus score diagnostics | `/modules/ssdbcodi/` |
 | `chatbox` | Chat UI, user feedback, clarification display | `/modules/chatbox/` |
 | `intent_instruction` | Message classification and structured instruction output | `/modules/intent-instruction/` |
 | `metric_learning_adapter` | Structured instruction to metric-learning constraints | `/modules/metric-learning-adapter/` |
@@ -126,9 +127,9 @@ The current working modules are:
    - MDS projection, projection API, SVG debug plot, and `/workflows/data-projection/`.
 
 4. `algorithm_adapters`
-   - Local Outlier Factor runs first.
-   - detected outliers are excluded.
-   - deterministic KMeans runs on the remaining non-outlier points.
+   - defaults to the SSDBCODI integrated clustering/outlier provider.
+   - keeps the old LOF-then-KMeans provider available as an explicit legacy provider.
+   - returns the same `ClusterResult`, `OutlierResult`, and `AnalysisResult` schemas to downstream modules.
    - `n_clusters` can be adjusted from the module page, workflow page, or API query string.
    - `/workflows/default-analysis/` shows data, projection, outliers, and clusters together.
 
@@ -146,8 +147,8 @@ The current working modules are:
    - supports marking selected points as outliers or not outliers.
    - converts annotations into structured feedback instructions.
    - `/workflows/selection-labeling/` shows selection context beside annotation output.
-   - `/workflows/analysis-labeling/` connects Steps 1-5 on one shared visual layer: data, projection, LOF outliers, KMeans clusters, selection, and labeling.
-   - in the Step 1-5 workflow, labels are limited to `cluster_1...cluster_n` and `outlier`; those labels update the effective cluster/outlier state and the frontend colors/markers.
+   - `/workflows/analysis-labeling/` connects Steps 1-5 on one shared visual layer: data, projection, SSDBCODI outliers, SSDBCODI clusters, selection, and labeling.
+   - in the Step 1-5 workflow, labels are limited to `cluster_1...cluster_n` and `outlier`; those labels are passed into SSDBCODI and then reflected in the effective cluster/outlier state and frontend colors/markers.
    - `/workflows/analysis-labeling/` remains the main manual browser test page for the completed Step 1-5 path.
 
 7. `scatterplot`
@@ -161,13 +162,39 @@ The current working modules are:
 The default algorithm-adapter fixture is `default_analysis_outlier_debug`, not Iris. It intentionally contains three compact clusters plus three distant outlier candidates so Step 3 is visually inspectable.
 
 8. `ssdbcodi`
-   - implements the future semi-supervised clustering/outlier provider as an independent module at `/modules/ssdbcodi/`.
+   - implements the active semi-supervised clustering/outlier provider and keeps an independent debug module at `/modules/ssdbcodi/`.
    - uses density-safe KMeans center seeds as stable bootstrap anchors, then merges manual labels on top so one relabel does not drop unrelated anchors.
    - includes selectable debug datasets (`demo`, `moons`, `circles`) to test separated, curved, and ring-shaped structures.
    - persists `rScore`, `lScore`, `simScore`, and `tScore` for downstream metric-learning use.
    - reuses the existing selection and labeling contracts: additive click/rectangle selection, black center dots for selected points, saved selection groups, and label controls limited to `cluster_1...cluster_n` plus `outlier`.
    - keeps label entry and execution separate: Apply Label saves pending labeling feedback; Run and Store recomputes and persists SSDBCODI.
-   - returns dashboard-compatible `ClusterResult` and `OutlierResult` schemas so it can later replace `SequentialLofThenKMeansProvider` behind the provider boundary.
+   - returns dashboard-compatible `ClusterResult` and `OutlierResult` schemas and now backs the default `algorithm_adapters` provider boundary.
+   - `/workflows/provider-feedback/` verifies the promoted provider boundary beside standalone SSDBCODI score diagnostics.
+
+## Workflow Debug Map
+
+The workflow index is grouped by debugging purpose, not just build order:
+
+1. Core pipeline smoke tests:
+   - `/workflows/data-projection/`
+   - `/workflows/default-analysis/`
+2. State boundary probes:
+   - `/workflows/selection-context/`
+   - `/workflows/selection-labeling/`
+3. Visual integration tests:
+   - `/workflows/analysis-selection/`
+   - `/workflows/analysis-labeling/`
+   - `/workflows/scatter-selection/`
+   - `/workflows/scatter-labeling/`
+4. Provider diagnostics:
+   - `/workflows/provider-feedback/`
+5. Future workflows:
+   - `/workflows/chat-selection/`
+   - `/workflows/chat-intent/`
+   - `/workflows/instruction-constraints/`
+   - `/workflows/refinement-loop/`
+
+See `docs/workflows.md` for the current workflow contract and grouping rules.
 
 ## Module Boundary Rules
 
@@ -236,8 +263,8 @@ Current planned order:
    - make MDS output visible as an SVG/table in Flask.
 
 4. `algorithm_adapters`
-   - make Local Outlier Factor and KMeans adapter outputs visible.
-   - keep the provider boundary open for future integrated algorithms.
+   - make SSDBCODI adapter outputs visible through the existing clustering/outlier schemas.
+   - keep the legacy LOF-then-KMeans provider available for comparison.
 
 5. `selection`
    - make selected/unselected state interactive in Flask.

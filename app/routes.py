@@ -68,7 +68,12 @@ def module_state(module_slug: str):
 
 @core.get("/workflows/")
 def workflows_index():
-    return render_template("workflows_index.html", workflows=_enabled_workflows())
+    workflows = _enabled_workflows()
+    return render_template(
+        "workflows_index.html",
+        workflows=workflows,
+        workflow_groups=_workflow_groups(workflows),
+    )
 
 
 @core.get("/workflows/<workflow_slug>/")
@@ -88,6 +93,19 @@ def _enabled_modules():
 
 def _enabled_workflows():
     return list_workflows(current_app.config.get("ENABLED_MODULES"))
+
+
+def _workflow_groups(workflows):
+    groups = []
+    by_name = {}
+    for workflow in workflows:
+        group = by_name.get(workflow.group)
+        if group is None:
+            group = {"title": workflow.group, "workflows": []}
+            by_name[workflow.group] = group
+            groups.append(group)
+        group["workflows"].append(workflow)
+    return groups
 
 
 def _get_enabled_module_or_404(module_slug: str):

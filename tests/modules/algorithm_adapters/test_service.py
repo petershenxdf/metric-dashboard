@@ -1,6 +1,7 @@
 import unittest
 
 from app.modules.algorithm_adapters.service import (
+    SequentialLofThenKMeansProvider,
     cluster_non_outliers,
     detect_outliers,
     run_default_analysis,
@@ -33,7 +34,23 @@ class AlgorithmAdapterServiceTests(unittest.TestCase):
 
         self.assertIn("p_outlier", analysis.outlier_result.outlier_point_ids)
         self.assertNotIn("p_outlier", assigned_point_ids)
-        self.assertEqual(analysis.diagnostics["execution_order"], ["local_outlier_factor", "kmeans_on_non_outliers"])
+        self.assertEqual(analysis.diagnostics["provider"], "ssdbcodi")
+        self.assertEqual(analysis.diagnostics["execution_order"], ["kmeans_bootstrap", "ssdbcodi_integrated"])
+
+    def test_legacy_provider_remains_available(self):
+        matrix = _outlier_feature_matrix()
+
+        analysis = run_default_analysis(
+            matrix,
+            n_clusters=2,
+            outlier_n_neighbors=2,
+            outlier_contamination=0.1,
+            provider=SequentialLofThenKMeansProvider(),
+        )
+
+        self.assertEqual(analysis.diagnostics["provider"], "sequential_lof_then_kmeans")
+        self.assertEqual(analysis.cluster_result.algorithm, "kmeans_numpy_deterministic")
+        self.assertEqual(analysis.outlier_result.algorithm, "local_outlier_factor_numpy")
 
     def test_cluster_count_is_adjustable(self):
         matrix = _cluster_feature_matrix()

@@ -69,9 +69,10 @@ Detailed flow:
 
 1. Data workspace creates a dataset with stable point IDs.
 2. Projection computes 2D coordinates with MDS.
-3. Algorithm adapters call existing clustering and outlier detection through replaceable providers.
-   The current provider runs Local Outlier Factor first, excludes detected outliers,
-   and then runs deterministic KMeans on the remaining points.
+3. Algorithm adapters call clustering and outlier detection through replaceable providers.
+   The current default provider is SSDBCODI, which emits cluster assignments and
+   outlier flags through the same dashboard schemas. The old LOF-then-KMeans
+   provider remains available explicitly for comparison.
 4. Scatterplot renders points with cluster colors and outlier markers.
 5. User selects points through clicks, lasso, rectangle, API calls, or future selection gestures.
 6. Selection module stores selected/unselected state, can save reusable named selection groups, and exposes reusable selection context.
@@ -306,11 +307,11 @@ Each module should expose these boundaries where applicable:
 | Dashboard Shell | App factory, module registry, integrated pages | `/`, `/modules/`, `/workflows/` |
 | Data Workspace | Dataset identity and feature matrix | `/modules/data-workspace/` |
 | Projection | MDS 2D coordinates | `/modules/projection/` |
-| Algorithm Adapters | LOF outlier detection, KMeans clustering, and future algorithm providers | `/modules/algorithm-adapters/` |
+| Algorithm Adapters | Active SSDBCODI provider boundary plus legacy LOF/KMeans comparison provider | `/modules/algorithm-adapters/` |
 | Selection | Selected/unselected point state | `/modules/selection/` |
 | Labeling | Manual point annotations, cluster labels, and outlier labels | `/modules/labeling/` |
 | Scatterplot | Visual point rendering and selection UI | `/modules/scatterplot/` |
-| SSDBCODI | Semi-supervised density-based clustering with integrated outlier detection (replaces the sequential LOF + KMeans provider) | `/modules/ssdbcodi/` |
+| SSDBCODI | Active semi-supervised density-based clustering with integrated outlier detection and score diagnostics | `/modules/ssdbcodi/` |
 | Chatbox | Dialogue UI, suggestion chips, clarification flow | `/modules/chatbox/` |
 | Intent Instruction | Router + extractor with replaceable LLM provider; emits instruction deltas | `/modules/intent-instruction/` |
 | Metric-Learning Adapter | Constraint builder + replaceable metric learner (default ITML), returns learned `M` | `/modules/metric-learning-adapter/` |
@@ -346,9 +347,9 @@ Manual labels from the labeling module remain as-is. In the constraint builder, 
 The following intents are intentionally excluded from Phase 1 because metric change alone cannot drive them:
 
 1. `split_cluster` - requires changing the clustering algorithm's `k` or running sub-clustering.
-2. `reclassify_outlier` - LOF uses a fixed contamination threshold; a metric change may not move a point across the boundary.
+2. `reclassify_outlier` - SSDBCODI uses score ranking and contamination for automatic outlier selection; a metric change may not move a point across the boundary, so direct labeling remains the Phase 1 path.
 
-Both will be revisited after the clustering and outlier providers are swapped for algorithms that can accept these signals directly. They are not blockers for Phase 1.
+Both will be revisited after the provider contract accepts these signals directly. They are not blockers for Phase 1.
 
 Example delta:
 
@@ -405,13 +406,17 @@ Browser checks:
 /workflows/data-projection/
 /workflows/default-analysis/
 /workflows/selection-context/
-/workflows/analysis-selection/
 /workflows/selection-labeling/
+/workflows/analysis-selection/
 /workflows/analysis-labeling/
 /modules/scatterplot/
 /workflows/scatter-selection/
 /workflows/scatter-labeling/
+/workflows/provider-feedback/
 ```
+
+The grouped workflow contract lives in `docs/workflows.md`. Use that document
+when adding, reordering, or renaming workflow pages.
 
 `/workflows/default-analysis/` uses the `default_analysis_outlier_debug` fixture
 so outliers are visible during local debugging. It should not be interpreted as
@@ -437,11 +442,12 @@ is consumed by labeling, and manual annotations are converted into structured
 feedback instructions without involving chatbox or metric learning.
 
 `/workflows/analysis-labeling/` is the full Step 1-5 visual test page. It uses
-the same projection, LOF outlier detection, KMeans clustering, additive
+the same projection, SSDBCODI clustering/outlier detection, additive
 click/rectangle selection, saved selection groups, and labeling controls on one
 shared point-ID fixture. Manual labels are limited to `cluster_1...cluster_n`
-and `outlier`; they update the effective cluster/outlier state used by the
-frontend while raw algorithm outputs remain available in the state API.
+and `outlier`; they are passed into SSDBCODI and update the effective
+cluster/outlier state used by the frontend while baseline outputs remain
+available in the state API.
 
 `/modules/scatterplot/` is the Step 6 module page. It turns already-computed
 projection, analysis, selection, and labeling state into a render payload and
@@ -451,10 +457,15 @@ labeling connected. The Step 1-6 workflow preserves prior interaction behavior:
 click selection, rectangle selection, saved selection groups, adjustable
 `n_clusters`, and manual cluster/outlier labeling.
 
+`/workflows/provider-feedback/` is the Step 6.5 provider diagnostics page. It
+checks that `algorithm_adapters.run_default_analysis()` resolves to SSDBCODI
+while the standalone SSDBCODI result still exposes seed records and per-point
+scores for future metric-learning work.
+
 `/modules/ssdbcodi/` is the dedicated module page for the SSDBCODI algorithm
-([arXiv:2208.05561](https://arxiv.org/abs/2208.05561)). It is a parallel
-clustering/outlier provider that replaces the existing sequential LOF + KMeans
-approach with a single semi-supervised density-based pass. Bootstrap behavior:
+([arXiv:2208.05561](https://arxiv.org/abs/2208.05561)). It is the active
+clustering/outlier provider behind `algorithm_adapters` and keeps a dedicated
+debug page for inspecting its scores. Bootstrap behavior:
 the module computes density-safe KMeans center seeds (default `k = 3`,
 user-configurable) so obvious far outliers are not promoted to normal seeds.
 Those bootstrap seeds remain stable anchors, and manual labels override only

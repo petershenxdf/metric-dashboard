@@ -4,7 +4,7 @@
 
 {% block content %}
   <section class="intro">
-    <p class="eyebrow">Workflow Demo</p>
+    <p class="eyebrow">Step 1-5 Analysis Labeling</p>
     <h1>Step 1-5 Visual Test</h1>
     <p>
       Connects Data Workspace -> Projection -> Algorithm Adapters -> Selection -> Labeling
@@ -27,7 +27,7 @@
         </select>
       </label>
       <label>
-        KMeans clusters
+        SSDBCODI bootstrap clusters
         <input type="number" name="n_clusters" min="1" value="{{ n_clusters }}">
       </label>
       <button class="button" type="submit">Run Step 1-5</button>
@@ -55,7 +55,7 @@
       <dt>Cluster algorithm</dt>
       <dd>{{ analysis.cluster_result.algorithm }}</dd>
       <dt>Analysis state</dt>
-      <dd>effective output with manual labels applied over raw algorithm results</dd>
+      <dd>SSDBCODI runs with manual labels, then explicit point labels are applied for display consistency</dd>
       <dt>Selection</dt>
       <dd>{{ selection_state.selected_point_ids | length }} selected, {{ selection_state.unselected_point_ids | length }} unselected</dd>
       <dt>Labels</dt>
@@ -73,9 +73,9 @@
     <h2>Shared Visual Layer</h2>
     <p class="small">
       Click points to add them to the active selection, or drag a rectangle to add every
-      point inside the region. Pink points are LOF outliers, colors are KMeans clusters,
+      point inside the region. Pink points are SSDBCODI outliers, colors are SSDBCODI clusters,
       and black center dots mark selected points. Manual cluster/outlier labels update
-      the effective state, so point colors and outlier markers change after labeling.
+      the SSDBCODI state, so point colors and outlier markers change after labeling.
     </p>
     <svg
       class="debug-plot workflow-selection-plot"

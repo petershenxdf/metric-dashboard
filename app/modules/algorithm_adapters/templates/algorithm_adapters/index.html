@@ -7,9 +7,8 @@
     <p class="eyebrow">Module Debug Page</p>
     <h1>Algorithm Adapters</h1>
     <p>
-      Runs Local Outlier Factor first, removes detected outliers, then runs
-      KMeans on the remaining points. Current algorithms are intentionally
-      wrapped behind adapter boundaries for future replacement.
+      Runs SSDBCODI behind the existing adapter boundary so downstream pages
+      keep using the same cluster and outlier result schemas.
     </p>
   </section>
 
@@ -21,11 +20,11 @@
         <input type="number" name="n_clusters" min="1" value="{{ params.n_clusters }}">
       </label>
       <label>
-        LOF neighbors
+        SSDBCODI MinPts
         <input type="number" name="outlier_n_neighbors" min="1" value="{{ params.outlier_n_neighbors }}">
       </label>
       <label>
-        LOF contamination
+        Outlier contamination
         <input
           type="number"
           name="outlier_contamination"
@@ -50,11 +49,11 @@
       <dt>Fixture shape</dt>
       <dd>three compact clusters plus three distant outlier candidates</dd>
       <dt>Current provider</dt>
-      <dd>sequential_lof_then_kmeans</dd>
+      <dd>{{ analysis.diagnostics.provider if analysis else "ssdbcodi" }}</dd>
       <dt>Execution order</dt>
-      <dd>Local Outlier Factor -> KMeans on non-outliers</dd>
-      <dt>Future provider slot</dt>
-      <dd>SSDBCODI or another integrated clustering/outlier algorithm</dd>
+      <dd>{{ analysis.diagnostics.execution_order | join(" -> ") if analysis else "kmeans_bootstrap -> ssdbcodi_integrated" }}</dd>
+      <dt>Legacy provider</dt>
+      <dd>sequential_lof_then_kmeans</dd>
     </dl>
 
     <div class="actions">
@@ -106,7 +105,7 @@
           <thead>
             <tr>
               <th>Point ID</th>
-              <th>LOF Score</th>
+              <th>tScore</th>
               <th>Outlier?</th>
             </tr>
           </thead>
@@ -125,7 +124,7 @@
 
     <section class="panel">
       <h2>Cluster Assignments</h2>
-      <p class="small">Outliers are intentionally excluded before KMeans runs.</p>
+      <p class="small">SSDBCODI emits integrated cluster assignments and outlier flags in one provider run.</p>
       <div class="table-wrap">
         <table>
           <thead>

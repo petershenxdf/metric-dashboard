@@ -13,8 +13,8 @@ class AlgorithmAdapterRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Algorithm Adapters", response.data)
-        self.assertIn(b"Local Outlier Factor", response.data)
-        self.assertIn(b"KMeans", response.data)
+        self.assertIn(b"SSDBCODI", response.data)
+        self.assertIn(b"ssdbcodi", response.data)
         self.assertIn(b"default_analysis_outlier_debug", response.data)
 
     def test_health_api_reports_working_module(self):
@@ -31,7 +31,7 @@ class AlgorithmAdapterRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json["ok"])
         data = response.json["data"]
-        self.assertEqual(data["algorithm"], "local_outlier_factor_numpy")
+        self.assertEqual(data["algorithm"], "ssdbcodi_numpy")
         self.assertEqual(len(data["scores"]), 18)
         self.assertIn("outlier_point_ids", data)
         self.assertGreaterEqual(len(data["outlier_point_ids"]), 1)
@@ -42,7 +42,7 @@ class AlgorithmAdapterRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json["ok"])
         data = response.json["data"]
-        self.assertEqual(data["algorithm"], "kmeans_numpy_deterministic")
+        self.assertEqual(data["algorithm"], "ssdbcodi_numpy")
         self.assertEqual(data["n_clusters"], 2)
         self.assertGreater(len(data["assignments"]), 0)
         self.assertIn("excluded_outlier_point_ids", data)
@@ -53,8 +53,9 @@ class AlgorithmAdapterRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json["ok"])
         diagnostics = response.json["data"]["diagnostics"]
-        self.assertEqual(diagnostics["provider"], "sequential_lof_then_kmeans")
-        self.assertEqual(diagnostics["future_provider_slot"], "ssdbcodi")
+        self.assertEqual(diagnostics["provider"], "ssdbcodi")
+        self.assertEqual(diagnostics["legacy_provider"], "sequential_lof_then_kmeans")
+        self.assertEqual(diagnostics["execution_order"], ["kmeans_bootstrap", "ssdbcodi_integrated"])
 
     def test_invalid_cluster_count_returns_error_envelope(self):
         response = self.client.get("/modules/algorithm-adapters/api/clusters?n_clusters=0")
@@ -68,8 +69,7 @@ class AlgorithmAdapterRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Default Analysis", response.data)
-        self.assertIn(b"Local Outlier Factor", response.data)
-        self.assertIn(b"KMeans", response.data)
+        self.assertIn(b"SSDBCODI", response.data)
         self.assertIn(b"default_analysis_outlier_debug", response.data)
 
 

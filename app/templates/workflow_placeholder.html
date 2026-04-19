@@ -4,9 +4,14 @@
 
 {% block content %}
   <section class="intro">
-    <p class="eyebrow">Workflow Placeholder</p>
+    <p class="eyebrow">{{ workflow.group }} · Step {{ workflow.step }}</p>
     <h1>{{ workflow.title }}</h1>
     <p>{{ workflow.purpose }}</p>
+  </section>
+
+  <section class="panel">
+    <h2>Debug Focus</h2>
+    <p>{{ workflow.debug_focus }}</p>
   </section>
 
   <section class="panel">

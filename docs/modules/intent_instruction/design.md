@@ -97,7 +97,7 @@ Plus non-extracting router outcomes:
 The following intents do not map cleanly to metric-only updates and are intentionally excluded from Phase 1:
 
 1. `split_cluster` - requires changing the clustering algorithm's `k` or running sub-clustering. Metric change alone does not force KMeans to split a cluster.
-2. `reclassify_outlier` - LOF uses a fixed contamination threshold, so metric changes may not move a point across the boundary.
+2. `reclassify_outlier` - SSDBCODI's automatic outlier decision still depends on score ranking and contamination, so metric changes may not move a point across the boundary.
 
 These intents will be revisited after the clustering and outlier detection providers are swapped for algorithms that can act on these signals directly. They are not blockers for Phase 1.
 

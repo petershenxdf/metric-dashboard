@@ -54,12 +54,12 @@ trigger (labeling change or instruction delta or manual refine)
   -> metric_learning_adapter.fit
   -> apply L to feature matrix
   -> projection.run
-  -> algorithm_adapters.run (LOF then KMeans, on transformed matrix)
+  -> algorithm_adapters.run (SSDBCODI provider, on transformed matrix)
   -> record run in history
   -> return updated dashboard state
 ```
 
-Phase 1 never passes `split_cluster` or `reclassify_outlier` intents through this flow. If such an intent appears (for example from a future provider), the orchestrator returns an error that names the intent as deferred until the clustering or outlier algorithm is upgraded.
+Phase 1 never passes `split_cluster` or `reclassify_outlier` intents through this flow. If such an intent appears, the orchestrator returns an error that names the intent as deferred until the provider contract can accept clustering or outlier reclassification hints directly.
 
 ## Run Result Contract
 

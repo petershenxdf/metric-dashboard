@@ -215,19 +215,30 @@ def _build_view_model(n_clusters: int, dataset_id: str):
     matrix = create_feature_matrix(dataset)
     projection = project_feature_matrix(matrix)
     error = None
-
-    try:
-        raw_analysis = run_default_analysis(matrix, n_clusters=n_clusters)
-    except ValueError as exc:
-        error = str(exc)
-        n_clusters = DEFAULT_N_CLUSTERS
-        raw_analysis = run_default_analysis(matrix, n_clusters=n_clusters)
-
     selection_store = _workflow_store_for_dataset(dataset)
     selection_state = get_selection_state(selection_store)
     context = get_selection_context(selection_store)
     labeling_state = get_labeling_state(get_labeling_store_for_context(context))
-    analysis = apply_manual_labels_to_analysis(dataset, raw_analysis, labeling_state)
+    provider_labeling_state = labeling_state if labeling_state.annotations else None
+
+    try:
+        raw_analysis = run_default_analysis(matrix, n_clusters=n_clusters)
+        provider_analysis = run_default_analysis(
+            matrix,
+            n_clusters=n_clusters,
+            labeling_state=provider_labeling_state,
+        )
+    except ValueError as exc:
+        error = str(exc)
+        n_clusters = DEFAULT_N_CLUSTERS
+        raw_analysis = run_default_analysis(matrix, n_clusters=n_clusters)
+        provider_analysis = run_default_analysis(
+            matrix,
+            n_clusters=n_clusters,
+            labeling_state=provider_labeling_state,
+        )
+
+    analysis = apply_manual_labels_to_analysis(dataset, provider_analysis, labeling_state)
     cluster_labels = {
         assignment.point_id: assignment.cluster_id
         for assignment in analysis.cluster_result.assignments
@@ -257,6 +268,7 @@ def _build_view_model(n_clusters: int, dataset_id: str):
         "projection": projection,
         "analysis": analysis,
         "raw_analysis": raw_analysis,
+        "provider_analysis": provider_analysis,
         "plot_points": plot_points,
         "selection_state": selection_state,
         "context": context,
@@ -314,6 +326,8 @@ def _state_payload(view_model):
         "clusters": view_model["analysis"].cluster_result.to_dict(),
         "raw_outliers": view_model["raw_analysis"].outlier_result.to_dict(),
         "raw_clusters": view_model["raw_analysis"].cluster_result.to_dict(),
+        "provider_outliers": view_model["provider_analysis"].outlier_result.to_dict(),
+        "provider_clusters": view_model["provider_analysis"].cluster_result.to_dict(),
         "selection": view_model["selection_state"].to_dict(),
         "selection_context": view_model["context"].to_dict(),
         "selection_groups": [group.to_dict() for group in view_model["selection_groups"]],

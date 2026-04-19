@@ -79,16 +79,27 @@ Workflow routes:
 /workflows/data-projection/
 /workflows/default-analysis/
 /workflows/selection-context/
-/workflows/analysis-selection/
 /workflows/selection-labeling/
+/workflows/analysis-selection/
 /workflows/analysis-labeling/
 /workflows/scatter-selection/
 /workflows/scatter-labeling/
+/workflows/provider-feedback/
 /workflows/chat-selection/
 /workflows/chat-intent/
 /workflows/instruction-constraints/
 /workflows/refinement-loop/
 ```
+
+`/workflows/` groups these routes by debug purpose:
+
+1. core pipeline smoke tests,
+2. state boundary probes,
+3. visual integration tests,
+4. provider diagnostics,
+5. future workflows.
+
+See `docs/workflows.md` for the detailed workflow map and route stability rule.
 
 ## 6. Module Debug Page Standard
 
@@ -109,7 +120,8 @@ For example:
 4. `labeling` shows selected points converted into cluster/outlier annotations.
 5. `analysis-labeling` shows Steps 1-5 together on one visual debug page.
 6. `scatterplot` shows the Step 1-6 render payload with click/rectangle selection, saved groups, adjustable clusters, and labeling workflows.
-7. `chatbox` shows a chat UI with mock or real selection and label context.
+7. `provider-feedback` shows the Step 6.5 provider contract between `algorithm_adapters` and SSDBCODI score diagnostics.
+8. `chatbox` shows a chat UI with mock or real selection and label context.
 
 ## 7. Testing Layers
 

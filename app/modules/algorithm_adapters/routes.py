@@ -54,7 +54,8 @@ def create_blueprint() -> Blueprint:
                 {"module": "algorithm-adapters", "status": "working"},
                 diagnostics={
                     "dependency_mode": "real data-workspace fixture",
-                    "provider": "sequential_lof_then_kmeans",
+                    "provider": "ssdbcodi",
+                    "legacy_provider": "sequential_lof_then_kmeans",
                 },
             )
         )
@@ -76,7 +77,8 @@ def create_blueprint() -> Blueprint:
                 analysis.outlier_result.to_dict(),
                 diagnostics={
                     "dependency_mode": "real data-workspace fixture",
-                    "execution_order": "outlier_detection_first",
+                    "provider": analysis.diagnostics["provider"],
+                    "execution_order": analysis.diagnostics["execution_order"],
                 },
             )
         )
@@ -98,7 +100,8 @@ def create_blueprint() -> Blueprint:
                 analysis.cluster_result.to_dict(),
                 diagnostics={
                     "dependency_mode": "real data-workspace fixture",
-                    "execution_order": "after_outlier_detection",
+                    "provider": analysis.diagnostics["provider"],
+                    "execution_order": analysis.diagnostics["execution_order"],
                 },
             )
         )
@@ -167,8 +170,8 @@ def _analysis_params_from_request():
     if error is not None:
         return _default_params(), error
 
-    outlier_n_neighbors, error = _int_query(
-        "outlier_n_neighbors",
+    outlier_n_neighbors, error = _int_query_alias(
+        ("min_pts", "outlier_n_neighbors"),
         DEFAULT_OUTLIER_N_NEIGHBORS,
         minimum=1,
     )
@@ -213,6 +216,13 @@ def _int_query(name: str, default: int, minimum: int):
         return default, f"{name} must be at least {minimum}"
 
     return value, None
+
+
+def _int_query_alias(names, default: int, minimum: int):
+    for name in names:
+        if request.args.get(name) is not None:
+            return _int_query(name, default, minimum)
+    return default, None
 
 
 def _float_query(name: str, default: float, minimum: float, maximum: float):

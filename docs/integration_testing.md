@@ -15,6 +15,8 @@ This prevents two common problems:
 1. modules only work in isolation.
 2. the full dashboard is integrated too late.
 
+The grouped workflow index contract is maintained in `docs/workflows.md`.
+
 ## 2. Testing Levels
 
 For every module, use four testing levels:
@@ -42,6 +44,7 @@ For every module, use four testing levels:
 | 4 | `selection` | `/modules/selection/` | `/workflows/selection-context/`, `/workflows/analysis-selection/` |
 | 5 | `labeling` | `/modules/labeling/` | `/workflows/selection-labeling/`, `/workflows/analysis-labeling/` |
 | 6 | `scatterplot` | `/modules/scatterplot/` | `/workflows/scatter-selection/` and `/workflows/scatter-labeling/` |
+| 6.5 | `ssdbcodi` provider diagnostics | `/modules/ssdbcodi/` | `/workflows/provider-feedback/` |
 | 7 | `chatbox` | `/modules/chatbox/` | `/workflows/chat-selection/` |
 | 8 | `intent_instruction` | `/modules/intent-instruction/` | `/workflows/chat-intent/` |
 | 9 | `metric_learning_adapter` | `/modules/metric-learning-adapter/` | `/workflows/instruction-constraints/` |
@@ -53,12 +56,13 @@ Not every workflow needs to be polished. A workflow page can be simple and diagn
 Step 3 currently uses a dedicated `default_analysis_outlier_debug` fixture for
 the algorithm-adapter page and `/workflows/default-analysis/`. This fixture is
 not Iris; it is intentionally shaped with compact clusters and distant outlier
-candidates so Local Outlier Factor and KMeans can both be visually checked.
+candidates so SSDBCODI clustering and outlier detection can both be visually
+checked.
 
 For Step 3 browser checks, confirm:
 
-1. `/modules/algorithm-adapters/` shows Local Outlier Factor output.
-2. KMeans assignments exclude detected outliers.
+1. `/modules/algorithm-adapters/` shows SSDBCODI output through the adapter APIs.
+2. SSDBCODI assignments exclude detected outliers.
 3. changing `n_clusters` changes the requested cluster count.
 4. `/workflows/default-analysis/` shows projection, outliers, and clusters together.
 
@@ -79,7 +83,7 @@ Step 1-4 combined workflow check:
 
 1. open `/workflows/analysis-selection/`.
 2. use the dataset dropdown to switch between `wide_gap_analysis_debug` and `default_analysis_outlier_debug`.
-3. confirm one SVG shows projected points, cluster colors, LOF outlier markers, and black center dots for selected points.
+3. confirm one SVG shows projected points, cluster colors, SSDBCODI outlier markers, and black center dots for selected points.
 4. click a point and confirm it is added to the active selection.
 5. drag a rectangle and confirm every point inside the region is added to the active selection.
 6. select more points and confirm they are added without replacing the existing selection.
@@ -101,7 +105,7 @@ Step 1-5 combined workflow check:
 
 1. open `/workflows/analysis-labeling/`.
 2. use the same dataset dropdown and `n_clusters` input as `/workflows/analysis-selection/`.
-3. confirm one SVG shows projected points, cluster colors, LOF outlier markers, and black center dots for selected points.
+3. confirm one SVG shows projected points, cluster colors, SSDBCODI outlier markers, and black center dots for selected points.
 4. click a point or drag a rectangle to add points to the active selection.
 5. assign the selected points to a cluster from the labeling panel.
 6. mark selected points as outliers.
@@ -113,7 +117,7 @@ Current Step 1-5 labeling rules:
 1. allowed labels on `/workflows/analysis-labeling/` are the current cluster labels, such as `cluster_1`, `cluster_2`, `cluster_3`, plus `outlier`.
 2. assigning a point to `cluster_N` updates the effective cluster state and removes that point from the effective outlier set.
 3. assigning a point to `outlier` updates the effective outlier state and removes that point from effective cluster assignments.
-4. the API keeps raw algorithm outputs as `raw_clusters` and `raw_outliers`, while `clusters` and `outliers` represent the effective state used by the frontend.
+4. the API keeps baseline provider outputs as `raw_clusters` and `raw_outliers`, label-aware provider outputs as `provider_clusters` and `provider_outliers`, and final display state as `clusters` and `outliers`.
 
 Expected visual result:
 
@@ -132,15 +136,26 @@ workflow. For Step 6 browser checks, confirm:
 5. changing `n_clusters` reruns analysis and updates available cluster label options.
 6. `/workflows/scatter-selection/` exposes projection, analysis, selection, selection groups, and render payload together.
 7. `/workflows/scatter-labeling/` lets selected points become cluster or outlier labels through labeling.
-8. `/workflows/scatter-labeling/api/state` includes raw analysis, effective analysis, selection groups, labeling state, and render payload.
+8. `/workflows/scatter-labeling/api/state` includes baseline analysis, label-aware provider analysis, final effective analysis, selection groups, labeling state, and render payload.
 
-### SSDBCODI Module Check
+### Step 6.5 Provider Diagnostics
 
-`/modules/ssdbcodi/` is a standalone future-provider test page. It should be
-checked separately from the legacy Step 1-6 flow until the provider swap is
-made.
+`/modules/ssdbcodi/` is the standalone provider test page.
+`/workflows/provider-feedback/` verifies the promoted `algorithm_adapters`
+boundary beside standalone SSDBCODI scores.
 
 Expected behavior:
+
+1. `/workflows/provider-feedback/` reports `active_provider: ssdbcodi` through
+   `algorithm_adapters`.
+2. `/workflows/provider-feedback/api/state` includes both the adapter
+   `AnalysisResult` and standalone `SsdbcodiResult`.
+3. The standalone result includes seed records and per-point `rScore`,
+   `lScore`, `simScore`, and `tScore`.
+4. Adapter results continue to use `ClusterResult`, `OutlierResult`, and
+   `AnalysisResult`.
+
+Standalone SSDBCODI behavior:
 
 1. `GET /modules/ssdbcodi/` returns a preview but does not append run history.
 2. `POST /modules/ssdbcodi/api/run` stores a run and exposes scores through

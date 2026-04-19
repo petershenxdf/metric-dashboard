@@ -4,9 +4,9 @@
 
 The SSDBCODI module implements *Semi-Supervised Density-Based Clustering with
 Outlier Detection Integrated* ([arXiv:2208.05561](https://arxiv.org/abs/2208.05561))
-as a first-class module in the dashboard. SSDBCODI is the algorithm the project
-intends to adopt in place of the existing `algorithm_adapters` provider
-(`SequentialLofThenKMeansProvider`) for the human-in-the-loop refinement loop.
+as a first-class module in the dashboard. SSDBCODI now backs the default
+`algorithm_adapters` provider boundary in place of the legacy
+`SequentialLofThenKMeansProvider` for the human-in-the-loop refinement loop.
 
 It produces:
 
@@ -45,8 +45,8 @@ It produces:
 2. Owning selection state - those remain in the `selection` module store.
 3. Performing metric learning (the `metric_learning_adapter` module covers
    that step).
-4. Replacing the existing `algorithm_adapters` blueprint; SSDBCODI provides a
-   parallel module that downstream code can opt into.
+4. Replacing the existing `algorithm_adapters` blueprint; SSDBCODI keeps its
+   own debug page while the adapter blueprint remains the compatibility entry.
 
 ## Bootstrap Flow
 
@@ -191,6 +191,8 @@ docs/modules/ssdbcodi/design.md
 /modules/ssdbcodi/api/clear-labels         POST: drop all manual annotations
 /modules/ssdbcodi/api/reset-labels         POST: reset labeling store
 /modules/ssdbcodi/api/reset                POST: clear SSDBCODI store, selection, and labels
+/workflows/provider-feedback/              compares adapter boundary output with standalone SSDBCODI diagnostics
+/workflows/provider-feedback/api/state     combined provider diagnostics JSON
 ```
 
 All API responses use the dashboard envelope:
@@ -204,11 +206,12 @@ All API responses use the dashboard envelope:
 | Module | Touch point | Direction |
 |---|---|---|
 | `data_workspace` | uses `create_dataset`, `create_feature_matrix` | reads only |
-| `algorithm_adapters` | reuses deterministic KMeans for density-safe bootstrap; emits compatible `ClusterResult` / `OutlierResult` | reads + reuses schemas |
+| `algorithm_adapters` | uses `SsdbcodiProvider` as the default provider; reuses deterministic KMeans for density-safe bootstrap; emits compatible `ClusterResult` / `OutlierResult` | reads + reuses schemas |
 | `selection` | owns active selected/unselected state and saved selection groups for the debug page | reads + delegates writes |
 | `labeling` | owns manual annotations; SSDBCODI reads `LabelingState` and sends label actions through `apply_labeling_action` | reads + delegates writes |
-| `scatterplot` (future) | can render `SsdbcodiResult` with per-point cluster + outlier flag | downstream consumer |
+| `scatterplot` | renders SSDBCODI-backed `ClusterResult` and `OutlierResult` through the adapter boundary | downstream consumer |
 | `metric_learning_adapter` (future) | will consume the persisted `r_score`/`l_score`/`sim_score`/`t_score` to weight constraints | downstream consumer |
+| `provider-feedback workflow` | verifies the promoted adapter boundary and standalone score contract together | downstream consumer |
 
 ## Testing
 
