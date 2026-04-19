@@ -165,8 +165,10 @@ Standalone SSDBCODI behavior:
    `/api/scores` and `/api/result`.
 3. Default bootstrap uses density-safe KMeans center seeds and should not
    promote the demo fixture's far outliers as normal seeds. Bootstrap seeds
-   remain active after manual labels unless the same point is explicitly
-   relabeled or marked outlier.
+   stay in the seed set across runs unless the same point is explicitly
+   relabeled or marked outlier; the seed point's final `cluster_id` is
+   recomputed each run by the weighted-distance assignment rule and may
+   differ from its bootstrap label, which is reflected in the seeds table.
 4. Click selection and rectangle selection add to the active selection through
    the `selection` module without forcing a full page refresh or jumping back
    to the top of the page.

@@ -511,8 +511,11 @@ clustering/outlier provider behind `algorithm_adapters` and keeps a dedicated
 debug page for inspecting its scores. Bootstrap behavior:
 the module computes density-safe KMeans center seeds (default `k = 3`,
 user-configurable) so obvious far outliers are not promoted to normal seeds.
-Those bootstrap seeds remain stable anchors, and manual labels override only
-the explicitly labeled points. The debug page uses the same selection behavior
+Those bootstrap seeds stay active as reusable seed inputs across runs;
+however, under the current weighted-distance assignment rule a bootstrap
+seed point's final `cluster_id` is recomputed each run and can shift to
+another class. Only manual cluster annotations are output locks for their
+own points. The debug page uses the same selection behavior
 as Step 1-6: click and rectangle selection add to the active selection,
 selected points use black center dots, and saved selection groups are restored
 through the selection module. Label controls are limited to

@@ -20,23 +20,39 @@ It produces:
 
 1. Compute pairwise Euclidean distances, core distances (`cDist`), and
    reachability distances (`rDist`).
-2. Run a modified Prim-style SSDBSCAN expansion from labeled seed points to
-   propagate cluster labels while tracking the maximum edge weight (`Emax`)
-   along each point's path to its seed.
-3. Compute per-point scores from the paper-aligned formulas:
+2. Compute per-point scores:
    - `rDist(p, q) = max(cDist(p), cDist(q), dist(p, q))`.
-   - `rScore = exp(-Emax)` - connectivity strength to the nearest labeled
-     normal seed.
+   - `Emax(p) = min_{s in seeds} rDist(p, s)`; `rScore = exp(-Emax)` -
+     connectivity strength to the nearest labeled seed (any class).
    - `LD(q) = mean(rDist(nearest_i(q), q))` over the `MinPts` nearest
      neighbors by `rDist`; `lScore = exp(-LD(q))`.
    - `simScore = exp(-dist(q, nearest_labeled_outlier))`. If no labeled
      outlier exists yet, the module sets `simScore = 0` so the similarity term
      does not invent outlier evidence.
    - `tScore = alpha(1 - rScore) + beta(1 - lScore) + (1 - alpha - beta) * simScore`.
-4. Mark the top `contamination` fraction by `tScore` as outliers and honor any
-   manual outlier overrides from the labeling module.
-5. Persist the latest result and a bounded run history in `SsdbcodiStore`.
-6. Expose a Flask debug page that visualizes the current preview and supports
+3. Pick outliers: take the top `contamination` fraction of non-seed points by
+   `tScore` and union them with manual `mark_outlier` annotations. Cluster
+   seeds (bootstrap or manual) are never auto-outliered.
+4. Assign every non-outlier point to a class through a direct weighted-distance
+   rule (no back-trace, no classifier). For each class `c` with seed set
+   `S_c`, the score for point `p` is
+
+       score(p, c) = w * min_{s in S_c} rDistNorm(p, s)
+                   + (1 - w) * min_{s in S_c} euclDistNorm(p, s)
+
+   where `rDist` and the Euclidean distance matrix are each normalized by
+   their global maximum so the two terms share a [0, 1] scale, and
+   `w = rscore_weight` (default `0.5`, user-configurable in `[0, 1]`). The
+   point joins the class with the smallest score; `seed_origin` is the seed
+   in that class which produced the minimum.
+5. Manual cluster annotations are final locks for their own points: after the
+   weighted-distance pass, each manually labeled point is forced back to its
+   manual cluster label and removed from the outlier set. Bootstrap seeds are
+   *not* locked - the weighted-distance rule may reassign a bootstrap seed to
+   a different class, and the seeds table reports the original bootstrap
+   label rather than the post-assignment cluster.
+6. Persist the latest result and a bounded run history in `SsdbcodiStore`.
+7. Expose a Flask debug page that visualizes the current preview and supports
    selection-driven labeling plus explicit stored re-runs.
 
 ## Not Responsible For
@@ -70,6 +86,32 @@ prevents one new label from accidentally dropping distant bootstrap anchors.
 Manual `mark_outlier` annotations force points into the outlier set and also
 become labeled outliers for `simScore`; `mark_not_outlier` removes points from
 the outlier set.
+
+Manual cluster annotations are final output locks for their own points: the
+weighted-distance assignment may use them as seeds, but the labeled point's
+final `cluster_id` always equals its manual label and the point is never
+auto-outliered. An explicit `mark_outlier` action still takes precedence over
+a cluster label.
+
+Bootstrap seeds are *not* locked. Because each non-outlier point is assigned
+to whichever class minimizes `w * rDistNorm + (1 - w) * euclDistNorm` to that
+class's nearest seed, a bootstrap seed point may itself end up in a different
+class than the one it was promoted under. The seeds table records the
+original bootstrap label; the scatterplot reflects the post-assignment
+`cluster_id`. The two can therefore disagree by design - this is the cost of
+using a single direct rule instead of a Prim-style expansion that pins each
+seed to its own class.
+
+## Class Assignment Flow
+
+1. Compute pairwise Euclidean distances, `cDist`, and `rDist`.
+2. Compute `Emax`, `rScore`, `lScore`, `simScore`, and `tScore` per point.
+3. Build the outlier set: take the top `contamination` fraction by `tScore`
+   among non-seed points, union with any manual `mark_outlier` annotations.
+4. For every non-outlier point (including bootstrap seed points), apply the
+   weighted-distance rule above and pick the argmin class. Manual cluster
+   labels are reapplied as final locks at the end.
+5. Persist the result and per-point scores.
 
 The debug page intentionally separates feedback entry from algorithm execution:
 `POST /api/label` saves pending manual feedback through the labeling module,
@@ -125,9 +167,15 @@ by dataset so switching fixtures does not mix feedback between datasets.
   "t_score": 0.18,
   "c_dist": 0.21,
   "e_max": 0.09,
-  "seed_origin_point_id": "ring_a_03"
+  "seed_origin_point_id": "ring_a_03",
+  "is_reliable_normal": false,
+  "is_uncertain": false
 }
 ```
+
+`is_reliable_normal` and `is_uncertain` are kept on the schema for backwards
+compatibility but always report `false` under the weighted-distance rule;
+they belonged to the removed back-trace stage.
 
 ### Run result (`SsdbcodiResult`)
 
@@ -145,6 +193,7 @@ by dataset so switching fixtures does not mix feedback between datasets.
     "alpha": 0.4,
     "beta": 0.3,
     "contamination": 0.13,
+    "rscore_weight": 0.5,
     "bootstrap_used": true
   },
   "diagnostics": { "...": "..." }
@@ -220,12 +269,12 @@ Unit tests (`tests/modules/ssdbcodi/test_algorithm.py`):
 1. Pairwise distance is symmetric with zero diagonal.
 2. Core distance returns the MinPts-th neighbor distance.
 3. Reachability uses `max(cDist(p), cDist(q), dist(p, q))` and is symmetric.
-4. SSDBSCAN expansion assigns all points and seeds keep their labels.
-5. `lScore` uses nearest-neighbor `rDist`; `simScore` uses nearest labeled outlier distance and is zero when there is no labeled outlier.
-6. Combined `tScore` honors `alpha`, `beta`, and `gamma = 1 - alpha - beta` with the paper-aligned positive `simScore` term.
-7. Top-`contamination` outlier selection.
-8. End-to-end `run_ssdbcodi_core` returns the expected schema, including labeled outlier indices.
-9. Invalid inputs (no seeds, bad `min_pts`) raise `ValueError`.
+4. `lScore` uses nearest-neighbor `rDist`; `simScore` uses nearest labeled outlier distance and is zero when there is no labeled outlier.
+5. Combined `tScore` honors `alpha`, `beta`, and `gamma = 1 - alpha - beta` with the paper-aligned positive `simScore` term.
+6. Top-`contamination` outlier selection picks the highest `tScore` candidates among non-seed points.
+7. `assign_classes_by_weighted_distance` picks the closest class under the weighted normalized rule, respects `excluded_indices`, and rejects `rscore_weight` outside `[0, 1]`.
+8. End-to-end `run_ssdbcodi_core` returns the expected schema (`assigned_label`, `r/l/sim/t_score`, `outlier_indices`, `seed_origin`, `rscore_weight`, ...) and detects far outliers.
+9. Invalid inputs (no seeds, bad `min_pts`, bad `rscore_weight`) raise `ValueError`.
 
 Service tests (`test_service.py`):
 

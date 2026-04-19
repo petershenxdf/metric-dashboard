@@ -51,6 +51,27 @@ class SsdbcodiServiceTests(unittest.TestCase):
         seed_point_ids = {matrix.point_ids[index] for index in seeds}
         self.assertFalse(any(point_id.startswith("circle_outlier_") for point_id in seed_point_ids))
 
+    def test_circle_bootstrap_initial_labels_do_not_collapse_to_one_seed(self):
+        dataset = create_dataset(
+            ssdbcodi_raw_points(CIRCLES_FIXTURE_DATASET_ID),
+            dataset_id=CIRCLES_FIXTURE_DATASET_ID,
+            feature_names=ssdbcodi_feature_names(),
+        )
+        matrix = create_feature_matrix(dataset)
+
+        result = run_ssdbcodi(
+            matrix,
+            n_clusters=3,
+            min_pts=3,
+            alpha=0.4,
+            beta=0.3,
+            contamination=0.13,
+        )
+
+        counts = cluster_counts(result)
+        self.assertEqual(set(counts), {"cluster_1", "cluster_2", "cluster_3"})
+        self.assertLess(max(counts.values()), 30)
+
     def test_run_ssdbcodi_uses_bootstrap_when_no_labels(self):
         result = run_ssdbcodi(self.matrix, labeling_state=None, n_clusters=3)
 
@@ -143,6 +164,45 @@ class SsdbcodiServiceTests(unittest.TestCase):
             score for score in result.point_scores if score.point_id == "ring_c_04"
         )
         self.assertEqual(relabeled.cluster_id, "cluster_3")
+
+    def test_manual_cluster_label_is_locked_after_smoothing(self):
+        dataset = create_dataset(
+            ssdbcodi_raw_points(CIRCLES_FIXTURE_DATASET_ID),
+            dataset_id=CIRCLES_FIXTURE_DATASET_ID,
+            feature_names=ssdbcodi_feature_names(),
+        )
+        matrix = create_feature_matrix(dataset)
+        labeling_state = LabelingState(
+            dataset_id=CIRCLES_FIXTURE_DATASET_ID,
+            annotations=(
+                ManualAnnotation(
+                    annotation_id="a1",
+                    dataset_id=CIRCLES_FIXTURE_DATASET_ID,
+                    source="manual_label",
+                    scope="selected_points",
+                    point_ids=("circle_inner_01",),
+                    label_type="cluster",
+                    label_value="cluster_2",
+                ),
+            ),
+        )
+
+        result = run_ssdbcodi(
+            matrix,
+            labeling_state=labeling_state,
+            n_clusters=3,
+            min_pts=3,
+            alpha=0.4,
+            beta=0.3,
+            contamination=0.13,
+        )
+
+        relabeled = next(
+            score for score in result.point_scores if score.point_id == "circle_inner_01"
+        )
+        self.assertEqual(relabeled.cluster_id, "cluster_2")
+        self.assertFalse(relabeled.is_outlier)
+        self.assertEqual(result.diagnostics["manual_cluster_lock_count"], 1)
 
     def test_run_ssdbcodi_persists_intermediate_scores(self):
         result = run_ssdbcodi(self.matrix, n_clusters=3)

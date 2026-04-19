@@ -275,7 +275,9 @@ Current implementation:
 5. The `ssdbcodi` module also exists as a dedicated debug page. It preserves
    dashboard-facing `ClusterResult` / `OutlierResult` schemas while exposing
    paper-aligned intermediate scores and selection/labeling integration. Its
-   debug page keeps bootstrap anchors stable under manual labels, separates
+   debug page keeps bootstrap seeds active across runs (manual cluster labels
+   are the only per-point output locks; bootstrap seed points' final
+   `cluster_id` may shift under the weighted-distance rule), separates
    pending label entry from Run and Store execution, and includes demo/moons/
    circles fixtures for shape-specific testing.
 6. The debug fixture is `default_analysis_outlier_debug`, which intentionally contains visible outlier candidates.
@@ -553,9 +555,19 @@ behavior interactively while the adapter boundary remains stable.
 
 Current implementation:
 
-1. Implements the paper algorithm: `rDist`, `lScore`, `simScore`, `tScore`.
+1. Computes `cDist`, `rDist`, `lScore`, `simScore`, and `tScore` from the
+   paper, plus `rScore = exp(-min rDist to any seed)` (a simplified
+   nearest-seed reachability instead of the paper's Prim back-trace `Emax`).
+   Class assignment uses a custom weighted-distance rule
+   `score(p, c) = w * rDistNorm(p, nearest_seed_of_c)
+                + (1 - w) * euclDistNorm(p, nearest_seed_of_c)`
+   with `w = rscore_weight` (default 0.5, user-configurable). Back-trace,
+   the random-forest classifier, and the local smoothing pass from the
+   paper are not used.
 2. Bootstrap: density-safe KMeans seeds, centroid-nearest points promoted to
-   normal anchors. Bootstrap anchors remain stable under manual labels.
+   normal seed inputs. Bootstrap seeds remain available as seeds across
+   runs; only manual cluster annotations lock the final `cluster_id` of the
+   labeled point.
 3. Debug page at `/modules/ssdbcodi/` with `demo`, `moons`, `circles` fixtures.
 4. Uses existing `selection` and `labeling` stores scoped per dataset.
 5. Pending labels are separate from Run & Store: `POST /api/label` saves

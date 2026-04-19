@@ -19,12 +19,18 @@ class PointScores:
     c_dist: float
     e_max: float
     seed_origin_point_id: str | None = None
+    is_reliable_normal: bool = False
+    is_uncertain: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "point_id", clean_text(self.point_id, "point_id"))
         object.__setattr__(self, "cluster_id", clean_text(self.cluster_id, "cluster_id"))
         if not isinstance(self.is_outlier, bool):
             raise ValueError("is_outlier must be a boolean")
+        if not isinstance(self.is_reliable_normal, bool):
+            raise ValueError("is_reliable_normal must be a boolean")
+        if not isinstance(self.is_uncertain, bool):
+            raise ValueError("is_uncertain must be a boolean")
         for name in ("r_score", "l_score", "sim_score", "t_score", "c_dist", "e_max"):
             object.__setattr__(self, name, clean_number(getattr(self, name), name))
         if self.seed_origin_point_id is not None:
@@ -46,6 +52,8 @@ class PointScores:
             "c_dist": self.c_dist,
             "e_max": self.e_max,
             "seed_origin_point_id": self.seed_origin_point_id,
+            "is_reliable_normal": self.is_reliable_normal,
+            "is_uncertain": self.is_uncertain,
         }
 
 

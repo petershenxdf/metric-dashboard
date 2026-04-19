@@ -48,6 +48,7 @@ from .service import (
     DEFAULT_BOOTSTRAP_K,
     DEFAULT_CONTAMINATION,
     DEFAULT_MIN_PTS,
+    DEFAULT_RSCORE_WEIGHT,
     cluster_counts,
     run_ssdbcodi,
 )
@@ -490,11 +491,7 @@ def _plot_points(
     }
     score_lookup = {score.point_id: score for score in result.point_scores}
     selected_ids = set(selection_state.selected_point_ids)
-    cluster_ids = sorted({score.cluster_id for score in result.point_scores})
-    color_lookup = {
-        cluster_id: PALETTE[index % len(PALETTE)]
-        for index, cluster_id in enumerate(cluster_ids)
-    }
+    color_lookup = _stable_result_color_lookup(result)
     screen_lookup = _screen_coordinates(feature_lookup)
 
     return [
@@ -512,6 +509,21 @@ def _plot_points(
         }
         for point_id in matrix.point_ids
     ]
+
+
+def _stable_result_color_lookup(result):
+    n_clusters = int(result.parameters.get("n_clusters_bootstrap", DEFAULT_BOOTSTRAP_K))
+    color_lookup = _label_color_lookup(n_clusters)
+    extra_cluster_ids = sorted(
+        {
+            score.cluster_id
+            for score in result.point_scores
+            if score.cluster_id not in color_lookup
+        }
+    )
+    for offset, cluster_id in enumerate(extra_cluster_ids, start=n_clusters):
+        color_lookup[cluster_id] = PALETTE[offset % len(PALETTE)]
+    return color_lookup
 
 
 def _screen_coordinates(feature_lookup):
@@ -612,7 +624,7 @@ def _params_from_request(dataset_id: str) -> Tuple[Dict[str, Any], Optional[str]
             params[name] = int(raw)
         except ValueError:
             return params, f"{name} must be an integer"
-    for name in ("alpha", "beta", "contamination"):
+    for name in ("alpha", "beta", "contamination", "rscore_weight"):
         raw = request.args.get(name)
         if raw is None:
             continue
@@ -631,7 +643,7 @@ def _params_from_payload(payload: Mapping[str, Any], dataset_id: str) -> Tuple[D
                 params[name] = int(payload[name])
             except (TypeError, ValueError):
                 return params, f"{name} must be an integer"
-    for name in ("alpha", "beta", "contamination"):
+    for name in ("alpha", "beta", "contamination", "rscore_weight"):
         if name in payload and payload.get(name) is not None and payload.get(name) != "":
             try:
                 params[name] = float(payload[name])
@@ -647,6 +659,7 @@ def _default_params() -> Dict[str, Any]:
         "alpha": DEFAULT_ALPHA,
         "beta": DEFAULT_BETA,
         "contamination": DEFAULT_CONTAMINATION,
+        "rscore_weight": DEFAULT_RSCORE_WEIGHT,
     }
 
 
@@ -666,4 +679,6 @@ def _validate_param_ranges(params: Mapping[str, Any], dataset_id: str) -> Option
         return "alpha + beta must not exceed 1"
     if params["contamination"] <= 0 or params["contamination"] >= 0.5:
         return "contamination must be greater than 0 and less than 0.5"
+    if params["rscore_weight"] < 0 or params["rscore_weight"] > 1:
+        return "rscore_weight must be between 0 and 1"
     return None

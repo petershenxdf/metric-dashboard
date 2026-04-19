@@ -30,6 +30,7 @@ DEFAULT_MIN_PTS = 3
 DEFAULT_ALPHA = 0.4
 DEFAULT_BETA = 0.3
 DEFAULT_CONTAMINATION = 0.13
+DEFAULT_RSCORE_WEIGHT = 0.5
 PROVIDER_NAME = "ssdbcodi"
 SEED_SOURCE_BOOTSTRAP = "kmeans_bootstrap"
 SEED_SOURCE_LABEL = "manual_label"
@@ -128,6 +129,7 @@ def run_ssdbcodi(
     alpha: float = DEFAULT_ALPHA,
     beta: float = DEFAULT_BETA,
     contamination: float = DEFAULT_CONTAMINATION,
+    rscore_weight: float = DEFAULT_RSCORE_WEIGHT,
     bootstrap: bool = True,
 ) -> SsdbcodiResult:
     if not isinstance(feature_matrix, FeatureMatrix):
@@ -170,11 +172,15 @@ def run_ssdbcodi(
         alpha=alpha,
         beta=beta,
         contamination=contamination,
+        rscore_weight=rscore_weight,
     )
 
     point_ids = feature_matrix.point_ids
-    assigned_label: Sequence[Optional[str]] = core["assigned_label"]
+    assigned_label: List[Optional[str]] = list(core["assigned_label"])
     outlier_indices = set(core["outlier_indices"])
+    for index, label in manual_seeds.items():
+        assigned_label[index] = label
+        outlier_indices.discard(index)
     for index, is_outlier in outlier_overrides.items():
         if is_outlier:
             outlier_indices.add(index)
@@ -201,8 +207,10 @@ def run_ssdbcodi(
         "alpha": alpha,
         "beta": beta,
         "contamination": contamination,
+        "rscore_weight": rscore_weight,
         "bootstrap_used": used_bootstrap,
         "labeled_outlier_count": len(labeled_outlier_indices),
+        "manual_cluster_lock_count": len(manual_seeds),
     }
 
     cluster_run_id = _stable_run_id(
@@ -245,9 +253,11 @@ def run_ssdbcodi(
             sorted(point_ids[index] for index in outlier_indices)
         ),
         diagnostics={
-            "execution_order": "ssdbscan_expansion_then_outlier_score",
+            "execution_order": "weighted_distance_assignment_then_outlier_score",
             "seed_count": len(combined_seeds),
             "bootstrap_used": used_bootstrap,
+            "rscore_weight": rscore_weight,
+            "manual_cluster_lock_count": len(manual_seeds),
         },
     )
 
@@ -300,6 +310,8 @@ def run_ssdbcodi(
                 if core["seed_origin"][index] is not None
                 else None
             ),
+            is_reliable_normal=False,
+            is_uncertain=False,
         )
         for index in range(len(point_ids))
     )
@@ -319,10 +331,12 @@ def run_ssdbcodi(
             "bootstrap_seed_count": len(bootstrap_seeds),
             "outlier_override_count": len(outlier_overrides),
             "labeled_outlier_count": len(labeled_outlier_indices),
+            "rscore_weight": rscore_weight,
+            "manual_cluster_lock_count": len(manual_seeds),
             "execution_order": (
-                "kmeans_bootstrap_then_ssdbcodi"
+                "kmeans_bootstrap_then_weighted_distance_assignment"
                 if used_bootstrap
-                else "ssdbcodi_with_user_seeds"
+                else "weighted_distance_assignment_with_user_seeds"
             ),
         },
     )
@@ -339,11 +353,13 @@ class SsdbcodiProvider:
         min_pts: int = DEFAULT_MIN_PTS,
         alpha: float = DEFAULT_ALPHA,
         beta: float = DEFAULT_BETA,
+        rscore_weight: float = DEFAULT_RSCORE_WEIGHT,
     ) -> None:
         self._labeling_state = labeling_state
         self._min_pts = min_pts
         self._alpha = alpha
         self._beta = beta
+        self._rscore_weight = rscore_weight
         self._latest_result: Optional[SsdbcodiResult] = None
 
     @property
@@ -373,6 +389,7 @@ class SsdbcodiProvider:
             alpha=self._alpha,
             beta=self._beta,
             contamination=outlier_contamination,
+            rscore_weight=self._rscore_weight,
         )
         self._latest_result = result
         diagnostics = dict(result.diagnostics)
@@ -383,6 +400,7 @@ class SsdbcodiProvider:
                 "execution_order": ["kmeans_bootstrap", "ssdbcodi_integrated"],
                 "legacy_provider": "sequential_lof_then_kmeans",
                 "score_fields": ("r_score", "l_score", "sim_score", "t_score"),
+                "rscore_weight": self._rscore_weight,
             }
         )
         return AnalysisResult(

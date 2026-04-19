@@ -1,12 +1,11 @@
-import math
 import unittest
 
 from app.modules.ssdbcodi.algorithm import (
+    assign_classes_by_weighted_distance,
     combined_outlier_score,
     compute_local_density_score,
     compute_similarity_score,
     core_distances,
-    expand_ssdbscan,
     pairwise_euclidean,
     reachability_matrix,
     run_ssdbcodi_core,
@@ -46,31 +45,6 @@ class SsdbcodiAlgorithmTests(unittest.TestCase):
         self.assertAlmostEqual(r_dist[0, 1], 2.0)
         self.assertAlmostEqual(r_dist[1, 0], 2.0)
         self.assertAlmostEqual(r_dist[1, 1], 2.0)
-
-    def test_expand_ssdbscan_assigns_every_point_to_a_seed(self):
-        r_dist = np.array(
-            [
-                [0.0, 1.0, 5.0, 10.0],
-                [1.0, 0.0, 4.0, 9.0],
-                [5.0, 4.0, 0.0, 1.0],
-                [10.0, 9.0, 1.0, 0.0],
-            ]
-        )
-
-        labels, e_max, origin = expand_ssdbscan(r_dist, {0: "A", 3: "B"})
-
-        self.assertEqual(labels[0], "A")
-        self.assertEqual(labels[3], "B")
-        self.assertIn(labels[1], {"A", "B"})
-        self.assertIn(labels[2], {"A", "B"})
-        self.assertEqual(e_max[0], 0.0)
-        self.assertEqual(e_max[3], 0.0)
-        self.assertEqual(origin[0], 0)
-        self.assertEqual(origin[3], 3)
-
-    def test_expand_ssdbscan_requires_seeds(self):
-        with self.assertRaises(ValueError):
-            expand_ssdbscan(np.zeros((2, 2)), {})
 
     def test_local_density_score_high_for_uniform_density(self):
         values = np.array([[0.0], [1.0], [2.0], [3.0]])
@@ -117,6 +91,64 @@ class SsdbcodiAlgorithmTests(unittest.TestCase):
 
         self.assertEqual(outliers, (1,))
 
+    def test_assign_classes_by_weighted_distance_picks_closest_class(self):
+        values = np.array(
+            [
+                [0.0, 0.0],
+                [0.2, 0.0],
+                [10.0, 0.0],
+                [10.2, 0.0],
+            ]
+        )
+        distances = pairwise_euclidean(values)
+        c_dist = core_distances(distances, min_pts=1)
+        r_dist = reachability_matrix(distances, c_dist)
+
+        labels, origin = assign_classes_by_weighted_distance(
+            distances=distances,
+            r_dist=r_dist,
+            seeds={0: "A", 2: "B"},
+            rscore_weight=0.5,
+        )
+
+        self.assertEqual(labels[0], "A")
+        self.assertEqual(labels[1], "A")
+        self.assertEqual(labels[2], "B")
+        self.assertEqual(labels[3], "B")
+        self.assertEqual(origin[0], 0)
+        self.assertEqual(origin[2], 2)
+
+    def test_assign_classes_respects_excluded_indices(self):
+        values = np.array([[0.0], [1.0], [5.0]])
+        distances = pairwise_euclidean(values)
+        c_dist = core_distances(distances, min_pts=1)
+        r_dist = reachability_matrix(distances, c_dist)
+
+        labels, _ = assign_classes_by_weighted_distance(
+            distances=distances,
+            r_dist=r_dist,
+            seeds={0: "A"},
+            rscore_weight=0.5,
+            excluded_indices=(2,),
+        )
+
+        self.assertEqual(labels[0], "A")
+        self.assertEqual(labels[1], "A")
+        self.assertIsNone(labels[2])
+
+    def test_assign_classes_rejects_invalid_weight(self):
+        values = np.array([[0.0], [1.0]])
+        distances = pairwise_euclidean(values)
+        c_dist = core_distances(distances, min_pts=1)
+        r_dist = reachability_matrix(distances, c_dist)
+        with self.assertRaises(ValueError):
+            assign_classes_by_weighted_distance(
+                distances=distances,
+                r_dist=r_dist,
+                seeds={0: "A"},
+                rscore_weight=1.5,
+            )
+
     def test_run_ssdbcodi_core_returns_expected_keys(self):
         values = [
             [0.0, 0.0],
@@ -135,12 +167,15 @@ class SsdbcodiAlgorithmTests(unittest.TestCase):
             alpha=0.4,
             beta=0.3,
             contamination=0.15,
+            rscore_weight=0.5,
         )
 
         self.assertEqual(set(result.keys()), {
-            "assigned_label", "e_max", "r_score", "l_score", "sim_score",
-            "t_score", "c_dist", "outlier_indices", "seed_origin",
-            "labeled_outlier_indices", "min_pts", "alpha", "beta", "contamination",
+            "assigned_label",
+            "e_max", "r_score", "l_score", "sim_score", "t_score", "c_dist",
+            "outlier_indices", "seed_origin",
+            "labeled_outlier_indices", "min_pts", "alpha", "beta",
+            "contamination", "rscore_weight",
         })
         self.assertEqual(len(result["assigned_label"]), len(values))
         self.assertGreaterEqual(len(result["outlier_indices"]), 1)
@@ -161,6 +196,15 @@ class SsdbcodiAlgorithmTests(unittest.TestCase):
     def test_run_ssdbcodi_core_rejects_no_seeds(self):
         with self.assertRaises(ValueError):
             run_ssdbcodi_core(values=[[0.0], [1.0]], seeds={}, min_pts=1)
+
+    def test_run_ssdbcodi_core_rejects_invalid_rscore_weight(self):
+        with self.assertRaises(ValueError):
+            run_ssdbcodi_core(
+                values=[[0.0], [1.0]],
+                seeds={0: "A"},
+                min_pts=1,
+                rscore_weight=-0.1,
+            )
 
 
 if __name__ == "__main__":
