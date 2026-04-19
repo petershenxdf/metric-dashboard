@@ -75,31 +75,31 @@ Only runs when Stage A returns `on_topic_actionable` or `partial`.
 
 Produces a `StructuredInstruction` delta constrained by JSON schema.
 
-## Supported Intent Types (ITML-Aligned, Phase 1)
+## Supported Intent Types (Phase 1)
 
-These intents map cleanly to pair-based metric learning constraints:
+The intent module emits eight structured intent types. Six of them are valid on both update paths; two (`split_cluster`, `reclassify_outlier`) are path-specific.
 
-1. `feature_weight` - increase, decrease, or ignore a feature. Implemented through pre-scaling, not pair constraints.
+### Shared intents (valid on Path A and Path B)
+
+1. `feature_weight` - increase, decrease, or ignore a feature.
 2. `group_similar` - two groups should be closer together.
 3. `group_dissimilar` - two groups should be farther apart.
 4. `merge_clusters` - two or more existing clusters should be treated as one.
 5. `anchor_point` - one reference point attracts a target group.
-6. `ignore_cluster` - a cluster should be excluded from metric updates this round.
+6. `ignore_cluster` - a cluster should be excluded from this update round.
+
+### Path-specific intents
+
+7. `split_cluster` - **Path B only**. Compiled into `n_clusters += 1` plus interior seeds by `direct_feedback_adapter`. Rejected with `intent_deferred` by `metric_learning_adapter` on Path A because a distance metric alone cannot change KMeans's `k`.
+8. `reclassify_outlier` - **Path B only**. Compiled into a labeled outlier override by `direct_feedback_adapter`. Rejected with `intent_deferred` by `metric_learning_adapter` on Path A because a metric change may not move a point across SSDBCODI's contamination threshold.
 
 Plus non-extracting router outcomes:
 
-7. `needs_clarification`
-8. `non_actionable`
-9. `meta_query`
+9. `needs_clarification`
+10. `non_actionable`
+11. `meta_query`
 
-## Deferred Intent Types (Phase 2)
-
-The following intents do not map cleanly to metric-only updates and are intentionally excluded from Phase 1:
-
-1. `split_cluster` - requires changing the clustering algorithm's `k` or running sub-clustering. Metric change alone does not force KMeans to split a cluster.
-2. `reclassify_outlier` - SSDBCODI's automatic outlier decision still depends on score ranking and contamination, so metric changes may not move a point across the boundary.
-
-These intents will be revisited after the clustering and outlier detection providers are swapped for algorithms that can act on these signals directly. They are not blockers for Phase 1.
+The intent module **emits** all eight intents (7 and 8 included). Path selection is enforced downstream: the extractor does not filter by strategy because the same `StructuredInstruction` may be replayed through either path for comparison on `/workflows/strategy-comparison/`.
 
 ## Structured Instruction Schema
 
@@ -265,4 +265,4 @@ This module is complete when:
 2. Phase 1 intents produce valid deltas that apply cleanly to instruction state.
 3. Flask debug page exposes router result, delta, and current instruction state.
 4. Provider protocol allows swapping local and cloud models without touching service code.
-5. Split and reclassify intents are explicitly documented as deferred and not emitted by the extractor.
+5. `split_cluster` and `reclassify_outlier` intents are emitted by the extractor but marked as Path B-only. Path A (`metric_learning_adapter`) rejects them with `intent_deferred` and suggests routing through Path B (`direct_feedback_adapter`).

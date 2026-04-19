@@ -17,7 +17,7 @@ Suggested app state:
 class AppState:
     dataset = None
     feature_matrix = None
-    transformed_feature_matrix = None  # X @ L, set after a refinement run
+    transformed_feature_matrix = None  # X @ L (Path A) or X @ S (Path B)
     projection = None
     cluster_result = None
     outlier_result = None
@@ -26,9 +26,16 @@ class AppState:
     selection_groups = []
     annotations = []
     chat_history = []
+    active_refinement_strategy = None  # "metric_learning" | "direct_ssdbcodi"
     structured_instruction = None      # evolving single state (not a list)
+
+    # Path A (metric learning)
     active_learned_metric = None       # {M, L, provider, diagnostics}
-    refinement_runs = []               # history for rollback
+    metric_refinement_runs = []        # Path A history for rollback
+
+    # Path B (direct SSDBCODI)
+    active_direct_feedback_plan = None # {seed_updates, feature_scale, param_overrides, ...}
+    direct_refinement_runs = []        # Path B history for rollback
 ```
 
 This can start as a simple object or dictionary attached to `app.config` or a small state module.
@@ -46,10 +53,12 @@ Each state area has one owner:
 | SSDBCODI intermediate scores (`rScore`, `lScore`, `simScore`, `tScore`) | `ssdbcodi` |
 | selected point IDs | `selection` |
 | manual cluster/outlier annotations | `labeling` |
-| chat history | `chatbox` |
+| chat history and active refinement strategy | `chatbox` |
 | structured instruction state | `intent_instruction` |
-| metric constraint set and learned metric | `metric_learning_adapter` |
-| refinement run history and active metric pointer | `refinement_orchestrator` |
+| Path A metric constraint set and learned metric | `metric_learning_adapter` |
+| Path B direct feedback plan | `direct_feedback_adapter` |
+| Path A refinement run history and active metric pointer | `metric_refinement_orchestrator` |
+| Path B refinement run history and active plan pointer | `direct_refinement_orchestrator` |
 
 Other modules may read state through contracts, but should not mutate state they do not own.
 
@@ -67,9 +76,15 @@ Structured feedback can originate from two modules:
 1. `labeling` for direct UI actions such as assigning selected points to a cluster or marking outliers.
 2. `intent_instruction` for chat-derived feedback. This module owns a single evolving `StructuredInstruction` state, updated turn by turn through deltas rather than regenerated from scratch.
 
-Both sources are merged by `metric_learning_adapter.constraint_builder` into a unified `ConstraintSet` before the metric learner runs. The adapter's learned matrix `L = chol(M)` is applied as a linear pre-transform to the feature matrix so projection and algorithm adapters can be reused without modification.
+These two sources feed two parallel adapters:
 
-Phase 1 intents are limited to those that map cleanly to pair-based ITML constraints: `feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`. The intents `split_cluster` and `reclassify_outlier` are deferred because metric change alone cannot drive them - they require upgrading the clustering provider (`k` adjustment or sub-clustering) and the outlier provider (dynamic threshold), respectively.
+1. **Path A** — `metric_learning_adapter.constraint_builder` merges them into a `ConstraintSet` and passes it to the metric learner. The adapter's learned matrix `L = chol(M)` is applied as a linear pre-transform to the feature matrix so projection and algorithm adapters can be reused without modification.
+2. **Path B** — `direct_feedback_adapter.plan_builder` merges them into a `DirectFeedbackPlan` (seed updates, `feature_scale`, `param_overrides`, `excluded_clusters`, `merged_cluster_groups`) that is fed directly to SSDBCODI through `algorithm_adapters.run_default_analysis`.
+
+Phase 1 intents:
+
+- Shared on both paths: `feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`.
+- Path B-only: `split_cluster` (realized as `n_clusters += 1` plus interior seeds) and `reclassify_outlier` (realized as a labeled outlier override). Path A rejects these with `intent_deferred` and a `suggested_strategy: "direct_ssdbcodi"` hint because a learned metric cannot change KMeans's `k` and may not move a point across SSDBCODI's contamination threshold.
 
 ## 4. API Response Envelope
 
@@ -187,9 +202,22 @@ Interactive modules should expose action APIs:
 /modules/metric-learning-adapter/api/constraints
 /modules/metric-learning-adapter/api/fit
 /modules/metric-learning-adapter/api/providers
-/modules/refinement-orchestrator/api/run
-/modules/refinement-orchestrator/api/history
-/modules/refinement-orchestrator/api/rollback
+/modules/direct-feedback-adapter/api/plan
+/modules/direct-feedback-adapter/api/preview
+/modules/metric-refinement-orchestrator/api/run
+/modules/metric-refinement-orchestrator/api/history
+/modules/metric-refinement-orchestrator/api/rollback
+/modules/metric-refinement-orchestrator/api/reset
+/modules/direct-refinement-orchestrator/api/run
+/modules/direct-refinement-orchestrator/api/history
+/modules/direct-refinement-orchestrator/api/rollback
+/modules/direct-refinement-orchestrator/api/reset
+/workflows/instruction-constraints/api/state
+/workflows/instruction-ssdbcodi/api/state
+/workflows/metric-refinement-loop/api/state
+/workflows/direct-refinement-loop/api/state
+/workflows/strategy-comparison/api/state
+/workflows/strategy-comparison/api/run
 ```
 
 Every module-level state route should include module identity fields in the
@@ -437,7 +465,10 @@ This is especially useful for:
 1. selection.
 2. labeling.
 3. chatbox.
-4. refinement orchestrator.
+4. `metric_refinement_orchestrator` (Path A history only).
+5. `direct_refinement_orchestrator` (Path B history only).
+
+Each orchestrator's reset endpoint scopes to its own history so resetting one path does not wipe the other.
 
 ## 8. Fixture Rule
 

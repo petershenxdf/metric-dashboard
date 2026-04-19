@@ -43,6 +43,9 @@ Existing clustering and outlier detection algorithms are treated as fixed extern
 
 ## System Loop
 
+The feedback loop forks into two update strategies after the shared upstream
+stages so they can be compared experimentally.
+
 ```text
 user data
   -> data workspace
@@ -52,12 +55,16 @@ user data
   -> scatterplot
   -> point selection
   -> direct labeling / annotation
-  -> or chatbox feedback
+  -> or chatbox feedback (with refinement strategy selector)
   -> intent instruction for chat-derived feedback
   -> unified structured feedback
-  -> metric-learning adapter
-  -> refinement orchestrator
-  -> updated projection/clusters/outliers
+      +-- Path A: metric_learning_adapter -> metric_refinement_orchestrator
+      |     (learns M, applies L = chol(M) as linear pre-transform,
+      |      reruns projection and algorithm adapters on X · L)
+      +-- Path B: direct_feedback_adapter -> direct_refinement_orchestrator
+            (builds DirectFeedbackPlan of seeds / feature_scale / n_clusters,
+             reruns SSDBCODI directly with merged seeds and param overrides)
+  -> updated projection/clusters/outliers (from whichever path ran)
   -> updated scatterplot
 ```
 
@@ -108,10 +115,12 @@ The module lab is important. It lets the developer open one module at a time and
 | `labeling` | Manual point annotations, cluster labels, and outlier labels | `/modules/labeling/` |
 | `scatterplot` | Point rendering, clusters, outliers, visual selection | `/modules/scatterplot/` |
 | `ssdbcodi` | Active semi-supervised clustering/outlier provider plus score diagnostics | `/modules/ssdbcodi/` |
-| `chatbox` | Chat UI, user feedback, clarification display | `/modules/chatbox/` |
-| `intent_instruction` | Message classification and structured instruction output | `/modules/intent-instruction/` |
-| `metric_learning_adapter` | Structured instruction to metric-learning constraints | `/modules/metric-learning-adapter/` |
-| `refinement_orchestrator` | Coordinates full refinement loop | `/modules/refinement-orchestrator/` |
+| `chatbox` | Chat UI, user feedback, clarification display, refinement strategy selector | `/modules/chatbox/` |
+| `intent_instruction` | Message classification and structured instruction output (shared by both paths) | `/modules/intent-instruction/` |
+| `metric_learning_adapter` | **Path A**: structured instruction to pair-based metric-learning constraints and learned `M` | `/modules/metric-learning-adapter/` |
+| `direct_feedback_adapter` | **Path B**: structured instruction to SSDBCODI-native `DirectFeedbackPlan` | `/modules/direct-feedback-adapter/` |
+| `metric_refinement_orchestrator` | **Path A**: coordinates the metric-learning refinement loop | `/modules/metric-refinement-orchestrator/` |
+| `direct_refinement_orchestrator` | **Path B**: coordinates the direct-SSDBCODI refinement loop | `/modules/direct-refinement-orchestrator/` |
 
 ## Current Implementation Status
 
@@ -191,8 +200,11 @@ The workflow index is grouped by debugging purpose, not just build order:
 5. Future workflows:
    - `/workflows/chat-selection/`
    - `/workflows/chat-intent/`
-   - `/workflows/instruction-constraints/`
-   - `/workflows/refinement-loop/`
+   - `/workflows/instruction-constraints/` (Path A: metric learning constraints preview)
+   - `/workflows/instruction-ssdbcodi/` (Path B: DirectFeedbackPlan preview)
+   - `/workflows/metric-refinement-loop/` (Path A end-to-end)
+   - `/workflows/direct-refinement-loop/` (Path B end-to-end)
+   - `/workflows/strategy-comparison/` (Path A vs Path B side-by-side)
 
 See `docs/workflows.md` for the current workflow contract and grouping rules.
 
@@ -281,16 +293,21 @@ Current planned order:
    - build chat UI with mock or real selection context.
 
 9. `intent_instruction`
-   - compile messages into structured instructions.
+   - compile messages into structured instructions (shared by both update paths; emits the full shared + Path B-only intent set).
 
-10. `metric_learning_adapter`
-   - convert structured instructions into constraints.
+10. Path A: `metric_learning_adapter` / Path B: `direct_feedback_adapter`
+   - 9A `metric_learning_adapter`: convert shared structured instructions into pair-based metric-learning constraints.
+   - 9B `direct_feedback_adapter`: convert shared structured instructions (including `split_cluster` and `reclassify_outlier`) into a SSDBCODI-native `DirectFeedbackPlan` (seed updates, feature_scale, n_clusters, excluded/merged clusters).
 
-11. `refinement_orchestrator`
-   - coordinate one full update loop.
+11. Path A: `metric_refinement_orchestrator` / Path B: `direct_refinement_orchestrator`
+    - 10A `metric_refinement_orchestrator`: fit metric `M`, apply `L = chol(M)` as linear pre-transform, rerun projection and algorithm adapters on `X · L`, track Path A rollback history.
+    - 10B `direct_refinement_orchestrator`: rerun SSDBCODI directly with merged seeds and param overrides from the plan, rerun projection only when geometry changed, track Path B rollback history.
 
-12. integrated dashboard
-   - combine already-tested modules.
+12. `strategy_comparison` workflow
+    - run the same structured feedback through both orchestrators and render outputs side-by-side with a per-point diff.
+
+13. integrated dashboard
+    - combine already-tested modules with the refinement strategy selector wired to whichever path the user chose.
 
 ## Testing Expectations
 

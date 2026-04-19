@@ -47,9 +47,12 @@ For every module, use four testing levels:
 | 6.5 | `ssdbcodi` provider diagnostics | `/modules/ssdbcodi/` | `/workflows/provider-feedback/` |
 | 7 | `chatbox` | `/modules/chatbox/` | `/workflows/chat-selection/` |
 | 8 | `intent_instruction` | `/modules/intent-instruction/` | `/workflows/chat-intent/` |
-| 9 | `metric_learning_adapter` | `/modules/metric-learning-adapter/` | `/workflows/instruction-constraints/` |
-| 10 | `refinement_orchestrator` | `/modules/refinement-orchestrator/` | `/workflows/refinement-loop/` |
-| 11 | integrated dashboard | `/` | full app |
+| 9A | `metric_learning_adapter` (Path A) | `/modules/metric-learning-adapter/` | `/workflows/instruction-constraints/` |
+| 9B | `direct_feedback_adapter` (Path B) | `/modules/direct-feedback-adapter/` | `/workflows/instruction-ssdbcodi/` |
+| 10A | `metric_refinement_orchestrator` (Path A) | `/modules/metric-refinement-orchestrator/` | `/workflows/metric-refinement-loop/` |
+| 10B | `direct_refinement_orchestrator` (Path B) | `/modules/direct-refinement-orchestrator/` | `/workflows/direct-refinement-loop/` |
+| 11 | strategy comparison | n/a | `/workflows/strategy-comparison/` |
+| 12 | integrated dashboard | `/` | full app |
 
 Not every workflow needs to be polished. A workflow page can be simple and diagnostic as long as it shows the interaction clearly.
 
@@ -230,8 +233,14 @@ Examples:
 3. Scatterplot before algorithm adapters exist:
    - use mock cluster and outlier assignments.
 
-4. Refinement orchestrator before real metric learning exists:
+4. `metric_refinement_orchestrator` before real metric learning exists:
    - use mock metric update output.
+
+5. `direct_refinement_orchestrator` before the SSDBCODI rerun integration is wired:
+   - use mock `DirectFeedbackPlan` input and mock SSDBCODI re-run output.
+
+6. `strategy-comparison` workflow before either orchestrator is wired:
+   - stub one or both orchestrator runs with fixture outputs and clearly label them mocked.
 
 ## 6. Workflow Page Standard
 

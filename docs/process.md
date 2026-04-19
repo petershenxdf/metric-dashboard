@@ -586,11 +586,12 @@ Build:
 chatbox
 chatbox Flask page
 mock selection, label, and instruction context
+refinement strategy selector (metric_learning | direct_ssdbcodi)
 ```
 
 Why:
 
-Chatbox needs selection context and may benefit from recent label context, but should not own selection, labeling, algorithms, or the structured instruction state.
+Chatbox needs selection context and may benefit from recent label context, but should not own selection, labeling, algorithms, or the structured instruction state. It also exposes the refinement strategy selector so the user can choose Path A or Path B per refinement without touching orchestrator internals.
 
 Tasks:
 
@@ -598,21 +599,24 @@ Tasks:
 2. Display current selection context and selection groups.
 3. Display recent manual label context when available.
 4. Display the current `StructuredInstruction` panel (read from intent instruction).
-5. Display suggestion chips derived from dataset context. Chips only cover Phase 1 intents.
+5. Display suggestion chips derived from dataset context and the active strategy. Chips for `split_cluster` and `reclassify_outlier` are only shown when strategy is `direct_ssdbcodi`.
 6. Submit user message with a truncated history window (default last 3 turns) plus context.
 7. Show assistant response including router category.
-8. Add `/modules/chatbox/`.
-9. Add APIs for message submission, context, history, and reset.
-10. Support mock selection, label, and instruction context for standalone testing.
+8. Expose a refinement strategy toggle near the input.
+9. Add `/modules/chatbox/`.
+10. Add APIs for message submission, context, history, strategy selection, and reset.
+11. Support mock selection, label, and instruction context for standalone testing.
 
 Unit tests:
 
 1. Empty messages are rejected.
 2. Message payload includes selection context and selection groups.
 3. Message payload includes label context when available.
-4. History window is truncated to the configured N turns.
-5. Chatbox does not call clustering or outlier detection.
-6. Chatbox does not mutate selection, labeling, or structured instruction state.
+4. Message payload includes the active refinement strategy.
+5. History window is truncated to the configured N turns.
+6. Chatbox does not call clustering or outlier detection.
+7. Chatbox does not mutate selection, labeling, or structured instruction state.
+8. Strategy toggle changes the strategy attached to subsequent messages but does not mutate instruction state.
 
 Flask visual check:
 
@@ -620,9 +624,10 @@ Open `/modules/chatbox/` and confirm:
 
 1. chat input works and messages appear in history.
 2. selection and label context are visible.
-3. suggestion chips produce valid Phase 1 intents when clicked.
-4. the `StructuredInstruction` preview panel updates after actionable messages.
-5. response clearly shows whether the LLM provider is real or mocked.
+3. strategy selector is visible and switchable.
+4. suggestion chips produce valid intents when clicked; `split_cluster`/`reclassify_outlier` chips only appear under `direct_ssdbcodi`.
+5. the `StructuredInstruction` preview panel updates after actionable messages.
+6. response clearly shows whether the LLM provider is real or mocked.
 
 Completion:
 
@@ -653,11 +658,10 @@ Tasks:
 4. Prompts use JSON-schema constrained output so small models can produce valid deltas.
 5. Resolve group references (`selected_points`, `selection_group`, `cluster`, `outlier_set`, `point_id`).
 6. Generate clarification prompts for ambiguous and partial messages.
-7. Only emit Phase 1 intents: `feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`.
-8. Do not emit `split_cluster` or `reclassify_outlier` - both are deferred until the clustering and outlier providers are upgraded.
-9. Forward only the last N turns (default 3) plus the current instruction snapshot to the LLM, not full chat history.
-10. Add `/modules/intent-instruction/` with route, compile, state, reset, and examples APIs.
-11. Add `/workflows/chat-intent/`.
+7. Emit all eight Phase 1 intents: `feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`, `split_cluster`, `reclassify_outlier`. Path-specific acceptance is enforced downstream by the adapters, not by the extractor.
+8. Forward only the last N turns (default 3) plus the current instruction snapshot to the LLM, not full chat history.
+9. Add `/modules/intent-instruction/` with route, compile, state, reset, and examples APIs.
+10. Add `/workflows/chat-intent/`.
 
 Unit tests (router):
 
@@ -674,8 +678,9 @@ Unit tests (extractor, with MockLlmProvider):
 4. Feature-importance messages become `feature_weight` deltas.
 5. Anchor references become `anchor_point` deltas.
 6. Ignore-cluster messages become `ignore_cluster` deltas.
-7. Applying a delta to an `StructuredInstruction` produces the expected next state.
-8. Deferred intents are never emitted.
+7. Split-cluster messages become `split_cluster` deltas.
+8. Reclassify-outlier messages become `reclassify_outlier` deltas.
+9. Applying a delta to an `StructuredInstruction` produces the expected next state.
 
 Flask visual check:
 
@@ -693,7 +698,7 @@ Intent parsing is visible and debuggable before metric-learning integration, and
 
 ---
 
-### Step 9: Metric-Learning Adapter
+### Step 9A: Metric-Learning Adapter (Path A)
 
 Build:
 
@@ -706,7 +711,7 @@ constraint preview Flask page
 
 Why:
 
-Structured instructions from labeling or chat should be converted into a single `ConstraintSet` and then into a learned Mahalanobis matrix through one narrow boundary. The learned matrix is applied as a linear pre-transform to the feature matrix so projection and algorithm adapters can be reused unchanged. When SSDBCODI is the active provider, its per-point `tScore` values are available as auxiliary signal for constraint weighting.
+Path A turns structured feedback into a learned Mahalanobis metric. Pair constraints from labeling and chat are collected in a single `ConstraintSet`, fed to ITML, and the resulting `L = chol(M)` is applied as a linear pre-transform to the feature matrix so projection and algorithm adapters can be reused unchanged. When SSDBCODI is the active provider, its per-point `tScore` values are available as auxiliary signal for constraint weighting.
 
 Tasks:
 
@@ -715,7 +720,7 @@ Tasks:
    - `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point` become sampled pair constraints (bounded by `max_pairs_per_intent`, default 50).
    - `feature_weight` populates a `feature_scale` dict, not pair lists.
    - `ignore_cluster` excludes that cluster from all pair generation.
-   - `split_cluster` and `reclassify_outlier` are rejected with `intent_deferred` error code.
+   - `split_cluster` and `reclassify_outlier` are rejected with `intent_deferred` and a `suggested_strategy: "direct_ssdbcodi"` hint pointing to Path B.
    - Detect conflicting must-link / cannot-link pairs and report them.
 2. Define `MetricLearnerProvider` protocol and implement:
    - `IdentityProvider` - returns `M = I`, used for cold start or empty constraints.
@@ -724,6 +729,7 @@ Tasks:
 4. Applying the metric is a linear pre-transform: `X' = X · L` (with `feature_scale` folded in).
 5. Add `/modules/metric-learning-adapter/` with `constraints`, `fit`, and `providers` APIs.
 6. Show instruction input, annotation input, `ConstraintSet`, and learned `M` preview.
+7. Add `/workflows/instruction-constraints/` to show the full Path A constraint preview with real selection and labeling state.
 
 Unit tests:
 
@@ -733,7 +739,7 @@ Unit tests:
 4. `feature_weight` populates `feature_scale`, not pair lists.
 5. `anchor_point` produces must-link pairs from anchor to every target.
 6. `ignore_cluster` excludes that cluster's points.
-7. `split_cluster` and `reclassify_outlier` return `intent_deferred`.
+7. `split_cluster` and `reclassify_outlier` return `intent_deferred` with a Path B hint.
 8. Conflicting must-link/cannot-link pairs are reported.
 9. Labeling `assign_cluster` annotations merge with chat-derived constraints into the same `ConstraintSet`.
 10. `IdentityProvider.fit` returns `M = I`.
@@ -746,68 +752,228 @@ Open `/modules/metric-learning-adapter/` and confirm:
 1. sample instruction plus sample annotations produce a visible `ConstraintSet` with pair count and conflict list.
 2. the active provider is visible and switchable.
 3. fit produces a visible `M` preview and transformed feature matrix preview.
-4. a `split_cluster` instruction produces a clear "intent deferred" error.
+4. a `split_cluster` instruction produces a clear "intent deferred" error that names Path B.
 
 Completion:
 
-Metric-learning input can be inspected before the refinement loop, and the learned metric is usable as a pre-transform by projection and algorithm adapters.
+Path A feedback compilation can be inspected before the refinement loop, and the learned metric is usable as a pre-transform by projection and algorithm adapters.
 
 ---
 
-### Step 10: Refinement Orchestrator
+### Step 9B: Direct Feedback Adapter (Path B)
 
 Build:
 
 ```text
-refinement_orchestrator
-refinement history + rollback
-refinement timeline Flask page
+direct_feedback_adapter
+plan_builder (pure)
+DirectFeedbackPlan schema
+direct feedback preview Flask page
 ```
 
 Why:
 
-The orchestrator coordinates modules but should not contain their internal logic. It must also record each run so users can inspect and revert changes.
+Path B turns the same structured feedback into SSDBCODI-native inputs instead of a metric. SSDBCODI is semi-supervised and accepts seeds, `n_clusters`, contamination, and feature scales directly, so feedback can drive the algorithm without learning a Mahalanobis metric. Keeping Path B as its own adapter (and its own orchestrator in Step 10B) makes each strategy independently testable and keeps their error codes and debug pages clean.
 
 Tasks:
 
-1. Accept a refinement trigger from labeling, intent instruction, or a manual refine button.
+1. Build `plan_builder` as a pure function module that compiles `StructuredInstruction` plus labeling annotations into a `DirectFeedbackPlan` (seed updates, `feature_scale`, `param_overrides`, `excluded_clusters`, `merged_cluster_groups`).
+2. Intent-to-plan mapping:
+   - `feature_weight` → `feature_scale` entry.
+   - `group_similar` → seed updates with a shared `cluster_id`.
+   - `group_dissimilar` → seed updates with distinct `cluster_id` values.
+   - `merge_clusters` → `merged_cluster_groups` entry and relabeled seeds.
+   - `anchor_point` → single seed update for the anchor.
+   - `ignore_cluster` → add to `excluded_clusters`.
+   - `split_cluster` → increment `param_overrides.n_clusters` and add interior seeds (Path B-native, not deferred).
+   - `reclassify_outlier` → seed update with `is_outlier: true`/`false` (Path B-native, not deferred).
+3. Labeling annotations override conflicting chat-derived seeds on the same point.
+4. Detect conflicts (point assigned to two clusters, point assigned and marked outlier, excluded cluster that is also referenced elsewhere, etc.).
+5. Add `/modules/direct-feedback-adapter/` with `plan` and `preview` APIs.
+6. Add `/workflows/instruction-ssdbcodi/` to show the full Path B plan preview with real selection and labeling state.
+
+Unit tests:
+
+1. `feature_weight` populates `feature_scale`, not seeds.
+2. `group_similar` produces `seed_updates` with a shared `cluster_id`.
+3. `group_dissimilar` produces `seed_updates` with distinct `cluster_id`s.
+4. `merge_clusters` produces a `merged_cluster_groups` entry and relabels seeds.
+5. `anchor_point` produces a single seed update for the anchor.
+6. `ignore_cluster` adds the cluster to `excluded_clusters`.
+7. `split_cluster` increments `n_clusters` in `param_overrides` and adds interior seeds.
+8. `reclassify_outlier` produces a seed update with the correct `is_outlier` flag.
+9. Labeling `assign_cluster` annotations override conflicting chat-derived seeds on the same point.
+10. Contradictory assignments are reported in `conflicts`.
+
+Flask visual check:
+
+Open `/modules/direct-feedback-adapter/` and confirm:
+
+1. sample instruction plus sample annotations produce a visible `DirectFeedbackPlan`.
+2. a `split_cluster` instruction is accepted (no `intent_deferred` error) and shows up in `param_overrides`.
+3. a `reclassify_outlier` instruction appears as an outlier seed update.
+4. contradictory seed assignments are listed in the conflicts panel.
+
+Completion:
+
+Path B feedback compilation can be inspected before the refinement loop, and all Phase 1 intents (including `split_cluster` and `reclassify_outlier`) produce valid plans.
+
+---
+
+### Step 10A: Metric Refinement Orchestrator (Path A)
+
+Build:
+
+```text
+metric_refinement_orchestrator
+Path A refinement history + rollback
+Path A refinement timeline Flask page
+```
+
+Why:
+
+Path A's orchestrator coordinates modules for the metric-learning update strategy but should not contain their internal logic. It also records each run so users can inspect and revert changes. Keeping this separate from the Path B orchestrator keeps each strategy's step list, error codes, and history easy to debug.
+
+Tasks:
+
+1. Accept a refinement trigger with `strategy: "metric_learning"` from labeling, intent instruction, or a manual refine button.
 2. Call `metric_learning_adapter.build_constraints`, then `fit`.
 3. Apply the returned `L` to the feature matrix.
 4. Trigger updated projection on the transformed matrix.
 5. Rerun clustering and outlier detection through algorithm adapters on the transformed matrix.
-6. Record each completed run (constraints, learned metric, downstream run IDs, instruction version) in history.
+6. Record each completed run (constraints, learned metric, downstream run IDs, instruction version) in this orchestrator's own history.
 7. Support rollback to a prior run.
-8. Reject triggers that contain `split_cluster` or `reclassify_outlier` intents with a clear `intent_deferred` error.
-9. Add `/modules/refinement-orchestrator/` with run, history, rollback, and reset APIs.
-10. Add `/workflows/refinement-loop/`.
+8. Reject triggers that contain `split_cluster` or `reclassify_outlier` intents with a clear `intent_deferred` error and a pointer to Path B.
+9. Add `/modules/metric-refinement-orchestrator/` with run, history, rollback, and reset APIs.
+10. Add `/workflows/metric-refinement-loop/`.
 
 Unit tests:
 
 1. Actionable instruction triggers the flow in the expected step order.
 2. Empty instruction plus empty annotations produces an identity-metric run (no-op visible as a run).
-3. Deferred intent returns `intent_deferred` before metric fit.
+3. `split_cluster` / `reclassify_outlier` intent returns `intent_deferred` with a Path B suggestion before metric fit.
 4. Metric-fit failure returns diagnostics and leaves prior active run untouched.
 5. Projection failure returns diagnostics and preserves prior run.
 6. History is appended only on success.
 7. Rollback restores a prior run without recomputation.
+8. Path A reset clears only Path A history.
 
 Flask visual check:
 
-Open `/modules/refinement-orchestrator/` and confirm:
+Open `/modules/metric-refinement-orchestrator/` and confirm:
 
 1. timeline shows each step.
 2. intermediate payloads (constraint set, metric metadata) are visible.
 3. failure and success states are understandable.
 4. history list shows prior runs and offers rollback buttons.
-5. deferred-intent errors name the intent clearly.
+5. deferred-intent errors name the intent clearly and suggest Path B.
 
 Completion:
 
-The update loop can be debugged visually, and every successful run is reversible before full dashboard integration.
+The Path A update loop can be debugged visually, and every successful Path A run is reversible before full dashboard integration.
 
 ---
 
-### Step 11: Integrated Dashboard
+### Step 10B: Direct Refinement Orchestrator (Path B)
+
+Build:
+
+```text
+direct_refinement_orchestrator
+Path B refinement history + rollback
+Path B refinement timeline Flask page
+```
+
+Why:
+
+Path B's orchestrator coordinates a different update sequence: `direct_feedback_adapter` builds a plan, `feature_scale` is applied as `X' = X · S`, SSDBCODI re-runs with merged seeds and param overrides, and projection is rerun only when feature geometry changed. The two orchestrators are intentionally separate so each strategy has its own step list, own history, and own debug surface.
+
+Tasks:
+
+1. Accept a refinement trigger with `strategy: "direct_ssdbcodi"` from labeling, intent instruction, or a manual direct-refine button.
+2. Call `direct_feedback_adapter.build_plan` to produce a `DirectFeedbackPlan`.
+3. Apply `feature_scale` (diagonal pre-scale) to the feature matrix when present.
+4. Merge `seed_updates` with existing bootstrap seeds and labeling outlier overrides.
+5. Call `algorithm_adapters.run_default_analysis` with the merged seeds and `param_overrides` so SSDBCODI re-runs with the new configuration.
+6. Trigger an updated projection on the transformed matrix when `feature_scale` changed; reuse projection when only seeds or `n_clusters` changed.
+7. Record each completed run in this orchestrator's own history.
+8. Support rollback to a prior Path B run.
+9. Add `/modules/direct-refinement-orchestrator/` with run, history, rollback, and reset APIs.
+10. Add `/workflows/direct-refinement-loop/`.
+
+Unit tests:
+
+1. Actionable instruction triggers the Path B step order.
+2. `split_cluster` intent produces a plan with `n_clusters += 1` and new seeds; the run completes without an `intent_deferred` error.
+3. `reclassify_outlier` intent flips the point's outlier state on the downstream analysis output.
+4. `feature_weight` intent populates `feature_scale` and the feature matrix is pre-scaled before SSDBCODI.
+5. Seeds from `anchor_point` intent are merged with bootstrap seeds.
+6. `ignore_cluster` intent removes that cluster's seeds from the merged set for this run.
+7. `merge_clusters` intent relabels seeds of the absorbed cluster(s).
+8. Projection is reused when only seed updates change and feature geometry is unchanged.
+9. SSDBCODI run failure returns diagnostics and preserves prior run.
+10. History is appended only on success.
+11. Rollback restores a prior Path B run without recomputation.
+12. Path B reset clears only Path B history.
+
+Flask visual check:
+
+Open `/modules/direct-refinement-orchestrator/` and confirm:
+
+1. timeline shows the Path B step list with `plan_build`, `feature_scale`, `ssdbcodi_run`, `projection`, `effective_analysis`.
+2. `DirectFeedbackPlan` preview is visible (seed updates, feature_scale, param overrides).
+3. a `split_cluster` instruction produces a visible new cluster on the downstream analysis.
+4. a `reclassify_outlier` instruction flips the target point's outlier state.
+5. history list shows prior Path B runs and offers rollback buttons.
+
+Completion:
+
+The Path B update loop can be debugged visually, and `split_cluster` / `reclassify_outlier` produce visible changes to the analysis state without `intent_deferred` errors.
+
+---
+
+### Step 11: Strategy Comparison
+
+Build:
+
+```text
+/workflows/strategy-comparison/
+read-only comparison between Path A and Path B runs on the same feedback snapshot
+```
+
+Why:
+
+Path A and Path B use the same structured feedback but different update mechanisms. The comparison workflow runs the same feedback through both orchestrators and renders their outputs side-by-side so the two strategies can be evaluated on the same data.
+
+Tasks:
+
+1. Snapshot current `StructuredInstruction` and labeling annotations.
+2. Call `metric_refinement_orchestrator.run(strategy="metric_learning")` and `direct_refinement_orchestrator.run(strategy="direct_ssdbcodi")` on the snapshot.
+3. Render both results on one page: two SVG plots side-by-side, two cluster/outlier tables, and key differences (e.g., which points changed cluster, which were reclassified as outliers).
+4. Surface each run's timeline and any `intent_deferred` errors from Path A (so it's clear which intents Path B absorbed).
+5. Do not own refinement history; read from both orchestrators' histories.
+
+Unit tests:
+
+1. Comparison endpoint runs both orchestrators and returns both timelines.
+2. When the feedback contains `split_cluster`, Path A run reports `intent_deferred` and Path B run reports a new cluster.
+3. Comparison payload includes per-point diff summary between the two outputs.
+
+Flask visual check:
+
+Open `/workflows/strategy-comparison/` and confirm:
+
+1. both plots render using the same projection axes for fair visual comparison.
+2. per-point diff table highlights points whose cluster assignment or outlier flag differs between the two paths.
+3. Path A errors are clearly labeled rather than silently omitted.
+
+Completion:
+
+Developers can run the same feedback through both update strategies on one page and see which points differ between Path A and Path B.
+
+---
+
+### Step 12: Integrated Dashboard
 
 Build:
 
@@ -821,17 +987,18 @@ Only integrate after individual modules and workflow demos work.
 
 Tasks:
 
-1. Compose data, projection, adapters, selection, labeling, scatterplot, chatbox, intent, metric learning, and orchestration.
+1. Compose data, projection, adapters, selection, labeling, scatterplot, chatbox, intent, both Path A and Path B adapters, both orchestrators, and the strategy comparison workflow.
 2. Keep dashboard shell thin.
 3. Show current state clearly.
-4. Make refinement loop visible.
+4. Make refinement loop visible, including the active strategy.
 
 Unit tests:
 
 1. Integrated route returns 200.
 2. APIs return coherent state.
-3. irrelevant chat does not trigger refinement.
-4. actionable chat triggers expected flow.
+3. Irrelevant chat does not trigger refinement.
+4. Actionable chat under `metric_learning` strategy triggers Path A flow.
+5. Actionable chat under `direct_ssdbcodi` strategy triggers Path B flow.
 
 Flask visual check:
 
@@ -841,11 +1008,12 @@ Open `/` and confirm:
 2. selecting points updates selection and chatbox context.
 3. direct label actions create structured feedback.
 4. chat instruction produces structured output.
-5. valid instruction updates the visible state.
+5. switching the strategy toggle routes the next refinement to the matching orchestrator.
+6. valid instruction updates the visible state.
 
 Completion:
 
-The first complete local human-in-the-loop workflow works in Flask.
+The first complete local human-in-the-loop workflow works in Flask, with both update strategies independently exercisable and comparable.
 
 ## 6. What Not To Do Early
 
@@ -915,14 +1083,26 @@ Goal:
 
 Chatbox receives selection/label context and intent module outputs structured instructions.
 
-### Milestone 6: Refinement Loop
+### Milestone 6A: Path A Refinement Loop
 
 Goal:
 
-Structured instruction flows through metric-learning adapter and refinement orchestrator.
+Structured instruction flows through `metric_learning_adapter` and `metric_refinement_orchestrator`, producing a learned metric, a retransformed feature matrix, and rerun projection + SSDBCODI output.
+
+### Milestone 6B: Path B Refinement Loop
+
+Goal:
+
+The same structured instruction flows through `direct_feedback_adapter` and `direct_refinement_orchestrator`, producing SSDBCODI-native input updates (seeds, `n_clusters`, feature scales, labeled outliers) and rerun SSDBCODI output. `split_cluster` and `reclassify_outlier` work end-to-end without `intent_deferred` errors.
+
+### Milestone 6.5: Strategy Comparison
+
+Goal:
+
+`/workflows/strategy-comparison/` runs both paths on the same feedback snapshot and renders their analysis outputs side-by-side with a per-point diff.
 
 ### Milestone 7: Integrated Dashboard
 
 Goal:
 
-The full local dashboard supports one complete refinement cycle.
+The full local dashboard supports at least one complete refinement cycle under each strategy.

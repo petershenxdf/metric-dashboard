@@ -50,6 +50,8 @@ The workflow page should answer the question: "Do these modules interact correct
 
 ## 4. Core User Flow
 
+The feedback-to-update loop forks into two parallel update strategies after the shared upstream stages. Users can pick either strategy per refinement; comparison is available through `/workflows/strategy-comparison/`.
+
 ```text
 data workspace
   -> projection
@@ -57,12 +59,25 @@ data workspace
   -> scatterplot
   -> selection
   -> labeling / annotation
-  -> chatbox
+  -> chatbox (with strategy selector)
   -> intent instruction for chat-derived feedback
   -> unified structured feedback
-  -> metric-learning adapter
-  -> refinement orchestrator
-  -> updated projection and algorithm outputs
+      |
+      +-- Path A (metric learning) --------------------------------------------+
+      |     -> metric_learning_adapter (ConstraintSet + LearnedMetric M, L)    |
+      |     -> metric_refinement_orchestrator                                  |
+      |         -> apply L as linear pre-transform: X' = X · L                 |
+      |         -> re-projection on X'                                         |
+      |         -> algorithm_adapters re-run (SSDBCODI) on X'                  |
+      |                                                                        |
+      +-- Path B (direct SSDBCODI) --------------------------------------------+
+            -> direct_feedback_adapter (DirectFeedbackPlan: seeds, scales, k)  |
+            -> direct_refinement_orchestrator                                  |
+                -> apply feature_scale S: X' = X · S (diagonal only)           |
+                -> algorithm_adapters re-run (SSDBCODI) with merged seeds      |
+                   and param overrides                                         |
+                -> re-projection on X' only if feature geometry changed        |
+      -> updated projection and algorithm outputs (from whichever path ran)
 ```
 
 Detailed flow:
@@ -77,11 +92,12 @@ Detailed flow:
 5. User selects points through clicks, lasso, rectangle, API calls, or future selection gestures.
 6. Selection module stores selected/unselected state, can save reusable named selection groups, and exposes reusable selection context.
 7. Labeling module converts direct label actions into manual annotations or structured feedback instructions.
-8. Chatbox receives user text and current selection/labeling context.
-9. Intent instruction module classifies chat text and compiles structured instructions.
-10. Metric-learning adapter merges labeling annotations plus structured instructions into a `ConstraintSet`, runs a replaceable metric learner (default ITML), and returns a Mahalanobis matrix `M`. Its Cholesky factor `L` is applied as a linear pre-transform to the feature matrix.
-11. Refinement orchestrator runs the update sequence on the transformed matrix, records history, and supports rollback.
-12. The integrated dashboard refreshes the visible state.
+8. Chatbox receives user text and current selection/labeling context, and exposes a refinement strategy selector (`metric_learning` | `direct_ssdbcodi`).
+9. Intent instruction module classifies chat text and compiles structured instructions. It emits all eight Phase 1 intents; downstream adapters enforce path-specific acceptance.
+10. **Path A**: `metric_learning_adapter` merges labeling annotations plus structured instructions into a `ConstraintSet`, runs a replaceable metric learner (default ITML), and returns a Mahalanobis matrix `M`. Its Cholesky factor `L` is applied as a linear pre-transform to the feature matrix. `split_cluster` and `reclassify_outlier` are rejected here with `intent_deferred` and redirected to Path B.
+11. **Path B**: `direct_feedback_adapter` compiles the same structured feedback into a `DirectFeedbackPlan` (seed updates, `feature_scale`, `param_overrides`, excluded clusters, merged clusters) that is fed directly to SSDBCODI. `split_cluster` becomes `n_clusters += 1` plus interior seeds; `reclassify_outlier` becomes a labeling outlier override. No Mahalanobis metric is learned on Path B.
+12. `metric_refinement_orchestrator` (Path A) and `direct_refinement_orchestrator` (Path B) each run their update sequence, record their own history, and support rollback independently. Keeping the orchestrators separate keeps each strategy's step list, error codes, and history easy to debug in isolation.
+13. The integrated dashboard refreshes the visible state from whichever path ran.
 
 ## 5. Product Constraints
 
@@ -212,7 +228,7 @@ metric-dashboard/
         routes.py
         templates/intent_instruction/
 
-      metric_learning_adapter/
+      metric_learning_adapter/          Path A: pair constraints -> learned metric
         schemas.py
         constraint_builder.py
         providers/
@@ -224,13 +240,28 @@ metric-dashboard/
         routes.py
         templates/metric_learning_adapter/
 
-      refinement_orchestrator/
+      direct_feedback_adapter/          Path B: feedback -> SSDBCODI-native plan
+        schemas.py
+        plan_builder.py
+        fixtures.py
+        routes.py
+        templates/direct_feedback_adapter/
+
+      metric_refinement_orchestrator/   Path A orchestrator
         schemas.py
         service.py
         history.py
         fixtures.py
         routes.py
-        templates/refinement_orchestrator/
+        templates/metric_refinement_orchestrator/
+
+      direct_refinement_orchestrator/   Path B orchestrator
+        schemas.py
+        service.py
+        history.py
+        fixtures.py
+        routes.py
+        templates/direct_refinement_orchestrator/
 
     workflows/
       fixtures.py               re-exports from app.shared.fixtures
@@ -243,8 +274,14 @@ metric-dashboard/
       analysis_labeling.py
       scatter_selection.py
       scatter_labeling.py
+      provider_feedback.py
+      chat_selection.py
       chat_intent.py
-      refinement_loop.py
+      instruction_constraints.py       Path A constraint preview
+      instruction_ssdbcodi.py          Path B plan preview
+      metric_refinement_loop.py        Path A end-to-end
+      direct_refinement_loop.py        Path B end-to-end
+      strategy_comparison.py           Path A vs Path B side-by-side
 
   tests/
     modules/
@@ -258,7 +295,9 @@ metric-dashboard/
       chatbox/
       intent_instruction/
       metric_learning_adapter/
-      refinement_orchestrator/
+      direct_feedback_adapter/
+      metric_refinement_orchestrator/
+      direct_refinement_orchestrator/
     flask_app/
       test_module_pages.py
       test_workflow_pages.py
@@ -312,44 +351,48 @@ Each module should expose these boundaries where applicable:
 | Labeling | Manual point annotations, cluster labels, and outlier labels | `/modules/labeling/` |
 | Scatterplot | Visual point rendering and selection UI | `/modules/scatterplot/` |
 | SSDBCODI | Active semi-supervised density-based clustering with integrated outlier detection and score diagnostics | `/modules/ssdbcodi/` |
-| Chatbox | Dialogue UI, suggestion chips, clarification flow | `/modules/chatbox/` |
-| Intent Instruction | Router + extractor with replaceable LLM provider; emits instruction deltas | `/modules/intent-instruction/` |
-| Metric-Learning Adapter | Constraint builder + replaceable metric learner (default ITML), returns learned `M` | `/modules/metric-learning-adapter/` |
-| Refinement Orchestrator | End-to-end update coordination, history, rollback | `/modules/refinement-orchestrator/` |
+| Chatbox | Dialogue UI, suggestion chips, clarification flow, strategy selector | `/modules/chatbox/` |
+| Intent Instruction | Router + extractor with replaceable LLM provider; emits instruction deltas for both paths | `/modules/intent-instruction/` |
+| Metric-Learning Adapter | **Path A** constraint builder + replaceable metric learner (default ITML), returns learned `M` | `/modules/metric-learning-adapter/` |
+| Direct Feedback Adapter | **Path B** plan builder that compiles feedback into SSDBCODI-native seeds, feature scales, and param overrides | `/modules/direct-feedback-adapter/` |
+| Metric Refinement Orchestrator | **Path A** end-to-end update coordination, history, rollback | `/modules/metric-refinement-orchestrator/` |
+| Direct Refinement Orchestrator | **Path B** end-to-end update coordination, history, rollback | `/modules/direct-refinement-orchestrator/` |
 
 ## 9. Structured Instruction Families
 
 Chat-derived feedback flows through intent instruction and produces an evolving `StructuredInstruction` state. Each turn the extractor emits a delta that is applied to this state.
 
-### Phase 1 Intents (ITML-Aligned)
+### Phase 1 Intents
 
-These intents map cleanly to pair-based metric learning constraints and are the initial implementation scope:
+The extractor emits eight intents in Phase 1. Six are path-agnostic; two are Path B-only.
 
-1. `feature_weight` - increase, decrease, or ignore a feature (implemented through pre-scaling, not pair constraints).
+Shared intents (valid on both paths):
+
+1. `feature_weight` - increase, decrease, or ignore a feature.
 2. `group_similar` - two groups should be closer together.
 3. `group_dissimilar` - two groups should be farther apart.
 4. `merge_clusters` - two or more clusters should be treated as one.
 5. `anchor_point` - one reference point attracts a target group.
-6. `ignore_cluster` - a cluster is excluded from metric updates this round.
+6. `ignore_cluster` - a cluster is excluded from this update round.
 
-Router-level meta-categories that do not produce pair constraints:
+Path B-only intents (deferred on Path A):
 
-7. `needs_clarification`
-8. `non_actionable`
-9. `meta_query`
+7. `split_cluster` - requires changing SSDBCODI's `n_clusters` and/or adding interior seeds. Accepted by `direct_feedback_adapter`; rejected by `metric_learning_adapter` with `intent_deferred`.
+8. `reclassify_outlier` - requires flipping a labeled outlier override in the labeling store. Accepted by `direct_feedback_adapter`; rejected by `metric_learning_adapter` with `intent_deferred`.
+
+Router-level meta-categories that do not produce pair constraints or plan entries:
+
+9. `needs_clarification`
+10. `non_actionable`
+11. `meta_query`
 
 ### Labeling-Derived Instructions
 
-Manual labels from the labeling module remain as-is. In the constraint builder, `assign_cluster` annotations become intra-label must-link pairs, and `mark_outlier` / `mark_not_outlier` annotations stay within the labeling module's effective state rather than being translated into metric pair constraints in Phase 1.
+Manual labels from the labeling module remain as-is. On **Path A**, `assign_cluster` annotations become intra-label must-link pairs, and `mark_outlier` / `mark_not_outlier` annotations stay within the labeling module's effective state rather than being translated into metric pair constraints in Phase 1. On **Path B**, every manual label becomes a direct `seed_updates` entry in the `DirectFeedbackPlan`, including outlier overrides.
 
-### Phase 2 (Deferred)
+### Why the Two Paths
 
-The following intents are intentionally excluded from Phase 1 because metric change alone cannot drive them:
-
-1. `split_cluster` - requires changing the clustering algorithm's `k` or running sub-clustering.
-2. `reclassify_outlier` - SSDBCODI uses score ranking and contamination for automatic outlier selection; a metric change may not move a point across the boundary, so direct labeling remains the Phase 1 path.
-
-Both will be revisited after the provider contract accepts these signals directly. They are not blockers for Phase 1.
+Path A learns a distance metric from pair constraints (ITML) and retransforms the feature space. Path B uses SSDBCODI's own semi-supervised inputs (seeds, labeled outliers, `n_clusters`, contamination, feature scales) to update the algorithm directly. Both consume the same structured feedback. `/workflows/strategy-comparison/` runs both paths on the same feedback snapshot so the two update strategies can be evaluated side-by-side.
 
 Example delta:
 

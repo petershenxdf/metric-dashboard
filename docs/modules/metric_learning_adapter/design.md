@@ -1,12 +1,23 @@
-# Metric-Learning Adapter Module Design
+# Metric-Learning Adapter Module Design (Path A)
 
 ## Purpose
 
 The metric-learning adapter converts structured instructions and manual labels into a learned Mahalanobis distance metric.
 
-It is the single boundary between dashboard-facing feedback and the actual metric learning library.
+It is the single boundary between dashboard-facing feedback and the actual metric learning library **on Path A**. Path B has its own sibling module, `direct_feedback_adapter`, which compiles the same inputs into SSDBCODI-native inputs instead of a metric. Keeping the two adapters separate makes each path independently testable and keeps their error codes, diagnostics, and debug pages from being entangled.
 
 It should not receive raw chat text. It should only receive validated structured instructions and labeling annotations.
+
+## Relationship to Path B
+
+Both `metric_learning_adapter` (this module) and `direct_feedback_adapter` consume the **same** `StructuredInstruction` and labeling annotation snapshot. The difference is in what they produce:
+
+| Adapter | Output | Consumed by |
+|---|---|---|
+| `metric_learning_adapter` (Path A) | `ConstraintSet` + `LearnedMetric` (M, L) | `metric_refinement_orchestrator` |
+| `direct_feedback_adapter` (Path B) | `DirectFeedbackPlan` (seeds, feature_scale, param_overrides) | `direct_refinement_orchestrator` |
+
+This adapter keeps `split_cluster` and `reclassify_outlier` **deferred** because metric change alone cannot drive them. Those intents are first-class on Path B. See `docs/modules/direct_feedback_adapter/design.md`.
 
 ## Responsibilities
 
@@ -83,14 +94,14 @@ Projection and algorithm adapters are not changed. They receive a transformed fe
 | `anchor_point` | Must-link pairs from anchor to each target group point. |
 | `ignore_cluster` | No pairs generated from that cluster this round. |
 
-### Deferred Intents (Phase 2)
+### Deferred Intents on Path A
 
-The following intents are not converted to constraints in Phase 1:
+On this path the following intents cannot be realized through a distance metric and are deferred:
 
-1. `split_cluster` - would require intra-cluster cannot-link pairs plus a `k` increment in the clustering provider. The metric change alone cannot force KMeans to split a cluster, so this is deferred until the clustering algorithm can accept a split hint directly.
-2. `reclassify_outlier` - SSDBCODI's automatic outlier decision still depends on score ranking and contamination. Users should use labeling's `mark_outlier` / `mark_not_outlier` directly until the provider contract accepts reclassification hints.
+1. `split_cluster` - would require intra-cluster cannot-link pairs plus a `k` increment in the clustering provider. The metric change alone cannot force KMeans to split a cluster, so a learned `M` cannot produce a split here.
+2. `reclassify_outlier` - SSDBCODI's automatic outlier decision still depends on score ranking and contamination. A metric change may not move a point across the contamination threshold.
 
-The constraint builder must reject these intents with a clear error code (`intent_deferred`) if they ever appear in a `StructuredInstruction`. The intent module should not emit them in Phase 1.
+The constraint builder rejects these intents with error code `intent_deferred` and a `suggested_strategy: "direct_ssdbcodi"` hint. The user can route them through Path B (`direct_feedback_adapter` + `direct_refinement_orchestrator`) where they are first-class inputs rather than deferred errors.
 
 ### Pair Sampling
 
@@ -192,7 +203,7 @@ The page should show:
 5. learned `M` preview (heatmap or numeric grid for small feature counts).
 6. transformed feature matrix preview.
 7. note showing whether the provider is real or mocked.
-8. explicit note that `split_cluster` and `reclassify_outlier` intents are deferred.
+8. explicit note that `split_cluster` and `reclassify_outlier` intents are deferred on this path, with a pointer to Path B (`direct_feedback_adapter`).
 
 ## Testing
 

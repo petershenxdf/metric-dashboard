@@ -87,8 +87,11 @@ Workflow routes:
 /workflows/provider-feedback/
 /workflows/chat-selection/
 /workflows/chat-intent/
-/workflows/instruction-constraints/
-/workflows/refinement-loop/
+/workflows/instruction-constraints/       Path A constraint preview
+/workflows/instruction-ssdbcodi/           Path B plan preview
+/workflows/metric-refinement-loop/         Path A end-to-end
+/workflows/direct-refinement-loop/         Path B end-to-end
+/workflows/strategy-comparison/            Path A vs Path B side-by-side
 ```
 
 `/workflows/` groups these routes by debug purpose:

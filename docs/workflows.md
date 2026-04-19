@@ -60,14 +60,30 @@ This page verifies Step 6.5 provider promotion and score availability.
 ### Future Workflows
 
 These placeholders are intentionally visible so future work has a planned
-integration path.
+integration path. Step 9 and Step 10 fork into Path A (metric learning) and
+Path B (direct SSDBCODI) so the two update strategies can be debugged
+independently.
 
 | Step | Route | Purpose |
 | --- | --- | --- |
 | 7 | `/workflows/chat-selection/` | Chat UI receives current selection context. |
-| 8 | `/workflows/chat-intent/` | Chat text becomes structured instruction deltas. |
-| 9 | `/workflows/instruction-constraints/` | Structured instructions and labels become metric-learning constraints. |
-| 10 | `/workflows/refinement-loop/` | Metric fit, transformed projection, rerun analysis, and rollback history. |
+| 8 | `/workflows/chat-intent/` | Chat text becomes structured instruction deltas (same deltas used by both paths). |
+| 9A | `/workflows/instruction-constraints/` | **Path A**: structured instructions and labels become metric-learning constraints. |
+| 9B | `/workflows/instruction-ssdbcodi/` | **Path B**: structured instructions and labels become a `DirectFeedbackPlan` (seeds, feature_scale, param_overrides). |
+| 10A | `/workflows/metric-refinement-loop/` | **Path A**: metric fit, transformed projection, rerun analysis, Path A rollback history. |
+| 10B | `/workflows/direct-refinement-loop/` | **Path B**: SSDBCODI re-run with merged seeds and param overrides, Path B rollback history. |
+| 11 | `/workflows/strategy-comparison/` | Run the same feedback through both paths and render their outputs side-by-side with a per-point diff. |
+
+### Path-Specific Workflow Rules
+
+1. Workflows under step 9 and step 10 should clearly label which path they
+   exercise.
+2. Path A workflows show Path A history only; Path B workflows show Path B
+   history only. Only `/workflows/strategy-comparison/` reads both histories.
+3. A `split_cluster` or `reclassify_outlier` intent should render an
+   `intent_deferred` error in Path A workflows and a completed run in Path B
+   workflows. The comparison workflow is the intended place to see both
+   behaviors next to each other.
 
 ## Ordering Rule
 

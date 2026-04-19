@@ -79,9 +79,11 @@ State is owned by exactly one module - other modules read through contracts, nev
 | selected point IDs | `selection` |
 | manual annotations | `labeling` |
 | chat history | `chatbox` |
-| structured instructions | `intent_instruction` |
-| metric constraints | `metric_learning_adapter` |
-| refinement history | `refinement_orchestrator` |
+| structured instructions (shared) | `intent_instruction` |
+| metric constraints (Path A) | `metric_learning_adapter` |
+| direct feedback plan / active `DirectFeedbackPlan` (Path B) | `direct_feedback_adapter` |
+| Path A refinement history (`metric_refinement_runs`) | `metric_refinement_orchestrator` |
+| Path B refinement history (`direct_refinement_runs`) | `direct_refinement_orchestrator` |
 
 ### Current Pipeline (Steps 1-6, all implemented)
 
@@ -95,6 +97,28 @@ data_workspace -> projection -> algorithm_adapters -> selection -> labeling -> s
 - `scatterplot`: builds a render payload from upstream state; does not own selection or label truth.
 
 The main manual test page for the full Step 1-6 path is `/workflows/scatter-labeling/`.
+
+### Planned Refinement Pipeline (Steps 7-11, A/B fork)
+
+After Step 6.5 the feedback loop forks into two parallel update strategies so they can be compared experimentally. The shared upstream stages are identical:
+
+```
+chatbox (with refinement strategy selector)
+  -> intent_instruction (emits shared + Path B-only intents)
+  -> structured feedback
+      +-- Path A: metric_learning_adapter -> metric_refinement_orchestrator
+      |     (learns M; applies L = chol(M) as linear pre-transform;
+      |      reruns projection and algorithm_adapters on X · L)
+      +-- Path B: direct_feedback_adapter -> direct_refinement_orchestrator
+            (builds DirectFeedbackPlan of seed_updates, feature_scale,
+             param_overrides; reruns SSDBCODI directly with merged seeds)
+  -> /workflows/strategy-comparison/ runs both paths on the same feedback
+```
+
+Intent handling rules:
+- Shared intents: `feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`.
+- Path B-only intents: `split_cluster`, `reclassify_outlier`. Path A adapters return `intent_deferred` for these with `suggested_strategy: "direct_ssdbcodi"`; Path B handles them natively through seed updates and `n_clusters` overrides.
+- Path A and Path B keep independent refinement histories and rollback stacks. Only `/workflows/strategy-comparison/` reads both.
 
 ### SSDBCODI Module (active clustering/outlier provider)
 

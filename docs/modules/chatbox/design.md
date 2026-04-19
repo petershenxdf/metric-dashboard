@@ -17,7 +17,8 @@ It is one path for user feedback. Direct point labels are handled by the labelin
 5. Display suggestion chips generated from current dataset context.
 6. Accept user messages and forward them with context to intent instruction.
 7. Show router-level responses (clarification, off-topic redirect, meta-query answer).
-8. Provide standalone Flask testing with mock selection, label, and instruction context.
+8. Expose a **refinement strategy selector** so the user can pick Path A (`metric_learning`) or Path B (`direct_ssdbcodi`) when triggering a refinement. The selector only affects which orchestrator runs; it does not filter intent extraction.
+9. Provide standalone Flask testing with mock selection, label, and instruction context.
 
 ## Not Responsible For
 
@@ -110,7 +111,7 @@ The chatbox generates a small set of suggestion chips per turn from dataset cont
 3. "Merge group A with cluster 2"
 4. "Treat p42 as a typical point for cluster 1"
 
-Clicking a chip sends the exact phrase as a normal message. Chips always map to Phase 1 intents (no `split_cluster` or `reclassify_outlier` chips).
+Clicking a chip sends the exact phrase as a normal message. Chips cover all Phase 1 intents. Chips for `split_cluster` and `reclassify_outlier` are only shown when the active refinement strategy is Path B (`direct_ssdbcodi`), since Path A rejects those intents with `intent_deferred`.
 
 ## Flask Routes
 
@@ -130,13 +131,14 @@ The page should show:
 
 1. chat history.
 2. message input and send button.
-3. suggestion chips derived from current dataset context.
+3. suggestion chips derived from current dataset context and active refinement strategy.
 4. current selection context panel.
 5. current label context panel when available.
 6. current `StructuredInstruction` preview panel (read from intent instruction API).
 7. response output with router category visible.
-8. a note showing whether selection, label, and instruction context are mocked or real.
-9. a provider status badge showing which LLM is active.
+8. a refinement strategy toggle (`metric_learning` / `direct_ssdbcodi`) visible near the chat input so the user knows which orchestrator the next refinement trigger will hit.
+9. a note showing whether selection, label, and instruction context are mocked or real.
+10. a provider status badge showing which LLM is active.
 
 ## Testing
 
