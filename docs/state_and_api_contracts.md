@@ -26,8 +26,10 @@ class AppState:
     selection_groups = []
     annotations = []
     chat_history = []
-    active_refinement_strategy = None  # "metric_learning" | "direct_ssdbcodi"
     structured_instruction = None      # evolving single state (not a list)
+    intent_memory = None               # Step 8.5 transcript / summary / facts / draft
+    clarification_state = None         # Step 8.5 unresolved slots and next question
+    runtime_validation_report = None   # Step 8.5 provider / evaluation diagnostics
 
     # Path A (metric learning)
     active_learned_metric = None       # {M, L, provider, diagnostics}
@@ -53,8 +55,8 @@ Each state area has one owner:
 | SSDBCODI intermediate scores (`rScore`, `lScore`, `simScore`, `tScore`) | `ssdbcodi` |
 | selected point IDs | `selection` |
 | manual cluster/outlier annotations | `labeling` |
-| chat history and active refinement strategy | `chatbox` |
-| structured instruction state | `intent_instruction` |
+| chat history | `chatbox` |
+| structured instruction state, conversation memory, extracted facts, draft state, clarification agenda, provider runtime config | `intent_instruction` |
 | Path A metric constraint set and learned metric | `metric_learning_adapter` |
 | Path B direct feedback plan | `direct_feedback_adapter` |
 | Path A refinement run history and active metric pointer | `metric_refinement_orchestrator` |
@@ -74,7 +76,27 @@ debug fixtures.
 Structured feedback can originate from two modules:
 
 1. `labeling` for direct UI actions such as assigning selected points to a cluster or marking outliers.
-2. `intent_instruction` for chat-derived feedback. This module owns a single evolving `StructuredInstruction` state, updated turn by turn through deltas rather than regenerated from scratch.
+2. `intent_instruction` for chat-derived feedback. This module owns a single evolving `StructuredInstruction` state, updated turn by turn through deltas rather than regenerated from scratch. The narrow `InstructionSnapshot` view (version, constraints, last_delta) consumed by chatbox is promoted to `app/shared/schemas.py` so `intent_instruction` and `chatbox` can share the shape without one importing the other.
+
+Step 8.5 extends `intent_instruction` ownership beyond final instruction state.
+The module also owns:
+
+1. an append-only transcript log,
+2. a rolling summary that can be passed to the live model,
+3. extracted facts with provenance, confidence, and confirmation state,
+4. an `InstructionDraft` for relevant-but-incomplete feedback,
+5. an irrelevant-turn log so off-topic chatter is auditable but does not pollute the draft,
+6. provider/runtime health and evaluation status.
+
+`intent_instruction` is also responsible for allocating stable constraint IDs. The extractor emits `InstructionDelta` operations with `constraint_id: "pending"`; the service rewrites those to monotonic IDs (`c1`, `c2`, ...) inside `apply_delta` and advances the version counter on the owning `IntentInstructionStore`. Off-topic, meta-query, and ambiguous messages never mutate this state.
+
+Step 7 and Step 8 are strategy-agnostic. Path choice (`metric_learning` vs
+`direct_ssdbcodi`) belongs to the refinement trigger owned by later adapters
+and orchestrators, not to chat intake or intent compilation.
+
+Step 8.5 is also strategy-agnostic. It is a validation gate for the live model
+runtime, memory policy, and structured-output reliability. It must complete
+before Step 9 adapters are trusted with the resulting instruction state.
 
 These two sources feed two parallel adapters:
 
@@ -196,12 +218,23 @@ Interactive modules should expose action APIs:
 /workflows/provider-feedback/api/state
 /modules/chatbox/api/messages
 /modules/chatbox/api/history
-/modules/chatbox/api/strategy
 /modules/chatbox/api/reset
 /modules/chatbox/api/clear
 /modules/intent-instruction/api/route
 /modules/intent-instruction/api/compile
 /modules/intent-instruction/api/state
+/modules/intent-instruction/api/reset
+/modules/intent-instruction/api/examples
+/modules/intent-instruction/api/provider
+/modules/intent-instruction/api/memory
+/modules/intent-instruction/api/draft
+/modules/intent-instruction/api/evaluate
+/workflows/chat-intent/api/messages
+/workflows/chat-intent/api/reset
+/workflows/chat-intent/api/clear
+/workflows/intent-runtime-validation/api/state
+/workflows/intent-runtime-validation/api/message
+/workflows/intent-runtime-validation/api/reset
 /modules/metric-learning-adapter/api/constraints
 /modules/metric-learning-adapter/api/fit
 /modules/metric-learning-adapter/api/providers

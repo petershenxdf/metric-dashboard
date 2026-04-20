@@ -7,8 +7,7 @@ from ..schemas import (
     ALL_INTENT_TYPES,
     ChatMessagePayload,
     ChatResponse,
-    INTENT_TYPES_PATH_B_ONLY,
-    MockInstructionSnapshot,
+    InstructionSnapshot,
 )
 
 
@@ -52,8 +51,8 @@ class _MockDatasetState:
     last_delta: Mapping | None = None
     constraint_counter: int = 0
 
-    def snapshot(self) -> MockInstructionSnapshot:
-        return MockInstructionSnapshot(
+    def snapshot(self) -> InstructionSnapshot:
+        return InstructionSnapshot(
             version=self.version,
             constraints=tuple(self.constraints),
             last_delta=self.last_delta,
@@ -75,7 +74,7 @@ class MockIntentProvider:
     def __init__(self) -> None:
         self._states: Dict[str, _MockDatasetState] = {}
 
-    def current_snapshot(self, dataset_id: str) -> MockInstructionSnapshot:
+    def current_snapshot(self, dataset_id: str) -> InstructionSnapshot:
         return self._state(dataset_id).snapshot()
 
     def reset(self, dataset_id: str) -> None:
@@ -124,7 +123,8 @@ class MockIntentProvider:
             return ChatResponse(
                 reply=(
                     f"Mock provider did not match a known keyword for {payload.message!r}. "
-                    "Step 7 uses keyword matching; Step 8 will use a real LLM. "
+                    "Step 7 uses keyword matching; Step 8 swaps in the real "
+                    "intent-instruction module boundary. "
                     "Try a suggestion chip, or phrase it with a recognized keyword "
                     "(merge, split, ignore, weight, similar, apart, anchor, outlier)."
                 ),
@@ -144,14 +144,8 @@ class MockIntentProvider:
         delta = {"operations": [{"op": "add", "constraint_id": constraint_id, "intent": intent_type}]}
         state.last_delta = delta
 
-        path_note = ""
-        if intent_type in INTENT_TYPES_PATH_B_ONLY and payload.strategy == "metric_learning":
-            path_note = (
-                " (Note: this intent is Path B-only and will be deferred by the metric-learning adapter.)"
-            )
-
         return ChatResponse(
-            reply=f"Recorded {intent_type}.{path_note}",
+            reply=f"Recorded {intent_type}.",
             router_category="on_topic_actionable",
             delta=delta,
             current_instruction_version=state.version,

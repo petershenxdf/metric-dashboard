@@ -598,22 +598,21 @@ Build:
 chatbox
 chatbox Flask page
 mock selection, label, and instruction context
-refinement strategy selector (metric_learning | direct_ssdbcodi)
 chat-selection workflow page
 ```
 
 Current implementation:
 
-1. `/modules/chatbox/` renders chat history, selection context, selection groups, label context, a mock `StructuredInstruction` preview panel, strategy-filtered suggestion chips, example messages, and a `metric_learning` / `direct_ssdbcodi` toggle.
+1. `/modules/chatbox/` renders chat history, selection context, selection groups, label context, a mock `StructuredInstruction` preview panel, full-coverage suggestion chips, and example messages.
 2. Selection context, selection groups, and label context are read from the real `selection` and `labeling` debug stores — chatbox never mutates them.
-3. The intent provider is pluggable via the `IntentProvider` protocol. Step 7 ships `MockIntentProvider` (deterministic keyword-based router + intent extractor); Step 8 will replace it with the real `intent_instruction` module.
+3. The intent provider is pluggable via the `IntentProvider` protocol. Step 7 ships `MockIntentProvider` (deterministic keyword-based router + intent extractor); Step 8 replaces the chatbox-side mock boundary with the real `intent_instruction` module, and Step 8.5 later replaces the module's mock backend with a live model runtime.
 4. The mock `StructuredInstruction` state lives in the provider, not in chatbox, so the chatbox service can be tested (and verified) to not mutate instruction state.
-5. `/modules/chatbox/api/messages` builds a `ChatMessagePayload` containing the last N turns (default 3), the selection context, selection groups, label context, and active strategy, then returns the provider's `ChatResponse` with `router_category`, optional `delta`, `current_instruction_version`, and optional `intent_type`.
+5. `/modules/chatbox/api/messages` builds a `ChatMessagePayload` containing the last N turns (default 3), the selection context, selection groups, and label context, then returns the provider's `ChatResponse` with `router_category`, optional `delta`, `current_instruction_version`, and optional `intent_type`.
 6. `/workflows/chat-selection/` combines selection, labeling, and chatbox state on one page for Step 7 acceptance.
 
 Why:
 
-Chatbox needs selection context and may benefit from recent label context, but should not own selection, labeling, algorithms, or the structured instruction state. It also exposes the refinement strategy selector so the user can choose Path A or Path B per refinement without touching orchestrator internals.
+Chatbox needs selection context and may benefit from recent label context, but should not own selection, labeling, algorithms, structured instruction state, or downstream path choice. Step 7 should stay focused on intake.
 
 Tasks:
 
@@ -621,24 +620,23 @@ Tasks:
 2. Display current selection context and selection groups.
 3. Display recent manual label context when available.
 4. Display the current `StructuredInstruction` panel (read from intent instruction).
-5. Display suggestion chips derived from dataset context and the active strategy. Chips for `split_cluster` and `reclassify_outlier` are only shown when strategy is `direct_ssdbcodi`.
+5. Display suggestion chips derived from dataset context. Chips for `split_cluster` and `reclassify_outlier` remain visible, but should be marked as Path B-only downstream intents instead of hidden.
 6. Submit user message with a truncated history window (default last 3 turns) plus context.
 7. Show assistant response including router category.
-8. Expose a refinement strategy toggle near the input.
-9. Add `/modules/chatbox/`.
-10. Add APIs for message submission, context, history, strategy selection, and reset.
-11. Support mock selection, label, and instruction context for standalone testing.
+8. Add `/modules/chatbox/`.
+9. Add APIs for message submission, context, history, and reset.
+10. Support mock selection, label, and instruction context for standalone testing.
 
 Unit tests:
 
 1. Empty messages are rejected.
 2. Message payload includes selection context and selection groups.
 3. Message payload includes label context when available.
-4. Message payload includes the active refinement strategy.
+4. Message payload is strategy-agnostic.
 5. History window is truncated to the configured N turns.
 6. Chatbox does not call clustering or outlier detection.
 7. Chatbox does not mutate selection, labeling, or structured instruction state.
-8. Strategy toggle changes the strategy attached to subsequent messages but does not mutate instruction state.
+8. Suggestion chips include both shared intents and Path B-only downstream intents.
 
 Flask visual check:
 
@@ -646,14 +644,13 @@ Open `/modules/chatbox/` and confirm:
 
 1. chat input works and messages appear in history.
 2. selection and label context are visible.
-3. strategy selector is visible and switchable.
-4. suggestion chips produce valid intents when clicked; `split_cluster`/`reclassify_outlier` chips only appear under `direct_ssdbcodi`.
-5. the `StructuredInstruction` preview panel updates after actionable messages.
-6. response clearly shows whether the LLM provider is real or mocked.
+3. suggestion chips produce valid intents when clicked, including `split_cluster` and `reclassify_outlier`.
+4. the `StructuredInstruction` preview panel updates after actionable messages.
+5. response clearly shows whether the provider is real or mocked.
 
 Completion:
 
-Chatbox can be manually tested in Flask with mock selection, label, and instruction context.
+Chatbox can be manually tested in Flask with mock instruction state and real selection / label context, and Step 7 remains cleanly separated from downstream path choice.
 
 ---
 
@@ -676,14 +673,25 @@ Tasks:
 
 1. Define `StructuredInstruction` schema and `InstructionDelta` schema.
 2. Implement two-stage pipeline: router first, extractor only on actionable messages.
-3. Define `LlmProvider` protocol; implement `MockLlmProvider` for tests and `LocalQwenProvider` (qwen2.5-14b via Ollama or vLLM) as default runtime. Cloud providers (`ClaudeProvider`, `OpenAIProvider`) slot into the same protocol.
-4. Prompts use JSON-schema constrained output so small models can produce valid deltas.
+3. Define `LlmProvider` protocol and ship `MockLlmProvider` as the Step 8 backend. Real providers are intentionally deferred to Step 8.5 so the compilation boundary can be stabilized first.
+4. Define the JSON-schema-shaped delta contract that future real providers must satisfy.
 5. Resolve group references (`selected_points`, `selection_group`, `cluster`, `outlier_set`, `point_id`).
-6. Generate clarification prompts for ambiguous and partial messages.
+6. Generate clarification prompts for ambiguous messages. Keep `partial` reserved in the shared schema surface for Step 8.5 draft accumulation and follow-up prompting.
 7. Emit all eight Phase 1 intents: `feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`, `split_cluster`, `reclassify_outlier`. Path-specific acceptance is enforced downstream by the adapters, not by the extractor.
-8. Forward only the last N turns (default 3) plus the current instruction snapshot to the LLM, not full chat history.
+8. Forward only the last N turns (default 3) plus the current instruction snapshot to the backend, not full chat history.
 9. Add `/modules/intent-instruction/` with route, compile, state, reset, and examples APIs.
 10. Add `/workflows/chat-intent/`.
+
+Current implementation:
+
+1. `app/modules/intent_instruction/` ships the two-stage pipeline (`router.py`, `extractor.py`) behind a thin `IntentInstructionProvider` service that satisfies the chatbox `IntentProvider` protocol. This lets the Step 7 chatbox swap its mock provider for the real intent module without any chatbox-side code change.
+2. Two protocols stack intentionally: the inner `LlmProvider` (route + extract) is owned by intent_instruction; the outer `IntentProvider` (respond / current_snapshot / reset) is the chatbox boundary. `IntentInstructionProvider` is the adapter between them.
+3. `MockLlmProvider` is the only backend that ships in Step 8. It is deterministic, keyword-driven, and is the tested default for the debug page and `/workflows/chat-intent/`. Step 8.5 and later can add live local or cloud providers through the same `LlmProvider` protocol without changing the rest of the module.
+4. `StructuredInstruction` is owned by intent_instruction; the `InstructionSnapshot` view shared with chatbox was promoted to `app/shared/schemas.py` so both modules consume it without layering violations.
+5. `DatasetContext` bundles dataset_id, feature_names, cluster_ids, selection_group_names, and selected/unselected point ids so the router and extractor can resolve references like "these points" or "cluster 2" deterministically.
+6. The extractor emits `InstructionDelta`s whose operations carry a `pending` constraint_id placeholder; the service rewrites them to real IDs (`c1`, `c2`, ...) inside `apply_delta` and advances the version counter in `IntentInstructionStore`.
+7. Off-topic, meta-query, and ambiguous messages do not mutate state. Actionable messages produce a delta, advance the version, and return the resulting `ChatResponse`. Path B-only intents (`split_cluster`, `reclassify_outlier`) are compiled here without forcing a path decision; adapters handle acceptance later.
+8. `/modules/intent-instruction/` exposes `/health`, `/api/route`, `/api/compile`, `/api/state`, `/api/reset`, and `/api/examples`. `/workflows/chat-intent/` wires the real `intent_instruction` module boundary into a chatbox shell so the structured instruction state can be observed across multiple turns while the backend is still deterministic.
 
 Unit tests (router):
 
@@ -712,11 +720,84 @@ Open `/modules/intent-instruction/` and confirm:
 2. router category and confidence are visible.
 3. delta JSON and resulting `StructuredInstruction` state are both visible.
 4. clarification cases are clear and do not mutate state.
-5. active provider (mock, local qwen, cloud) is clearly labeled.
+5. active backend label is clearly shown, with Step 8 expected to remain mock.
 
 Completion:
 
-Intent parsing is visible and debuggable before metric-learning integration, and the LLM provider is swappable through settings.
+Intent compilation is visible and debuggable before any real-model dependency is introduced. Step 8.5 is the first stage where a live provider becomes mandatory.
+
+---
+
+### Step 8.5: Intent Runtime Validation
+
+Build:
+
+```text
+intent runtime validation workflow
+real-model LLM provider runtime
+structured conversation memory + draft state
+evaluation suite + provider diagnostics
+```
+
+Why:
+
+Step 8 proves the compiler boundary, but it still uses a deterministic mock
+backend. Before Step 9 consumes chat-derived instructions, the project needs a
+real-model gate that validates wording robustness, memory, relevance filtering,
+partial-information accumulation, and schema-valid structured output.
+
+Tasks:
+
+1. Implement a real `LlmProvider` runtime with default config `provider: ollama`, `model: qwen2.5:14b`, `base_url: http://127.0.0.1:11434`.
+2. Keep the runtime provider-agnostic so future Ollama models or online providers can be swapped through configuration instead of branching the workflow design.
+3. Embed the real `scatterplot`, `selection`, and `labeling` module boundaries into `/workflows/intent-runtime-validation/` so the live model is validated against the actual visible plot state.
+4. Add structured conversation memory owned by `intent_instruction`: append-only transcript, rolling summary, working memory, extracted facts with provenance and confidence, incomplete instruction draft, unresolved slots, and irrelevant-turn log.
+5. Activate `partial` handling: extract usable fragments from incomplete user messages, store them in structured form, and ask one focused follow-up question instead of discarding the turn.
+6. Distinguish `off_topic`, `meta_query`, `relevant_but_incomplete`, `actionable`, and correction/overwrite cases before mutating structured state.
+7. Validate paraphrase robustness for wording variants such as `how many clusters`, `how many class`, and `what classes do we have`.
+8. Validate visual grounding cases such as `these points`, `that cluster`, `the selected group`, and label-aware outlier references against the real plot state.
+9. Promote incomplete multi-turn feedback to final `StructuredInstruction` state only when the required fields are present; otherwise keep it in draft form.
+10. Add `/workflows/intent-runtime-validation/` as a composite visual lab: real scatterplot, real selection/labeling context, chat intake, provider/model controls, memory panels, draft state, final structured output, and evaluation diagnostics on one page.
+11. Define replayable evaluation packs for paraphrases, meta-queries, irrelevant turns, partial completion, multi-turn memory, contradiction/correction, visual grounding, state drift, and provider timeout/failure.
+12. Record explicit pass/fail gates that must be satisfied before Step 9 starts.
+
+Current design status:
+
+1. Not implemented yet. Step 8 still ships `MockLlmProvider` only.
+2. Step 8.5 is the first step that actually connects a live model runtime.
+3. The default first model is Ollama `qwen2.5:14b`, but the provider contract must stay open for future local and online models.
+
+Validation suites:
+
+1. Paraphrase suite: same intent, varied wording and grammar.
+2. Meta-query suite: cluster/class synonyms and count questions.
+3. Relevant-vs-irrelevant suite: on-topic fragments are retained; off-topic chatter is logged without polluting instruction state.
+4. Partial-information suite: incomplete messages update the draft and produce a focused follow-up.
+5. Multi-turn memory suite: later turns can resolve earlier references without replaying the entire raw transcript.
+6. Correction suite: updated user statements replace or confirm tentative facts without silently overwriting confirmed instruction state.
+7. Provider failure suite: timeout, invalid JSON, and unavailable model states surface clear diagnostics.
+
+Flask visual check:
+
+Open `/workflows/intent-runtime-validation/` and confirm:
+
+1. a real scatterplot is embedded as the main visual surface, not a detached text-only context panel.
+2. click selection and rectangle selection update selection context immediately on the same page.
+3. current label state is visible and stays consistent with the plot and context panels.
+4. provider health and active model are clearly visible.
+5. the memory view separates transcript, summary, confirmed facts, tentative facts, and irrelevant turns.
+6. incomplete messages update a draft panel instead of mutating final instruction state.
+7. clarification prompts ask for the next missing piece rather than repeating the whole request.
+8. completed multi-turn feedback promotes into final structured output.
+9. evaluation diagnostics show which validation packs passed or failed.
+10. visual references such as `these points`, `that cluster`, and current outliers can be audited by comparing the plot, context panels, and structured output on one screen.
+
+Completion:
+
+Step 9 does not begin until a real-model runtime is wired through
+`LlmProvider`, the default Ollama `qwen2.5:14b` path works, and the validation
+gates for intent robustness, memory, structured extraction, and UI clarity all
+pass.
 
 ---
 
@@ -1104,6 +1185,14 @@ Working. Debug page at `/modules/ssdbcodi/` with three fixtures, selection and l
 Goal:
 
 Chatbox receives selection/label context and intent module outputs structured instructions.
+
+### Milestone 5.5: Real LLM Validation Gate
+
+Goal:
+
+`/workflows/intent-runtime-validation/` proves a live provider runtime
+(default Ollama `qwen2.5:14b`), structured memory, partial-information draft
+handling, and schema-valid structured output before either Step 9 path begins.
 
 ### Milestone 6A: Path A Refinement Loop
 

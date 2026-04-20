@@ -25,7 +25,7 @@ class ChatboxRouteTests(unittest.TestCase):
         self.assertIn(b"Chatbox", response.data)
         self.assertIn(b"Selection Context", response.data)
         self.assertIn(b"Instruction Snapshot", response.data)
-        self.assertIn(b"metric_learning", response.data)
+        self.assertIn(b"Step 7 is strategy-agnostic", response.data)
 
     def test_health_api_reports_working_module(self):
         response = self.client.get("/modules/chatbox/health")
@@ -46,6 +46,8 @@ class ChatboxRouteTests(unittest.TestCase):
         self.assertIn("selection_groups", data)
         self.assertIn("suggestion_chips", data)
         self.assertIn("instruction_snapshot", data)
+        intent_types = {chip["intent_type"] for chip in data["suggestion_chips"]}
+        self.assertIn("split_cluster", intent_types)
 
     def test_history_api_starts_empty_after_reset(self):
         response = self.client.get("/modules/chatbox/api/history")
@@ -81,27 +83,6 @@ class ChatboxRouteTests(unittest.TestCase):
         self.assertEqual(response.json["data"]["response"]["router_category"], "off_topic")
         self.assertIsNone(response.json["data"]["response"]["delta"])
 
-    def test_strategy_api_switches_chips(self):
-        response = self.client.post(
-            "/modules/chatbox/api/strategy",
-            json={"strategy": "direct_ssdbcodi"},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        data = response.json["data"]
-        self.assertEqual(data["strategy"], "direct_ssdbcodi")
-        intent_types = {chip["intent_type"] for chip in data["suggestion_chips"]}
-        self.assertIn("split_cluster", intent_types)
-
-    def test_strategy_api_rejects_unknown_strategy(self):
-        response = self.client.post(
-            "/modules/chatbox/api/strategy",
-            json={"strategy": "no_such_strategy"},
-        )
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json["error"]["code"], "invalid_strategy")
-
     def test_reset_api_clears_chat_state(self):
         self.client.post(
             "/modules/chatbox/api/messages",
@@ -114,8 +95,7 @@ class ChatboxRouteTests(unittest.TestCase):
         self.assertEqual(response.json["data"]["turn_count"], 0)
         self.assertEqual(response.json["data"]["instruction_snapshot"]["version"], 0)
 
-    def test_clear_api_keeps_strategy(self):
-        self.client.post("/modules/chatbox/api/strategy", json={"strategy": "direct_ssdbcodi"})
+    def test_clear_api_clears_turns_only(self):
         self.client.post(
             "/modules/chatbox/api/messages",
             json={"message": "ignore cluster 5"},
@@ -125,13 +105,12 @@ class ChatboxRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["data"]["turn_count"], 0)
-        self.assertEqual(response.json["data"]["strategy"], "direct_ssdbcodi")
 
     def test_chat_selection_workflow_loads(self):
         response = self.client.get("/workflows/chat-selection/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Chat Selection", response.data)
+        self.assertIn(b"Step 7 Chat Intake", response.data)
         self.assertIn(b"Suggestion Chips", response.data)
         self.assertIn(b"Instruction Snapshot", response.data)
 

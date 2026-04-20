@@ -59,24 +59,35 @@ This page verifies Step 6.5 provider promotion and score availability.
 
 ### Feedback Pipeline
 
-Step 7 ships the chatbox module and its selection-context workflow. The
-workflow exercises the chatbox read-only dependency on selection and labeling
-state plus the `MockIntentProvider` keyword router.
+Step 7 is the strategy-agnostic chat intake workflow. It proves that chatbox
+can read selection and labeling context and forward messages without owning any
+upstream state.
+
+Step 8 promotes the chatbox boundary from the mock provider to the real
+`intent_instruction` module, but the backend inside that module is still the
+deterministic `MockLlmProvider` so the compiler boundary stays easy to debug.
+
+Step 8.5 is the real-model runtime gate. It connects `intent_instruction` to a
+live provider runtime (default Ollama `qwen2.5:14b`) and validates memory,
+paraphrase robustness, relevance filtering, partial-information accumulation,
+and schema-valid structured output before Path A / Path B adapters are allowed
+to consume the result.
 
 | Step | Route | Purpose |
 | --- | --- | --- |
-| 7 | `/workflows/chat-selection/` | Chat UI reads current selection and labeling context and records mock intents without mutating upstream state. |
+| 7 | `/workflows/chat-selection/` | Chat UI reads current selection and labeling context, records mock intents, and proves the intake boundary without choosing a refinement path. |
+| 8 | `/workflows/chat-intent/` | Chat text becomes structured instruction deltas at the real `intent_instruction` module boundary, still using the deterministic Step 8 backend so compilation can be debugged independently of live-model behavior. |
+| 8.5 | `/workflows/intent-runtime-validation/` | Live-model validation gate: real scatterplot + selection + labeling context, real provider runtime, grounded conversation memory, partial draft completion, relevance filtering, and evaluation diagnostics before Step 9 begins. |
 
 ### Future Workflows
 
 These placeholders are intentionally visible so future work has a planned
-integration path. Step 9 and Step 10 fork into Path A (metric learning) and
-Path B (direct SSDBCODI) so the two update strategies can be debugged
-independently.
+integration path. After the Step 8.5 validation gate passes, Step 9 and Step
+10 fork into Path A (metric learning) and Path B (direct SSDBCODI) so the two
+update strategies can be debugged independently.
 
 | Step | Route | Purpose |
 | --- | --- | --- |
-| 8 | `/workflows/chat-intent/` | Chat text becomes structured instruction deltas (same deltas used by both paths). |
 | 9A | `/workflows/instruction-constraints/` | **Path A**: structured instructions and labels become metric-learning constraints. |
 | 9B | `/workflows/instruction-ssdbcodi/` | **Path B**: structured instructions and labels become a `DirectFeedbackPlan` (seeds, feature_scale, param_overrides). |
 | 10A | `/workflows/metric-refinement-loop/` | **Path A**: metric fit, transformed projection, rerun analysis, Path A rollback history. |

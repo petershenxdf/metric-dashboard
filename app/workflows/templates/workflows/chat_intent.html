@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}Intent Compilation Workflow{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Step 8 Intent Compilation</p>
+    <h1>Chatbox &rarr; Intent Instruction</h1>
+    <p>
+      Chatbox forwards user messages through the real
+      <code>IntentInstructionProvider</code>. The router decides whether a
+      message is actionable, ambiguous, a meta-query, or off-topic; actionable
+      messages produce a structured <code>InstructionDelta</code> that is
+      applied to the running <code>StructuredInstruction</code> shown below.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Workflow State</h2>
+    <form class="debug-form" method="get">
+      <label>
+        SSDBCODI bootstrap clusters
+        <input type="number" name="n_clusters" min="1" value="{{ n_clusters }}">
+      </label>
+      <button class="button" type="submit">Refresh Step 8</button>
+    </form>
+    <dl class="details">
+      <dt>Dataset</dt>
+      <dd>{{ selection_context.dataset_id }}</dd>
+      <dt>Outer provider</dt>
+      <dd><code>{{ provider_label }}</code></dd>
+      <dt>Inner backend</dt>
+      <dd><code>{{ llm_label }}</code> (deterministic mock)</dd>
+      <dt>Selected points</dt>
+      <dd>{{ selection_context.selected_point_ids | length }}</dd>
+      <dt>Grounded clusters</dt>
+      <dd>{{ analysis_context.cluster_count }}</dd>
+      <dt>Grounded outliers</dt>
+      <dd>{{ analysis_context.outlier_count }}</dd>
+      <dt>Label annotations</dt>
+      <dd>{{ label_context.annotation_count }}</dd>
+      <dt>Chat turns</dt>
+      <dd>{{ state.turns | length }}</dd>
+      <dt>History window</dt>
+      <dd>last {{ history_window }} turns</dd>
+      <dt>Instruction version</dt>
+      <dd>{{ instruction.version }}</dd>
+      <dt>Constraints</dt>
+      <dd>{{ instruction.constraints | length }}</dd>
+    </dl>
+    <div class="actions">
+      <a href="/modules/chatbox/">Open Chatbox Module</a>
+      <a href="/modules/intent-instruction/">Open Intent Instruction Module</a>
+    </div>
+    <p class="small">
+      Step 8 is the deterministic compiler lab. If grounding is incomplete, the
+      response must clarify and leave the compiled instruction unchanged.
+    </p>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Selection Context</h2>
+      <pre>{{ selection_context.to_dict() | tojson(indent=2) }}</pre>
+      <h3>Selection Groups</h3>
+      <pre>{{ selection_groups_payload | tojson(indent=2) }}</pre>
+    </article>
+    <article>
+      <h2>Grounded Analysis Context</h2>
+      <pre>{{ analysis_context | tojson(indent=2) }}</pre>
+      <h3>Label Context</h3>
+      <pre>{{ label_context | tojson(indent=2) }}</pre>
+    </article>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Suggestion Chips</h2>
+      <pre>{{ chips_payload | tojson(indent=2) }}</pre>
+    </article>
+    <article>
+      <h2>Current Structured Instruction</h2>
+      <pre id="current-instruction">{{ instruction.to_dict() | tojson(indent=2) }}</pre>
+    </article>
+  </section>
+
+  <section class="panel">
+    <h2>Chat</h2>
+    <form class="debug-form" data-chat-intent-form>
+      <label>
+        Message
+        <input name="message" placeholder="e.g. merge clusters 1 and 2" autocomplete="off">
+      </label>
+      <button class="button" type="submit">Send</button>
+      <button type="button" data-chat-intent-clear>Clear History</button>
+      <button type="button" data-chat-intent-reset>Reset</button>
+    </form>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Chat History</h2>
+      <pre id="chat-history">{{ state.to_dict().turns | tojson(indent=2) }}</pre>
+    </article>
+    <article>
+      <h2>Last Response</h2>
+      <pre id="last-response">(no message sent yet)</pre>
+    </article>
+  </section>
+
+  <script>
+    const workflowNClusters = "{{ n_clusters }}";
+
+    const postJson = async (url, body = {}) => {
+      return fetch(url, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({n_clusters: workflowNClusters, ...body})
+      });
+    };
+
+    const refreshPage = () => window.location.reload();
+
+    const showError = async (response) => {
+      const payload = await response.json();
+      alert(payload.error ? payload.error.message : "Workflow action failed");
+    };
+
+    document.querySelector("[data-chat-intent-form]").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const input = event.currentTarget.querySelector("[name=message]");
+      const message = input.value.trim();
+      if (!message) { alert("Message cannot be empty"); return; }
+      const response = await postJson("/workflows/chat-intent/api/messages", {message});
+      if (!response.ok) { await showError(response); return; }
+      const payload = await response.json();
+      document.getElementById("last-response").textContent = JSON.stringify(payload.data.response, null, 2);
+      document.getElementById("chat-history").textContent = JSON.stringify(payload.data.state.turns, null, 2);
+      document.getElementById("current-instruction").textContent = JSON.stringify(payload.data.current_instruction, null, 2);
+      input.value = "";
+    });
+
+    document.querySelector("[data-chat-intent-clear]").addEventListener("click", async () => {
+      const response = await postJson("/workflows/chat-intent/api/clear");
+      if (!response.ok) { await showError(response); return; }
+      refreshPage();
+    });
+
+    document.querySelector("[data-chat-intent-reset]").addEventListener("click", async () => {
+      const response = await postJson("/workflows/chat-intent/api/reset");
+      if (!response.ok) { await showError(response); return; }
+      refreshPage();
+    });
+  </script>
+{% endblock %}

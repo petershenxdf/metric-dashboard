@@ -59,9 +59,11 @@ data workspace
   -> scatterplot
   -> selection
   -> labeling / annotation
-  -> chatbox (with strategy selector)
+  -> chatbox
   -> intent instruction for chat-derived feedback
+  -> intent runtime validation (real provider + memory + draft completion)
   -> unified structured feedback
+      -> refinement trigger chooses Path A or Path B
       |
       +-- Path A (metric learning) --------------------------------------------+
       |     -> metric_learning_adapter (ConstraintSet + LearnedMetric M, L)    |
@@ -92,12 +94,13 @@ Detailed flow:
 5. User selects points through clicks, lasso, rectangle, API calls, or future selection gestures.
 6. Selection module stores selected/unselected state, can save reusable named selection groups, and exposes reusable selection context.
 7. Labeling module converts direct label actions into manual annotations or structured feedback instructions.
-8. Chatbox receives user text and current selection/labeling context, and exposes a refinement strategy selector (`metric_learning` | `direct_ssdbcodi`).
-9. Intent instruction module classifies chat text and compiles structured instructions. It emits all eight Phase 1 intents; downstream adapters enforce path-specific acceptance.
-10. **Path A**: `metric_learning_adapter` merges labeling annotations plus structured instructions into a `ConstraintSet`, runs a replaceable metric learner (default ITML), and returns a Mahalanobis matrix `M`. Its Cholesky factor `L` is applied as a linear pre-transform to the feature matrix. `split_cluster` and `reclassify_outlier` are rejected here with `intent_deferred` and redirected to Path B.
-11. **Path B**: `direct_feedback_adapter` compiles the same structured feedback into a `DirectFeedbackPlan` (seed updates, `feature_scale`, `param_overrides`, excluded clusters, merged clusters) that is fed directly to SSDBCODI. `split_cluster` becomes `n_clusters += 1` plus interior seeds; `reclassify_outlier` becomes a labeling outlier override. No Mahalanobis metric is learned on Path B.
-12. `metric_refinement_orchestrator` (Path A) and `direct_refinement_orchestrator` (Path B) each run their update sequence, record their own history, and support rollback independently. Keeping the orchestrators separate keeps each strategy's step list, error codes, and history easy to debug in isolation.
-13. The integrated dashboard refreshes the visible state from whichever path ran.
+8. Chatbox receives user text and current selection/labeling context. It is a strategy-agnostic intake surface.
+9. Intent instruction module classifies chat text and compiles structured instructions. Step 8 proves this compiler boundary with a deterministic backend and emits all eight Phase 1 intents in a strategy-agnostic way.
+10. Step 8.5 validates a live provider runtime before refinement begins. It embeds the real scatterplot plus real selection and labeling context, then adds structured conversation memory, relevant-fragment extraction, partial draft completion, visual grounding checks, meta-query robustness, and provider diagnostics. The default first runtime is Ollama `qwen2.5:14b`, but the contract remains provider-agnostic for future local or online models.
+11. **Path A**: `metric_learning_adapter` merges labeling annotations plus structured instructions into a `ConstraintSet`, runs a replaceable metric learner (default ITML), and returns a Mahalanobis matrix `M`. Its Cholesky factor `L` is applied as a linear pre-transform to the feature matrix. `split_cluster` and `reclassify_outlier` are rejected here with `intent_deferred` and redirected to Path B.
+12. **Path B**: `direct_feedback_adapter` compiles the same structured feedback into a `DirectFeedbackPlan` (seed updates, `feature_scale`, `param_overrides`, excluded clusters, merged clusters) that is fed directly to SSDBCODI. `split_cluster` becomes `n_clusters += 1` plus interior seeds; `reclassify_outlier` becomes a labeling outlier override. No Mahalanobis metric is learned on Path B.
+13. `metric_refinement_orchestrator` (Path A) and `direct_refinement_orchestrator` (Path B) each run their update sequence, record their own history, and support rollback independently. Keeping the orchestrators separate keeps each strategy's step list, error codes, and history easy to debug in isolation.
+14. The integrated dashboard refreshes the visible state from whichever path ran.
 
 ## 5. Product Constraints
 
@@ -219,11 +222,15 @@ metric-dashboard/
         schemas.py
         router.py
         extractor.py
+        service.py
+        store.py
+        memory.py
+        drafts.py
+        evaluation.py
         providers/
           base.py
           mock.py
-          local_qwen.py
-          cloud_claude.py
+          ollama.py
         fixtures.py
         routes.py
         templates/intent_instruction/
@@ -277,6 +284,7 @@ metric-dashboard/
       provider_feedback.py
       chat_selection.py
       chat_intent.py
+      intent_runtime_validation.py     Step 8.5 live-model validation gate
       instruction_constraints.py       Path A constraint preview
       instruction_ssdbcodi.py          Path B plan preview
       metric_refinement_loop.py        Path A end-to-end
@@ -351,8 +359,8 @@ Each module should expose these boundaries where applicable:
 | Labeling | Manual point annotations, cluster labels, and outlier labels | `/modules/labeling/` |
 | Scatterplot | Visual point rendering and selection UI | `/modules/scatterplot/` |
 | SSDBCODI | Active semi-supervised density-based clustering with integrated outlier detection and score diagnostics | `/modules/ssdbcodi/` |
-| Chatbox | Dialogue UI, suggestion chips, clarification flow, strategy selector | `/modules/chatbox/` |
-| Intent Instruction | Router + extractor with replaceable LLM provider; emits instruction deltas for both paths | `/modules/intent-instruction/` |
+| Chatbox | Dialogue UI, suggestion chips, clarification flow, and context-aware intake | `/modules/chatbox/` |
+| Intent Instruction | Router + extractor boundary, structured instruction state, conversation memory, and replaceable provider runtime for both paths | `/modules/intent-instruction/` |
 | Metric-Learning Adapter | **Path A** constraint builder + replaceable metric learner (default ITML), returns learned `M` | `/modules/metric-learning-adapter/` |
 | Direct Feedback Adapter | **Path B** plan builder that compiles feedback into SSDBCODI-native seeds, feature scales, and param overrides | `/modules/direct-feedback-adapter/` |
 | Metric Refinement Orchestrator | **Path A** end-to-end update coordination, history, rollback | `/modules/metric-refinement-orchestrator/` |
@@ -360,7 +368,7 @@ Each module should expose these boundaries where applicable:
 
 ## 9. Structured Instruction Families
 
-Chat-derived feedback flows through intent instruction and produces an evolving `StructuredInstruction` state. Each turn the extractor emits a delta that is applied to this state.
+Chat-derived feedback flows through intent instruction and produces an evolving `StructuredInstruction` state. Each turn the extractor emits a delta that is applied to this state. Step 8 owns the deterministic compiler boundary; Step 8.5 adds real-model runtime validation, structured conversation memory, relevance filtering, and draft promotion before Step 9 adapters consume the result.
 
 ### Phase 1 Intents
 

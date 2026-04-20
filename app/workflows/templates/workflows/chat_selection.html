@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 
-{% block title %}Chat Selection Workflow{% endblock %}
+{% block title %}Chat Intake Workflow{% endblock %}
 
 {% block content %}
   <section class="intro">
-    <p class="eyebrow">Step 7 Chat Selection</p>
+    <p class="eyebrow">Step 7 Chat Intake</p>
     <h1>Chatbox with Selection + Label Context</h1>
     <p>
       Shows how the chatbox reads selection, selection groups, and label
-      context without owning or mutating any of them. The intent provider is
-      mocked until Step 8.
+      context without owning or mutating any of them. Step 7 stops at message
+      intake and does not choose a downstream refinement path.
     </p>
   </section>
 
@@ -18,8 +18,6 @@
     <dl class="details">
       <dt>Dataset</dt>
       <dd>{{ selection_context.dataset_id }}</dd>
-      <dt>Strategy</dt>
-      <dd><code>{{ state.strategy }}</code></dd>
       <dt>Provider</dt>
       <dd><code>{{ provider_label }}</code> (mocked)</dd>
       <dt>Selected points</dt>
@@ -52,7 +50,7 @@
 
   <section class="split">
     <article>
-      <h2>Suggestion Chips (filtered by strategy)</h2>
+      <h2>Suggestion Chips</h2>
       <pre>{{ chips_payload | tojson(indent=2) }}</pre>
     </article>
     <article>

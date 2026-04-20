@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block title %}Intent Instruction{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Module Debug Page</p>
+    <h1>Intent Instruction</h1>
+    <p>
+      Converts chat messages into a structured instruction state through a
+      two-stage pipeline: a router decides whether a message is actionable,
+      ambiguous, a meta-query, or off-topic; an extractor then turns
+      actionable messages into an <code>InstructionDelta</code> that the
+      service layer applies to the running <code>StructuredInstruction</code>.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Provider &amp; Context</h2>
+    <dl class="details">
+      <dt>Dependency mode</dt>
+      <dd>{{ dependency_mode }}</dd>
+      <dt>Outer provider</dt>
+      <dd><code>{{ provider_label }}</code></dd>
+      <dt>Inner backend</dt>
+      <dd><code>{{ llm_label }}</code> (deterministic mock)</dd>
+      <dt>Dataset</dt>
+      <dd><code>{{ dataset_context.dataset_id }}</code></dd>
+      <dt>Feature names</dt>
+      <dd>{{ dataset_context.feature_names | join(", ") }}</dd>
+      <dt>Cluster ids</dt>
+      <dd>{{ dataset_context.cluster_ids | join(", ") }}</dd>
+      <dt>Selection group names</dt>
+      <dd>{{ dataset_context.selection_group_names | join(", ") or "(none)" }}</dd>
+      <dt>Selected points</dt>
+      <dd>{{ dataset_context.selected_point_ids | length }}</dd>
+    </dl>
+  </section>
+
+  <section class="panel">
+    <h2>Examples</h2>
+    <div class="actions" id="example-messages">
+      {% for example in examples %}
+        <button type="button"
+                data-example-text="{{ example.text }}"
+                data-example-intent="{{ example.intent }}">
+          {{ example.label }}
+        </button>
+      {% endfor %}
+    </div>
+    <p class="small">
+      Examples exercise each router category and Phase 1 intent. The Path B
+      examples (<code>split_cluster</code>, <code>reclassify_outlier</code>)
+      still produce a valid instruction delta here; path selection is enforced
+      downstream by the metric-learning and direct-feedback adapters.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Try a Message</h2>
+    <form class="debug-form" data-intent-form>
+      <label>
+        Message
+        <input name="message" placeholder="e.g. merge clusters 1 and 2" autocomplete="off">
+      </label>
+      <button class="button" type="submit">Compile</button>
+      <button type="button" data-intent-route>Route only</button>
+      <button type="button" data-intent-reset>Reset instruction state</button>
+    </form>
+    <p class="small">
+      Step 8 is also strategy-agnostic. Path A / Path B acceptance begins in
+      the adapters after compilation, not in this compiler view.
+    </p>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Last Router Result</h2>
+      <pre id="router-result">(no message submitted yet)</pre>
+    </article>
+    <article>
+      <h2>Last Response / Delta</h2>
+      <pre id="last-response">(no message submitted yet)</pre>
+    </article>
+  </section>
+
+  <section class="panel">
+    <h2>Current Structured Instruction</h2>
+    <pre id="current-instruction">{{ state.to_dict() | tojson(indent=2) }}</pre>
+  </section>
+
+  <section class="panel">
+    <h2>APIs</h2>
+    <div class="actions">
+      <a href="{{ url_for('intent_instruction.state_api') }}">State API</a>
+      <a href="{{ url_for('intent_instruction.examples_api') }}">Examples API</a>
+      <a href="{{ url_for('intent_instruction.health') }}">Health API</a>
+    </div>
+    <p class="small">
+      Router categories: {{ router_categories | join(", ") }}. Intent types:
+      {{ intent_types | join(", ") }}.
+    </p>
+  </section>
+
+  <script>
+    const postJson = async (url, body = {}) => {
+      return fetch(url, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body)
+      });
+    };
+
+    const showError = async (response) => {
+      const payload = await response.json();
+      alert(payload.error ? payload.error.message : "Intent action failed");
+    };
+
+    const currentMessage = () => document.querySelector("[name=message]").value.trim();
+
+    document.querySelectorAll("[data-example-text]").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelector("[name=message]").value = button.dataset.exampleText;
+      });
+    });
+
+    document.querySelector("[data-intent-form]").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const message = currentMessage();
+      if (!message) { alert("Message cannot be empty"); return; }
+      const response = await postJson("/modules/intent-instruction/api/compile", {message});
+      if (!response.ok) { await showError(response); return; }
+      const payload = await response.json();
+      document.getElementById("last-response").textContent = JSON.stringify(payload.data.response, null, 2);
+      document.getElementById("current-instruction").textContent = JSON.stringify(payload.data.current_instruction, null, 2);
+    });
+
+    document.querySelector("[data-intent-route]").addEventListener("click", async () => {
+      const message = currentMessage();
+      if (!message) { alert("Message cannot be empty"); return; }
+      const response = await postJson("/modules/intent-instruction/api/route", {message});
+      if (!response.ok) { await showError(response); return; }
+      const payload = await response.json();
+      document.getElementById("router-result").textContent = JSON.stringify(payload.data.router_result, null, 2);
+    });
+
+    document.querySelector("[data-intent-reset]").addEventListener("click", async () => {
+      const response = await postJson("/modules/intent-instruction/api/reset");
+      if (!response.ok) { await showError(response); return; }
+      const payload = await response.json();
+      document.getElementById("current-instruction").textContent = JSON.stringify(payload.data.current_instruction, null, 2);
+      document.getElementById("last-response").textContent = "(state reset)";
+      document.getElementById("router-result").textContent = "(state reset)";
+    });
+  </script>
+{% endblock %}

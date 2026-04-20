@@ -381,3 +381,33 @@ class AnalysisResult:
             "cluster_result": self.cluster_result.to_dict(),
             "diagnostics": dict(self.diagnostics),
         }
+
+
+@dataclass(frozen=True)
+class InstructionSnapshot:
+    """Narrow view of accumulated structured-instruction state.
+
+    Used at the chatbox / intent-provider boundary so the chatbox does not
+    depend on the richer ``StructuredInstruction`` type owned by the
+    intent_instruction module.
+    """
+
+    version: int
+    constraints: Tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
+    last_delta: "Mapping[str, Any] | None" = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.version, int) or self.version < 0:
+            raise ValueError("version must be a non-negative integer")
+        constraints = tuple(dict(constraint) for constraint in self.constraints)
+        last_delta = dict(self.last_delta) if self.last_delta is not None else None
+        object.__setattr__(self, "constraints", constraints)
+        object.__setattr__(self, "last_delta", last_delta)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "version": self.version,
+            "constraints": [dict(constraint) for constraint in self.constraints],
+            "last_delta": dict(self.last_delta) if self.last_delta is not None else None,
+            "constraint_count": len(self.constraints),
+        }

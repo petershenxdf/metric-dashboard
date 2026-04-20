@@ -47,6 +47,7 @@ For every module, use four testing levels:
 | 6.5 | `ssdbcodi` provider diagnostics | `/modules/ssdbcodi/` | `/workflows/provider-feedback/` |
 | 7 | `chatbox` | `/modules/chatbox/` | `/workflows/chat-selection/` |
 | 8 | `intent_instruction` | `/modules/intent-instruction/` | `/workflows/chat-intent/` |
+| 8.5 | `intent_instruction` live runtime validation | `/modules/intent-instruction/` | `/workflows/intent-runtime-validation/` |
 | 9A | `metric_learning_adapter` (Path A) | `/modules/metric-learning-adapter/` | `/workflows/instruction-constraints/` |
 | 9B | `direct_feedback_adapter` (Path B) | `/modules/direct-feedback-adapter/` | `/workflows/instruction-ssdbcodi/` |
 | 10A | `metric_refinement_orchestrator` (Path A) | `/modules/metric-refinement-orchestrator/` | `/workflows/metric-refinement-loop/` |
@@ -181,6 +182,49 @@ Standalone SSDBCODI behavior:
    per point.
 9. The dataset dropdown can switch among `demo`, `moons`, and `circles`; each
    dataset keeps separate selection, label, and result state.
+
+### Step 7-8 Feedback Pipeline
+
+Expected behavior:
+
+1. `/modules/chatbox/` remains the Step 7 intake test page and uses a mocked
+   intent backend so the chatbox boundary can be tested in isolation.
+2. `/workflows/chat-intent/` is the Step 8 compiler-boundary page: the real
+   `intent_instruction` module is wired into the chatbox shell, but the module
+   backend is still deterministic.
+3. Off-topic and meta-query messages do not mutate `StructuredInstruction`
+   state.
+4. Ambiguous messages produce clarification without inventing constraints.
+5. Actionable messages append a versioned `InstructionDelta`.
+
+### Step 8.5 Real-Model Validation
+
+Expected behavior before Step 9 starts:
+
+1. `/workflows/intent-runtime-validation/` shows provider health, active
+   runtime config, a real embedded scatterplot, real selection/label state,
+   memory state, draft state, final structured output, and evaluation
+   diagnostics together.
+2. The page uses the real `scatterplot`, `selection`, and `labeling` module
+   boundaries rather than mock visual context.
+3. The default runtime is Ollama `qwen2.5:14b`, but the provider selection
+   surface stays generic enough for future local or online models.
+4. Wording variants such as `how many clusters`, `how many class`, and
+   `what classes do we have` are handled as the same meta-query family.
+5. Incomplete but relevant turns update a structured draft and produce a
+   targeted follow-up question.
+6. Irrelevant turns are logged for audit but do not pollute the active draft or
+   final instruction state.
+7. Multi-turn corrections can revise tentative facts without silently
+   overwriting confirmed instruction state.
+8. Visual references such as `these points`, `that cluster`, `the selected
+   group`, and current outliers can be checked directly against the plot on the
+   same page.
+9. Selection changes, selection-group restore, and label changes are reflected
+   in the context seen by the live model before the next turn is processed.
+10. Evaluation packs are replayable so paraphrase, visual-grounding,
+    partial-memory, state-drift, and provider failure cases can be rechecked
+    before Path A / Path B work proceeds.
 
 ## 4. Allowed Alternate Build Path
 

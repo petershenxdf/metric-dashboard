@@ -2,18 +2,23 @@
 
 ## Purpose
 
-The intent instruction module converts user language into stable structured instructions.
+The intent instruction module compiles chat-derived feedback into stable
+structured instructions.
 
-It is the boundary between vague chat text and deterministic downstream metric-learning constraints.
+It is the boundary between conversational text and deterministic downstream
+feedback objects. It should stay strategy-agnostic: Path A / Path B acceptance
+starts after this module, not inside it.
 
-Chat-derived instructions should use the same feedback instruction family as manual labels from the labeling module.
+Step 8 proves the compiler boundary with a deterministic backend. Step 8.5 is
+the first stage that actually connects a live model runtime and validates
+memory, relevance filtering, and partial-information accumulation.
 
 ## Responsibilities
 
 1. Route user messages through a robustness stage before extraction.
-2. Decide whether the message is actionable, ambiguous, partial, off-topic, or a meta-query.
+2. Decide whether a message is actionable, ambiguous, off-topic, or a meta-query.
 3. Resolve references using selection context, selection groups, and existing label context.
-4. Compile actionable messages into structured feedback instructions via a replaceable LLM provider.
+4. Compile actionable messages into structured feedback instructions through a replaceable backend.
 5. Produce delta updates to an evolving `StructuredInstruction` state instead of regenerating it from scratch.
 6. Generate clarification prompts for incomplete or ambiguous messages.
 7. Reject irrelevant messages as constraints.
@@ -22,12 +27,49 @@ Chat-derived instructions should use the same feedback instruction family as man
 ## Not Responsible For
 
 1. Rendering chat UI.
-2. Running metric learning.
-3. Running clustering.
-4. Running outlier detection.
-5. Rendering scatterplot points.
-6. Owning manual label state.
-7. Owning selection state or selection groups.
+2. Choosing Path A vs Path B.
+3. Running metric learning.
+4. Running clustering.
+5. Running outlier detection.
+6. Rendering scatterplot points.
+7. Owning manual label state.
+8. Owning selection state or selection groups.
+
+## Step 8 Contract
+
+Step 8 proves the compilation boundary:
+
+```text
+ChatMessagePayload
+  -> router
+  -> extractor
+  -> InstructionDelta
+  -> StructuredInstruction state
+```
+
+This step should answer one question:
+
+```text
+Can chat feedback become versioned, replayable structured instructions
+without entangling the compiler with downstream refinement policy?
+```
+
+## Step 8.5 Runtime Validation Gate
+
+Step 8 alone is not enough for the project goals because it still runs on
+`MockLlmProvider`.
+
+Step 8.5 is the first stage that connects a live runtime (default Ollama
+`qwen2.5:14b`) and validates five things before Step 9:
+
+1. paraphrase robustness across different wording and structure,
+2. conversation memory that is stored in structured, auditable form,
+3. partial-information extraction plus focused follow-up questions,
+4. relevance filtering between irrelevant chatter and relevant-but-incomplete feedback,
+5. UI visibility of provider state, memory state, draft state, and final output.
+
+See `docs/modules/intent_instruction/runtime_validation.md` for the full Step
+8.5 design.
 
 ## Target Files
 
@@ -37,11 +79,16 @@ app/modules/intent_instruction/
   schemas.py
   router.py
   extractor.py
+  service.py
+  store.py
+  memory.py          # Step 8.5 planned
+  drafts.py          # Step 8.5 planned
+  evaluation.py      # Step 8.5 planned
   providers/
     base.py
     mock.py
-    local_qwen.py
-    cloud_claude.py
+    ollama.py        # Step 8.5 planned default live runtime
+    # cloud providers remain swappable follow-on work
   fixtures.py
   routes.py
   templates/intent_instruction/index.html
@@ -50,60 +97,60 @@ tests/modules/intent_instruction/
   test_router.py
   test_extractor.py
   test_providers.py
+  test_service.py
   test_routes.py
 ```
 
 ## Two-Stage Pipeline
 
-The module never sends raw text straight to an extractor. Every message goes through two stages:
+The module never sends raw text straight to an extractor.
 
 ### Stage A: Router
 
-Classifies the message into one of:
+Current Step 8 categories:
 
 1. `on_topic_actionable` - proceed to extraction.
 2. `on_topic_ambiguous` - extractor is skipped; a clarification question is returned.
-3. `partial` - extractor returns a partial instruction with missing fields flagged.
-4. `meta_query` - the user is asking about current state, not giving feedback; return an informational answer.
-5. `off_topic` - polite redirect with suggested example phrases tied to the current dataset.
+3. `meta_query` - the user is asking about current state, not giving feedback.
+4. `off_topic` - polite redirect with suggested example phrases.
 
-The router is a small classifier prompt that runs on the same LLM provider but with short output.
+`partial` remains reserved in the shared schema surface, but the current Step 8
+implementation does not emit it yet. Step 8.5 turns `partial` into a real
+draft-updating path.
 
 ### Stage B: Extractor
 
-Only runs when Stage A returns `on_topic_actionable` or `partial`.
+Only `on_topic_actionable` reaches the extractor in the current build.
 
-Produces a `StructuredInstruction` delta constrained by JSON schema.
+The extractor emits an `InstructionDelta`, not a fully regenerated instruction
+state. The service layer applies the delta, allocates stable constraint IDs,
+and advances the version counter.
 
 ## Supported Intent Types (Phase 1)
 
-The intent module emits eight structured intent types. Six of them are valid on both update paths; two (`split_cluster`, `reclassify_outlier`) are path-specific.
+The intent module emits eight structured intent types.
 
-### Shared intents (valid on Path A and Path B)
+### Shared intents
 
-1. `feature_weight` - increase, decrease, or ignore a feature.
-2. `group_similar` - two groups should be closer together.
-3. `group_dissimilar` - two groups should be farther apart.
-4. `merge_clusters` - two or more existing clusters should be treated as one.
-5. `anchor_point` - one reference point attracts a target group.
-6. `ignore_cluster` - a cluster should be excluded from this update round.
+1. `feature_weight`
+2. `group_similar`
+3. `group_dissimilar`
+4. `merge_clusters`
+5. `anchor_point`
+6. `ignore_cluster`
 
-### Path-specific intents
+### Path B-only downstream intents
 
-7. `split_cluster` - **Path B only**. Compiled into `n_clusters += 1` plus interior seeds by `direct_feedback_adapter`. Rejected with `intent_deferred` by `metric_learning_adapter` on Path A because a distance metric alone cannot change KMeans's `k`.
-8. `reclassify_outlier` - **Path B only**. Compiled into a labeled outlier override by `direct_feedback_adapter`. Rejected with `intent_deferred` by `metric_learning_adapter` on Path A because a metric change may not move a point across SSDBCODI's contamination threshold.
+7. `split_cluster`
+8. `reclassify_outlier`
 
-Plus non-extracting router outcomes:
-
-9. `needs_clarification`
-10. `non_actionable`
-11. `meta_query`
-
-The intent module **emits** all eight intents (7 and 8 included). Path selection is enforced downstream: the extractor does not filter by strategy because the same `StructuredInstruction` may be replayed through either path for comparison on `/workflows/strategy-comparison/`.
+The compiler still emits all eight intents. It does not pre-filter by path and
+does not add a strategy-specific deferral note. Path A / Path B adapters make
+the acceptance decision later.
 
 ## Structured Instruction Schema
 
-A `StructuredInstruction` is the current accumulated state, a list of constraint entries:
+A `StructuredInstruction` is the current accumulated state:
 
 ```json
 {
@@ -135,11 +182,11 @@ A `StructuredInstruction` is the current accumulated state, a list of constraint
 }
 ```
 
-Delta operations are `add`, `remove`, and `modify`. Small models only need to emit the delta, not the full state.
+Delta operations are `add`, `remove`, and `modify`.
 
 ## Group Reference Schema
 
-Constraints reference groups through a small reference object rather than inline point IDs:
+Constraints reference groups through a compact reference object:
 
 ```json
 {"source": "selection_group", "ref": "group_001"}
@@ -149,45 +196,79 @@ Constraints reference groups through a small reference object rather than inline
 {"source": "point_id", "ref": "p42"}
 ```
 
-This keeps the structure stable when selection or cluster contents change between turns.
+This keeps the structure stable even when selection or cluster contents change
+between turns.
 
 ## Chat History Handling
 
-The module does not feed full chat history to the LLM. The rule is:
+Step 8 does not treat full raw history as memory.
 
 1. The real memory is the `StructuredInstruction` itself.
-2. Each turn the extractor receives `last_N_turns` (default 3), the current instruction snapshot, the new message, and a `dataset_context` summary (feature names, cluster IDs, selection group names).
-3. The model outputs only the delta.
-4. Service layer applies the delta to the instruction state and records it in refinement history.
+2. Each turn the extractor receives the last N turns (default 3), the current
+   instruction snapshot, the new message, and a `DatasetContext` summary.
+3. The model/backend outputs only the delta.
+4. The service layer applies the delta to the instruction state.
 
-This keeps prompts short and works for small local models like qwen2.5-14b.
+Step 8.5 extends this with structured conversation memory owned by
+`intent_instruction`: transcript, rolling summary, extracted facts with
+provenance, incomplete draft state, and irrelevant-turn logging. Chatbox still
+owns only UI history.
 
-## LLM Provider Protocol
+## Two Protocol Layers
+
+There are two protocols in this module.
+
+### Inner: `LlmProvider`
+
+The pluggable router/extractor backend:
 
 ```python
 class LlmProvider(Protocol):
-    def route(self, message: str, context: DatasetContext, history: list[Turn]) -> RouterResult: ...
-    def extract(self, message: str, context: DatasetContext, history: list[Turn],
-                current_instruction: StructuredInstruction) -> InstructionDelta: ...
+    label: str
+
+    def route(self, message: str, context: DatasetContext, history: Sequence[Turn]) -> RouterResult: ...
+
+    def extract(
+        self,
+        message: str,
+        context: DatasetContext,
+        history: Sequence[Turn],
+        current_instruction: StructuredInstruction,
+    ) -> InstructionDelta: ...
 ```
 
-Built-in providers:
+Step 8 ships `MockLlmProvider` only: a deterministic keyword-based backend that
+makes the pipeline fully testable without external dependencies. Step 8.5 adds
+the first live provider runtime, defaulting to Ollama `qwen2.5:14b`, while
+keeping the same protocol open to future local or cloud providers.
 
-1. `MockLlmProvider` - deterministic, used in unit tests.
-2. `LocalQwenProvider` - default; qwen2.5-14b via Ollama or vLLM, JSON-schema constrained output.
-3. `LocalSmallProvider` - qwen2.5-7b or phi fallback for constrained GPU memory.
-4. `ClaudeProvider` - cloud fallback or quality upgrade path.
-5. `OpenAIProvider` - cloud alt.
+### Outer: `IntentProvider`
 
-Provider is chosen from `settings.json` or environment variable. Module code depends only on the protocol.
+The chatbox-facing protocol:
+
+```python
+class IntentProvider(Protocol):
+    label: str
+    def respond(self, payload: ChatMessagePayload) -> ChatResponse: ...
+    def current_snapshot(dataset_id: str) -> InstructionSnapshot: ...
+    def reset(dataset_id: str) -> None: ...
+```
+
+`IntentInstructionProvider` satisfies this outer protocol by:
+
+1. Building `DatasetContext` from `ChatMessagePayload`.
+2. Routing the message.
+3. Extracting an `InstructionDelta` only for actionable messages.
+4. Applying the delta to the module-owned store.
+5. Returning a `ChatResponse` plus a narrower `InstructionSnapshot`.
 
 ## Robustness Guarantees
 
-1. Low-confidence extractor output triggers clarification rather than silent constraint creation.
-2. Vague references ("these points") require a non-empty selection or selection group; otherwise the router returns `on_topic_ambiguous` with a clarification question.
-3. Off-topic messages return a polite redirect that lists example phrases derived from the current dataset state.
-4. The frontend exposes a preview panel showing the current `StructuredInstruction`; users can edit or remove constraints directly.
-5. Suggestion chips on the chatbox debug page are generated from `dataset_context` and produce known-valid intents when clicked.
+1. Vague references such as "these points" require a non-empty selection or selection group.
+2. Off-topic messages never mutate instruction state.
+3. Meta-queries never mutate instruction state.
+4. The frontend exposes both the last response and the current `StructuredInstruction` state.
+5. Suggestion chips on the chatbox debug page are generated so users can exercise every Phase 1 intent.
 
 ## Flask Routes
 
@@ -199,63 +280,84 @@ Provider is chosen from `settings.json` or environment variable. Module code dep
 /modules/intent-instruction/api/state              current StructuredInstruction
 /modules/intent-instruction/api/reset              clear instruction state
 /modules/intent-instruction/api/examples           example messages
+/modules/intent-instruction/api/provider           Step 8.5 planned runtime config + health
+/modules/intent-instruction/api/memory             Step 8.5 planned conversation memory
+/modules/intent-instruction/api/draft              Step 8.5 planned incomplete instruction draft
+/modules/intent-instruction/api/evaluate           Step 8.5 planned evaluation packs
 /workflows/chat-intent/                            chat plus intent workflow
+/workflows/intent-runtime-validation/              Step 8.5 planned live-model validation gate
 ```
 
 ## Flask Debug Page Requirements
 
 The page should show:
 
-1. example message buttons grouped by intent type.
-2. free text input.
-3. mock selection context and selection groups editor.
-4. router classification result and confidence.
-5. structured instruction state preview (editable).
-6. last delta JSON.
-7. clarification question when needed.
-8. provider status (which LLM is active, mock vs real).
+1. Example message buttons grouped by intent type.
+2. Free text input.
+3. Dataset context summary.
+4. Router classification result and confidence.
+5. Structured instruction state preview.
+6. Last delta JSON.
+7. Clarification question when needed.
+8. Provider status showing whether the backend is mock or real.
+
+It should not expose a refinement-strategy selector at Step 8.
 
 ## Testing
 
 Unit tests (router):
 
-1. "today's weather" becomes `off_topic`.
-2. "how many clusters are there" becomes `meta_query`.
-3. "move these together" with empty selection becomes `on_topic_ambiguous`.
-4. "make petal_length more important" becomes `on_topic_actionable`.
+1. `"today's weather"` becomes `off_topic`.
+2. `"how many clusters are there"` becomes `meta_query`.
+3. `"move these together"` with empty selection becomes `on_topic_ambiguous`.
+4. `"make petal_length more important"` becomes `on_topic_actionable`.
 
-Unit tests (extractor, with MockLlmProvider):
+Unit tests (extractor, with `MockLlmProvider`):
 
-1. "these points should be together" becomes `group_similar` delta.
-2. "push cluster 1 away from cluster 3" becomes `group_dissimilar` delta.
-3. "merge clusters 1 and 2" becomes `merge_clusters` delta.
-4. "make feature sepal_width less important" becomes `feature_weight` delta with `direction: decrease`.
-5. "ignore cluster 5" becomes `ignore_cluster` delta.
-6. "treat p42 as a typical example for cluster 2" becomes `anchor_point` delta.
-7. delta apply produces the expected `StructuredInstruction` state.
-
-Unit tests (provider contract):
-
-1. MockLlmProvider satisfies the `LlmProvider` protocol.
-2. Provider factory returns the configured provider.
+1. Grouping messages become `group_similar` deltas.
+2. Separating messages become `group_dissimilar` deltas.
+3. Merge messages become `merge_clusters` deltas.
+4. Feature-importance messages become `feature_weight` deltas.
+5. Anchor references become `anchor_point` deltas.
+6. Ignore-cluster messages become `ignore_cluster` deltas.
+7. Split-cluster messages become `split_cluster` deltas.
+8. Reclassify-outlier messages become `reclassify_outlier` deltas.
+9. Applying a delta to a `StructuredInstruction` produces the expected next state.
 
 Flask route tests:
 
-1. debug page returns 200.
-2. route API returns router category for any input.
-3. compile API returns delta JSON for valid input.
-4. compile API returns clarification JSON for ambiguous input.
-5. state API returns current instruction.
-6. reset API clears state.
+1. Debug page returns 200.
+2. Route API returns router category for valid input.
+3. Compile API returns delta JSON for actionable input.
+4. Compile API returns clarification JSON for ambiguous input.
+5. State API returns current instruction.
+6. Reset API clears state.
 
 Manual browser check:
 
-1. open `/modules/intent-instruction/`.
-2. try each example message.
-3. confirm router category matches expectation.
-4. confirm delta and resulting state are both visible.
-5. confirm vague messages return clarification, not constraints.
-6. confirm off-topic messages do not mutate state.
+1. Open `/modules/intent-instruction/`.
+2. Try each example message.
+3. Confirm router category matches expectation.
+4. Confirm delta and resulting state are both visible.
+5. Confirm vague messages return clarification, not constraints.
+6. Confirm off-topic messages do not mutate state.
+
+## DatasetContext Schema
+
+```python
+@dataclass(frozen=True)
+class DatasetContext:
+    dataset_id: str
+    feature_names: tuple[str, ...]
+    cluster_ids: tuple[str, ...]
+    selection_group_names: tuple[str, ...]
+    selected_point_ids: tuple[str, ...]
+    unselected_point_ids: tuple[str, ...]
+```
+
+The `IntentInstructionProvider` builds this from `ChatMessagePayload` plus a
+small per-dataset feature-name lookup. Routers and extractors use it to
+resolve references such as "these points" or "cluster 2".
 
 ## Completion Criteria
 
@@ -264,5 +366,7 @@ This module is complete when:
 1. Router and extractor are independently testable with `MockLlmProvider`.
 2. Phase 1 intents produce valid deltas that apply cleanly to instruction state.
 3. Flask debug page exposes router result, delta, and current instruction state.
-4. Provider protocol allows swapping local and cloud models without touching service code.
-5. `split_cluster` and `reclassify_outlier` intents are emitted by the extractor but marked as Path B-only. Path A (`metric_learning_adapter`) rejects them with `intent_deferred` and suggests routing through Path B (`direct_feedback_adapter`).
+4. `LlmProvider` is documented so real backends can be plugged in later without touching `service.py`.
+5. `IntentInstructionProvider` satisfies the chatbox `IntentProvider` protocol.
+6. Path B-only intents are emitted here without forcing a path decision at compile time.
+7. Step 8.5 design is documented so the first live runtime can be added without changing Step 7 ownership boundaries.

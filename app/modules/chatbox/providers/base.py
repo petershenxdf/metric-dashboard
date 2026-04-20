@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from ..schemas import ChatMessagePayload, ChatResponse, MockInstructionSnapshot
+from ..schemas import ChatMessagePayload, ChatResponse, InstructionSnapshot
 
 
 class IntentProvider(Protocol):
@@ -16,6 +16,6 @@ class IntentProvider(Protocol):
 
     def respond(self, payload: ChatMessagePayload) -> ChatResponse: ...
 
-    def current_snapshot(self, dataset_id: str) -> MockInstructionSnapshot: ...
+    def current_snapshot(self, dataset_id: str) -> InstructionSnapshot: ...
 
     def reset(self, dataset_id: str) -> None: ...

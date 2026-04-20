@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional, Tuple
 
-from app.shared.schemas import clean_text
+from app.shared.schemas import InstructionSnapshot, clean_text
 
 CHAT_ROLES = ("user", "assistant")
 
@@ -14,10 +14,6 @@ ROUTER_CATEGORIES = (
     "meta_query",
     "off_topic",
 )
-
-REFINEMENT_STRATEGIES = ("metric_learning", "direct_ssdbcodi")
-
-DEFAULT_REFINEMENT_STRATEGY = "metric_learning"
 
 DEFAULT_HISTORY_WINDOW = 3
 
@@ -78,29 +74,6 @@ class SuggestionChip:
 
 
 @dataclass(frozen=True)
-class MockInstructionSnapshot:
-    version: int
-    constraints: Tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
-    last_delta: Optional[Mapping[str, Any]] = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.version, int) or self.version < 0:
-            raise ValueError("version must be a non-negative integer")
-        constraints = tuple(dict(constraint) for constraint in self.constraints)
-        last_delta = dict(self.last_delta) if self.last_delta is not None else None
-        object.__setattr__(self, "constraints", constraints)
-        object.__setattr__(self, "last_delta", last_delta)
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "version": self.version,
-            "constraints": [dict(constraint) for constraint in self.constraints],
-            "last_delta": dict(self.last_delta) if self.last_delta is not None else None,
-            "constraint_count": len(self.constraints),
-        }
-
-
-@dataclass(frozen=True)
 class ChatMessagePayload:
     """What the chatbox forwards to the (future) intent provider.
 
@@ -114,11 +87,6 @@ class ChatMessagePayload:
     selection_groups: Tuple[Mapping[str, Any], ...]
     label_context: Mapping[str, Any]
     history_window: Tuple[Mapping[str, Any], ...]
-    strategy: str
-
-    def __post_init__(self) -> None:
-        if self.strategy not in REFINEMENT_STRATEGIES:
-            raise ValueError(f"unsupported strategy: {self.strategy}")
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -133,7 +101,6 @@ class ChatMessagePayload:
             "selection_groups": [dict(group) for group in self.selection_groups],
             "label_context": dict(self.label_context),
             "history_window": [dict(turn) for turn in self.history_window],
-            "strategy": self.strategy,
         }
 
 
@@ -182,27 +149,23 @@ class ChatResponse:
 @dataclass(frozen=True)
 class ChatboxState:
     dataset_id: str
-    strategy: str
     turns: Tuple[ChatTurn, ...] = field(default_factory=tuple)
-    instruction_snapshot: MockInstructionSnapshot = field(
-        default_factory=lambda: MockInstructionSnapshot(version=0, constraints=())
+    instruction_snapshot: InstructionSnapshot = field(
+        default_factory=lambda: InstructionSnapshot(version=0, constraints=())
     )
 
     def __post_init__(self) -> None:
         dataset_id = clean_text(self.dataset_id, "dataset_id")
-        if self.strategy not in REFINEMENT_STRATEGIES:
-            raise ValueError(f"unsupported strategy: {self.strategy}")
         if not all(isinstance(turn, ChatTurn) for turn in self.turns):
             raise ValueError("turns must contain ChatTurn objects")
-        if not isinstance(self.instruction_snapshot, MockInstructionSnapshot):
-            raise ValueError("instruction_snapshot must be a MockInstructionSnapshot")
+        if not isinstance(self.instruction_snapshot, InstructionSnapshot):
+            raise ValueError("instruction_snapshot must be a InstructionSnapshot")
         object.__setattr__(self, "dataset_id", dataset_id)
         object.__setattr__(self, "turns", tuple(self.turns))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "dataset_id": self.dataset_id,
-            "strategy": self.strategy,
             "turns": [turn.to_dict() for turn in self.turns],
             "turn_count": len(self.turns),
             "instruction_snapshot": self.instruction_snapshot.to_dict(),

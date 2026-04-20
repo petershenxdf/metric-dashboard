@@ -85,18 +85,18 @@ State is owned by exactly one module - other modules read through contracts, nev
 | Path A refinement history (`metric_refinement_runs`) | `metric_refinement_orchestrator` |
 | Path B refinement history (`direct_refinement_runs`) | `direct_refinement_orchestrator` |
 
-### Current Pipeline (Steps 1-6, all implemented; Step 7 chatbox implemented with mock intent provider)
+### Current Pipeline (implemented through Step 8 compiler boundary; Step 8.5 live runtime is planned)
 
 ```
 data_workspace -> projection -> algorithm_adapters -> selection -> labeling -> scatterplot
-                                                                            \-> chatbox (Step 7, mock intent provider)
+                                                                            \-> chatbox (Step 7) -> intent_instruction (Step 8) -> Step 8.5 live runtime validation
 ```
 
 - `algorithm_adapters`: defaults to `SsdbcodiProvider`, preserving the same dashboard-facing `ClusterResult`, `OutlierResult`, and `AnalysisResult` schemas. `SequentialLofThenKMeansProvider` remains as an explicit legacy provider.
 - `selection`: supports `select`/`deselect`/`replace`/`toggle`/`clear`, named selection groups (not semantic labels), sources include `point_click`, `rectangle`, `lasso`, `api`, `workflow_fixture`, `selection_group`.
 - `labeling`: converts selected points into `assign_cluster`, `assign_new_class`, `mark_outlier`, `mark_not_outlier` annotations -> structured feedback instructions.
 - `scatterplot`: builds a render payload from upstream state; does not own selection or label truth.
-- `chatbox`: reads selection/selection-groups/label context from their owning modules without mutating them, forwards messages through an `IntentProvider` protocol (Step 7 ships `MockIntentProvider`; Step 8 swaps in the real `intent_instruction` module), and owns the refinement strategy toggle. The mock `StructuredInstruction` snapshot lives inside the provider, not chatbox.
+- `chatbox`: reads selection/selection-groups/label context from their owning modules without mutating them, forwards messages through an `IntentProvider` protocol (Step 7 ships `MockIntentProvider`; Step 8 swaps in the real `intent_instruction` module boundary), and stays strategy-agnostic. The mock `StructuredInstruction` snapshot lives inside the provider, not chatbox.
 
 The main manual test page for the full Step 1-6 path is `/workflows/scatter-labeling/`. The Step 7 page is `/workflows/chat-selection/`.
 
@@ -105,21 +105,46 @@ The main manual test page for the full Step 1-6 path is `/workflows/scatter-labe
 `app/modules/chatbox/` is the dialogue UI for user feedback.
 
 - Target files: `schemas.py`, `service.py`, `store.py`, `state.py`, `fixtures.py`, `routes.py`, `templates/chatbox/index.html`, `providers/{base.py,mock.py}`.
-- `IntentProvider` protocol decouples chatbox from the LLM pipeline: `respond(payload) -> ChatResponse`, `current_snapshot(dataset_id)`, `reset(dataset_id)`. Step 8 (`intent_instruction`) will satisfy the same protocol.
-- `ChatMessagePayload` includes: the message, dataset_id, selection context (selected/unselected point IDs), selection groups, label context, truncated history window (default last 3 turns), and the active refinement strategy.
+- `IntentProvider` protocol decouples chatbox from the intent-compilation pipeline: `respond(payload) -> ChatResponse`, `current_snapshot(dataset_id)`, `reset(dataset_id)`. Step 8 (`intent_instruction`) now also satisfies the same protocol, so `/workflows/chat-intent/` swaps in the real provider without chatbox code changes while `/modules/chatbox/` keeps the mock for isolated testing.
+- `ChatMessagePayload` includes: the message, dataset_id, selection context (selected/unselected point IDs), selection groups, label context, and truncated history window (default last 3 turns).
 - `ChatResponse` includes: `reply`, `router_category`, optional `delta`, `current_instruction_version`, optional `intent_type`, optional followup question, and `provider_label`.
-- Strategy toggle (`metric_learning` / `direct_ssdbcodi`) is stored on the chatbox store and attached to outgoing payloads; it does not mutate any instruction state.
-- Suggestion chips for `split_cluster` and `reclassify_outlier` are hidden under Path A (`metric_learning`).
+- Step 7 is intentionally strategy-agnostic. Path choice begins later, when Step 9 adapters consume the compiled instruction state.
+- Suggestion chips for `split_cluster` and `reclassify_outlier` remain visible in Step 7, but are marked as Path B-only downstream intents rather than hidden.
 - Debug page at `/modules/chatbox/`, workflow at `/workflows/chat-selection/`. See `docs/modules/chatbox/design.md`.
 
-### Planned Refinement Pipeline (Steps 8-11, A/B fork)
+### Intent Instruction Module (Step 8)
+
+`app/modules/intent_instruction/` converts chat text into structured instruction deltas.
+
+- Target files: `schemas.py`, `router.py`, `extractor.py`, `service.py`, `store.py`, `state.py`, `fixtures.py`, `routes.py`, `templates/intent_instruction/index.html`, `providers/{base.py,mock.py}`.
+- Two protocols stack intentionally:
+  - Inner `LlmProvider` (owned here): `route(message, context, history) -> RouterResult`, `extract(message, context, history, current_instruction) -> InstructionDelta`. `MockLlmProvider` is the only provider that ships in Step 8; Step 8.5 and later can add live local or cloud providers without touching chatbox.
+  - Outer `IntentProvider` (chatbox boundary): `IntentInstructionProvider` is the adapter that satisfies it using the inner `LlmProvider`.
+- Router categories: `on_topic_actionable`, `on_topic_ambiguous`, `partial`, `meta_query`, `off_topic`. Current Step 8 behavior only routes `on_topic_actionable` into the extractor; `partial` remains reserved in the shared schema surface.
+- Phase 1 intents (8): shared (`feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`) + Path B-only downstream intents (`split_cluster`, `reclassify_outlier`). Step 8 emits all eight without choosing Path A vs Path B; adapters enforce final acceptance later.
+- `StructuredInstruction` (full state, owned here) vs `InstructionSnapshot` (narrow cross-module view, in `app/shared/schemas.py`). The extractor emits `InstructionDelta`s whose `constraint_id` starts as `pending`; the service rewrites it to a real ID (`c1`, `c2`, ...) inside `apply_delta` and advances the version counter.
+- Off-topic, meta-query, and ambiguous messages never mutate state.
+- Debug page at `/modules/intent-instruction/` with `/health`, `/api/route`, `/api/compile`, `/api/state`, `/api/reset`, `/api/examples`. Workflow at `/workflows/chat-intent/`. See `docs/modules/intent_instruction/design.md`.
+
+### Planned Runtime Validation Gate (Step 8.5)
+
+`Step 8.5` is the first stage that actually connects a live model runtime.
+
+- Default first runtime: Ollama `qwen2.5:14b` at `http://127.0.0.1:11434`.
+- Provider contract stays generic so future local or online models can slot in without changing Step 7 ownership boundaries.
+- `intent_instruction` owns the structured memory for this stage: append-only transcript, rolling summary, extracted facts with provenance, incomplete draft state, clarification agenda, irrelevant-turn log, and evaluation diagnostics.
+- `/workflows/intent-runtime-validation/` is the pre-Step-9 gate for paraphrase robustness, meta-query alias handling, partial-information completion, relevance filtering, and provider failure behavior.
+
+### Planned Refinement Pipeline (Steps 9-11, A/B fork)
 
 After Step 6.5 the feedback loop forks into two parallel update strategies so they can be compared experimentally. The shared upstream stages are identical:
 
 ```
-chatbox (with refinement strategy selector)
+chatbox (strategy-agnostic intake)
   -> intent_instruction (emits shared + Path B-only intents)
+  -> Step 8.5 live runtime validation (real provider + memory + draft completion)
   -> structured feedback
+      -> refinement trigger chooses Path A or Path B
       +-- Path A: metric_learning_adapter -> metric_refinement_orchestrator
       |     (learns M; applies L = chol(M) as linear pre-transform;
       |      reruns projection and algorithm_adapters on X · L)
@@ -160,7 +185,9 @@ Key workflows:
 - `/workflows/analysis-selection/` and `/workflows/analysis-labeling/` - visual integration through Step 1-5.
 - `/workflows/scatter-selection/` and `/workflows/scatter-labeling/` - Step 1-6 render/selection/labeling checks.
 - `/workflows/provider-feedback/` - Step 6.5 provider diagnostics for adapter boundary plus standalone SSDBCODI scores.
-- `/workflows/chat-selection/` - Step 7 chatbox reading selection, selection groups, and labeling context through a mocked intent provider.
+- `/workflows/chat-selection/` - Step 7 chat intake reading selection, selection groups, and labeling context through a mocked intent provider.
+- `/workflows/chat-intent/` - Step 8 chatbox wired to the real `IntentInstructionProvider`, exercising the full chat -> router -> extractor -> structured instruction loop with the deterministic backend.
+- `/workflows/intent-runtime-validation/` - Step 8.5 live-model validation gate for provider health, memory, partial drafts, and evaluation diagnostics.
 
 ### Shared Layer (`app/shared/`)
 

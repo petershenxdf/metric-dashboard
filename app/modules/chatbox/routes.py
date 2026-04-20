@@ -10,18 +10,8 @@ from .fixtures import (
     current_selection_groups,
     example_messages,
 )
-from .schemas import (
-    DEFAULT_HISTORY_WINDOW,
-    REFINEMENT_STRATEGIES,
-    ROUTER_CATEGORIES,
-)
-from .service import (
-    clear_history,
-    get_chatbox_state,
-    set_strategy,
-    submit_message,
-    suggestion_chips_for_strategy,
-)
+from .schemas import DEFAULT_HISTORY_WINDOW, ROUTER_CATEGORIES
+from .service import clear_history, get_chatbox_state, submit_message, suggestion_chips
 from .state import get_debug_provider, get_debug_store_for_context, reset_debug_store_for_context
 
 
@@ -41,15 +31,13 @@ def create_blueprint() -> Blueprint:
         state = get_chatbox_state(store, provider)
         groups = current_selection_groups()
         label_context = current_label_context()
-        chips = suggestion_chips_for_strategy(state.strategy)
         return render_template(
             "chatbox/index.html",
             state=state,
             selection_context=context,
             selection_groups_payload=[group.to_dict() for group in groups],
             label_context=label_context,
-            chips=chips,
-            strategies=REFINEMENT_STRATEGIES,
+            chips=suggestion_chips(),
             router_categories=ROUTER_CATEGORIES,
             examples=example_messages(),
             history_window=DEFAULT_HISTORY_WINDOW,
@@ -80,14 +68,11 @@ def create_blueprint() -> Blueprint:
             api_success(
                 {
                     "dataset_id": context.dataset_id,
-                    "strategy": store.strategy,
                     "selection_context": context.to_dict(),
                     "selection_groups": [group.to_dict() for group in groups],
                     "label_context": label_context,
                     "instruction_snapshot": snapshot.to_dict(),
-                    "suggestion_chips": [
-                        chip.to_dict() for chip in suggestion_chips_for_strategy(store.strategy)
-                    ],
+                    "suggestion_chips": [chip.to_dict() for chip in suggestion_chips()],
                 },
                 diagnostics={"provider": provider.label},
             )
@@ -103,7 +88,6 @@ def create_blueprint() -> Blueprint:
             api_success(
                 {
                     "dataset_id": state.dataset_id,
-                    "strategy": state.strategy,
                     "turns": [turn.to_dict() for turn in state.turns],
                     "turn_count": len(state.turns),
                 },
@@ -147,40 +131,13 @@ def create_blueprint() -> Blueprint:
             )
         )
 
-    @blueprint.post("/api/strategy")
-    def strategy_api():
-        payload = request.get_json(silent=True) or {}
-        context = current_selection_context()
-        store = get_debug_store_for_context(context)
-        try:
-            set_strategy(store, payload.get("strategy", ""))
-        except ValueError as exc:
-            return jsonify(api_error("invalid_strategy", str(exc))), 400
-        provider = get_debug_provider()
-        return jsonify(
-            api_success(
-                {
-                    "strategy": store.strategy,
-                    "suggestion_chips": [
-                        chip.to_dict() for chip in suggestion_chips_for_strategy(store.strategy)
-                    ],
-                },
-                diagnostics={"provider": provider.label},
-            )
-        )
-
     @blueprint.post("/api/reset")
     def reset_api():
         context = current_selection_context()
         store = reset_debug_store_for_context(context)
         provider = get_debug_provider()
         state = get_chatbox_state(store, provider)
-        return jsonify(
-            api_success(
-                state.to_dict(),
-                diagnostics={"provider": provider.label},
-            )
-        )
+        return jsonify(api_success(state.to_dict(), diagnostics={"provider": provider.label}))
 
     @blueprint.post("/api/clear")
     def clear_api():
@@ -189,12 +146,7 @@ def create_blueprint() -> Blueprint:
         clear_history(store)
         provider = get_debug_provider()
         state = get_chatbox_state(store, provider)
-        return jsonify(
-            api_success(
-                state.to_dict(),
-                diagnostics={"provider": provider.label},
-            )
-        )
+        return jsonify(api_success(state.to_dict(), diagnostics={"provider": provider.label}))
 
     return blueprint
 

@@ -7,14 +7,11 @@ from app.shared.schemas import clean_text
 
 from .providers.base import IntentProvider
 from .schemas import (
-    ALL_INTENT_TYPES,
     ChatboxState,
     ChatMessagePayload,
     ChatResponse,
     ChatTurn,
     DEFAULT_HISTORY_WINDOW,
-    INTENT_TYPES_PATH_B_ONLY,
-    REFINEMENT_STRATEGIES,
     SuggestionChip,
 )
 from .store import ChatboxStore
@@ -29,19 +26,9 @@ def get_chatbox_state(store: ChatboxStore, provider: IntentProvider) -> ChatboxS
     snapshot = provider.current_snapshot(store.dataset_id)
     return ChatboxState(
         dataset_id=store.dataset_id,
-        strategy=store.strategy,
         turns=tuple(store.turns),
         instruction_snapshot=snapshot,
     )
-
-
-def set_strategy(store: ChatboxStore, strategy: str) -> ChatboxStore:
-    _validate_store(store)
-    strategy = clean_text(strategy, "strategy")
-    if strategy not in REFINEMENT_STRATEGIES:
-        raise ValueError(f"unsupported strategy: {strategy}")
-    store.strategy = strategy
-    return store
 
 
 def clear_history(store: ChatboxStore) -> ChatboxStore:
@@ -74,7 +61,6 @@ def build_payload(
         selection_groups=tuple(group.to_dict() for group in selection_groups),
         label_context=dict(label_context or {}),
         history_window=window,
-        strategy=store.strategy,
     )
 
 
@@ -106,10 +92,7 @@ def submit_message(
     return payload, response
 
 
-def suggestion_chips_for_strategy(strategy: str) -> tuple[SuggestionChip, ...]:
-    if strategy not in REFINEMENT_STRATEGIES:
-        raise ValueError(f"unsupported strategy: {strategy}")
-
+def suggestion_chips() -> tuple[SuggestionChip, ...]:
     base = (
         SuggestionChip("Make feature petal_length more important", "feature_weight"),
         SuggestionChip("Treat these points as similar", "group_similar"),
@@ -122,10 +105,7 @@ def suggestion_chips_for_strategy(strategy: str) -> tuple[SuggestionChip, ...]:
         SuggestionChip("Split cluster 2 into two", "split_cluster", requires_path_b=True),
         SuggestionChip("Reclassify p7 as not an outlier", "reclassify_outlier", requires_path_b=True),
     )
-
-    if strategy == "direct_ssdbcodi":
-        return base + path_b_only
-    return base
+    return base + path_b_only
 
 
 def _validate_store(store: ChatboxStore) -> None:

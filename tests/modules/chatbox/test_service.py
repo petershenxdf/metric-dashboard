@@ -5,20 +5,14 @@ from dataclasses import dataclass, field
 from typing import List
 
 from app.modules.chatbox.providers.mock import MockIntentProvider
-from app.modules.chatbox.schemas import (
-    ChatMessagePayload,
-    ChatResponse,
-    MockInstructionSnapshot,
-    REFINEMENT_STRATEGIES,
-)
+from app.modules.chatbox.schemas import ChatMessagePayload, ChatResponse, InstructionSnapshot
 from app.modules.chatbox.service import (
     build_payload,
     clear_history,
     create_chatbox_store,
     get_chatbox_state,
-    set_strategy,
     submit_message,
-    suggestion_chips_for_strategy,
+    suggestion_chips,
 )
 from app.modules.selection.schemas import SelectionContext, SelectionGroup
 
@@ -32,8 +26,8 @@ class SpyIntentProvider:
     calls: List[ChatMessagePayload] = field(default_factory=list)
     snapshot_version: int = 0
 
-    def current_snapshot(self, dataset_id: str) -> MockInstructionSnapshot:
-        return MockInstructionSnapshot(version=self.snapshot_version, constraints=())
+    def current_snapshot(self, dataset_id: str) -> InstructionSnapshot:
+        return InstructionSnapshot(version=self.snapshot_version, constraints=())
 
     def respond(self, payload: ChatMessagePayload) -> ChatResponse:
         self.calls.append(payload)
@@ -104,8 +98,7 @@ class ChatboxServiceTests(unittest.TestCase):
         self.assertEqual(payload.label_context["annotation_count"], 2)
         self.assertEqual(len(payload.label_context["active_annotations"]), 1)
 
-    def test_payload_includes_active_refinement_strategy(self):
-        set_strategy(self.store, "direct_ssdbcodi")
+    def test_payload_serialization_is_strategy_agnostic(self):
         payload = build_payload(
             self.store,
             "split cluster 2",
@@ -113,7 +106,9 @@ class ChatboxServiceTests(unittest.TestCase):
             selection_groups=[],
             label_context={},
         )
-        self.assertEqual(payload.strategy, "direct_ssdbcodi")
+        serialized = payload.to_dict()
+        self.assertNotIn("strategy", serialized)
+        self.assertEqual(serialized["message"], "split cluster 2")
 
     def test_history_window_is_truncated(self):
         for index in range(5):
@@ -123,7 +118,6 @@ class ChatboxServiceTests(unittest.TestCase):
                 message=f"message {index}",
                 selection_context=self.context,
             )
-        # Store has 5 user + 5 assistant turns = 10 total.
         self.assertEqual(len(self.store.turns), 10)
 
         payload = build_payload(
@@ -135,7 +129,6 @@ class ChatboxServiceTests(unittest.TestCase):
             history_window_size=3,
         )
         self.assertEqual(len(payload.history_window), 3)
-        # The window contains the most recent turns.
         self.assertEqual(payload.history_window[-1]["turn_id"], self.store.turns[-1].turn_id)
 
     def test_service_does_not_mutate_selection_or_label_context(self):
@@ -157,17 +150,13 @@ class ChatboxServiceTests(unittest.TestCase):
         self.assertEqual(label_context, label_context_snapshot)
 
     def test_service_does_not_mutate_provider_snapshot_directly(self):
-        """The chatbox service never writes to instruction state; only the
-        provider does. Verify by swapping to a provider that stays pinned
-        at version 0 and observing submit_message reports that version."""
-
         @dataclass
         class FrozenProvider:
             label: str = "frozen"
             calls: int = 0
 
-            def current_snapshot(self, dataset_id: str) -> MockInstructionSnapshot:
-                return MockInstructionSnapshot(version=0, constraints=())
+            def current_snapshot(self, dataset_id: str) -> InstructionSnapshot:
+                return InstructionSnapshot(version=0, constraints=())
 
             def respond(self, payload):
                 self.calls += 1
@@ -194,26 +183,18 @@ class ChatboxServiceTests(unittest.TestCase):
         self.assertEqual(state.instruction_snapshot.version, 0)
         self.assertEqual(frozen.calls, 1)
 
-    def test_strategy_toggle_changes_payload_not_turns(self):
-        set_strategy(self.store, "direct_ssdbcodi")
+    def test_build_payload_does_not_add_turns(self):
         before = len(self.store.turns)
-        payload = build_payload(
+        build_payload(
             self.store,
             "treat these as similar",
             selection_context=self.context,
             selection_groups=[],
             label_context={},
         )
-        # Building a payload should not add turns or produce chat history.
         self.assertEqual(len(self.store.turns), before)
-        self.assertEqual(payload.strategy, "direct_ssdbcodi")
 
-    def test_unsupported_strategy_is_rejected(self):
-        with self.assertRaises(ValueError):
-            set_strategy(self.store, "no_such_strategy")
-
-    def test_clear_history_empties_turns_but_keeps_strategy(self):
-        set_strategy(self.store, "direct_ssdbcodi")
+    def test_clear_history_empties_turns(self):
         submit_message(
             self.store,
             self.provider,
@@ -224,23 +205,20 @@ class ChatboxServiceTests(unittest.TestCase):
 
         clear_history(self.store)
         self.assertEqual(len(self.store.turns), 0)
-        self.assertEqual(self.store.strategy, "direct_ssdbcodi")
 
-    def test_suggestion_chips_hide_path_b_intents_under_metric_learning(self):
-        chips = suggestion_chips_for_strategy("metric_learning")
-        intent_types = {chip.intent_type for chip in chips}
-        self.assertNotIn("split_cluster", intent_types)
-        self.assertNotIn("reclassify_outlier", intent_types)
-
-    def test_suggestion_chips_include_path_b_intents_under_direct_ssdbcodi(self):
-        chips = suggestion_chips_for_strategy("direct_ssdbcodi")
+    def test_suggestion_chips_cover_all_phase_one_intents(self):
+        chips = suggestion_chips()
         intent_types = {chip.intent_type for chip in chips}
         self.assertIn("split_cluster", intent_types)
         self.assertIn("reclassify_outlier", intent_types)
+        self.assertIn("feature_weight", intent_types)
+
+    def test_path_b_suggestion_chips_are_marked_not_hidden(self):
+        chips = {chip.intent_type: chip for chip in suggestion_chips()}
+        self.assertTrue(chips["split_cluster"].requires_path_b)
+        self.assertTrue(chips["reclassify_outlier"].requires_path_b)
 
     def test_empty_selection_still_allows_message_without_reference(self):
-        """An actionable message that does not reference selection should
-        still be accepted even if no points are currently selected."""
         _, response = submit_message(
             self.store,
             self.provider,
@@ -248,9 +226,6 @@ class ChatboxServiceTests(unittest.TestCase):
             selection_context=self.empty_context,
         )
         self.assertEqual(response.router_category, "on_topic_actionable")
-
-    def test_supported_strategies_constant(self):
-        self.assertEqual(set(REFINEMENT_STRATEGIES), {"metric_learning", "direct_ssdbcodi"})
 
 
 class MockIntentProviderTests(unittest.TestCase):
@@ -310,8 +285,7 @@ class MockIntentProviderTests(unittest.TestCase):
         self.assertIsNotNone(response.delta)
         self.assertEqual(self.provider.current_snapshot(self.store.dataset_id).version, 1)
 
-    def test_split_cluster_under_metric_learning_emits_deferred_note(self):
-        self.store.strategy = "metric_learning"
+    def test_path_b_only_intent_is_recorded_without_deferral_note(self):
         _, response = submit_message(
             self.store,
             self.provider,
@@ -319,7 +293,7 @@ class MockIntentProviderTests(unittest.TestCase):
             selection_context=self.context,
         )
         self.assertEqual(response.intent_type, "split_cluster")
-        self.assertIn("deferred", response.reply.lower())
+        self.assertNotIn("deferred", response.reply.lower())
 
 
 if __name__ == "__main__":

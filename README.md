@@ -55,9 +55,11 @@ user data
   -> scatterplot
   -> point selection
   -> direct labeling / annotation
-  -> or chatbox feedback (with refinement strategy selector)
+  -> or chatbox feedback
   -> intent instruction for chat-derived feedback
+  -> intent runtime validation (real provider + memory + draft completion)
   -> unified structured feedback
+      -> refinement trigger chooses Path A or Path B
       +-- Path A: metric_learning_adapter -> metric_refinement_orchestrator
       |     (learns M, applies L = chol(M) as linear pre-transform,
       |      reruns projection and algorithm adapters on X · L)
@@ -115,7 +117,7 @@ The module lab is important. It lets the developer open one module at a time and
 | `labeling` | Manual point annotations, cluster labels, and outlier labels | `/modules/labeling/` |
 | `scatterplot` | Point rendering, clusters, outliers, visual selection | `/modules/scatterplot/` |
 | `ssdbcodi` | Active semi-supervised clustering/outlier provider plus score diagnostics | `/modules/ssdbcodi/` |
-| `chatbox` | Chat UI, user feedback, clarification display, refinement strategy selector | `/modules/chatbox/` |
+| `chatbox` | Chat UI, user feedback, clarification display, and context-aware intake | `/modules/chatbox/` |
 | `intent_instruction` | Message classification and structured instruction output (shared by both paths) | `/modules/intent-instruction/` |
 | `metric_learning_adapter` | **Path A**: structured instruction to pair-based metric-learning constraints and learned `M` | `/modules/metric-learning-adapter/` |
 | `direct_feedback_adapter` | **Path B**: structured instruction to SSDBCODI-native `DirectFeedbackPlan` | `/modules/direct-feedback-adapter/` |
@@ -182,12 +184,28 @@ The default algorithm-adapter fixture is `default_analysis_outlier_debug`, not I
 
 9. `chatbox`
    - dialogue UI that reads selection, selection groups, and label context from the real `selection` and `labeling` debug stores without mutating them.
-   - forwards messages through a pluggable `IntentProvider` protocol; Step 7 ships `MockIntentProvider` (deterministic keyword-based router + intent extractor) so the chatbox can be tested standalone. Step 8 (`intent_instruction`) will swap in the real LLM-backed provider through the same protocol without changing chatbox code.
-   - owns chat history and the active refinement strategy toggle (`metric_learning` / `direct_ssdbcodi`); the mock `StructuredInstruction` snapshot lives inside the provider, not inside chatbox, so the module never owns instruction truth.
+   - forwards messages through a pluggable `IntentProvider` protocol; Step 7 ships `MockIntentProvider` (deterministic keyword-based router + intent extractor) so the chatbox can be tested standalone. Step 8 (`intent_instruction`) now also satisfies the same protocol, so `/workflows/chat-intent/` can wire the real provider in without any chatbox code change while `/modules/chatbox/` keeps the mock for isolated testing.
+   - owns chat history only; the `InstructionSnapshot` lives inside whichever provider is active, not inside chatbox, so the module never owns instruction truth.
    - forwards a truncated history window (default last 3 turns) plus selection/label/instruction context with each message.
-   - renders strategy-filtered suggestion chips: `split_cluster` and `reclassify_outlier` chips only appear under `direct_ssdbcodi`; Path A-only runs hide them.
+   - renders suggestion chips for the full Phase 1 vocabulary. `split_cluster` and `reclassify_outlier` remain visible but are marked as Path B-only downstream intents instead of being hidden.
    - fallback responses explicitly mark themselves as coming from the mock provider so users aren't confused by keyword-matcher limitations.
-   - `/workflows/chat-selection/` combines selection, labeling, and chatbox state on one page.
+   - `/workflows/chat-selection/` combines selection, labeling, and chatbox state on one page as the Step 7 intake check.
+
+10. `intent_instruction`
+    - owns `StructuredInstruction` state and the two-stage router + extractor pipeline behind `IntentInstructionProvider`, which satisfies both the inner `LlmProvider` protocol (route/extract) and the outer `IntentProvider` protocol expected by chatbox.
+    - Step 8 ships `MockLlmProvider` (deterministic keyword-driven router + extractor) as the only LLM provider; Step 8.5 and later can plug live local/cloud models into the same `LlmProvider` protocol without code changes elsewhere.
+    - emits all eight Phase 1 intents (`feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`, `split_cluster`, `reclassify_outlier`) in a strategy-agnostic way; the adapters in Steps 9A/9B enforce final acceptance.
+    - off-topic, meta-query, and ambiguous messages never mutate state; actionable messages append a versioned `InstructionDelta` with a real `constraint_id`.
+    - `/modules/intent-instruction/` exposes `/health`, `/api/route`, `/api/compile`, `/api/state`, `/api/reset`, `/api/examples`. `/workflows/chat-intent/` wires the real `intent_instruction` module boundary into a chatbox shell so the instruction state can be observed across multiple turns as the Step 8 compilation check.
+    - `InstructionSnapshot` (shared cross-module view) was promoted to `app/shared/schemas.py` so chatbox and intent_instruction can both consume it without layering violations.
+
+Planned next gate before Step 9:
+
+- `Step 8.5` is intentionally separate from Step 8. It is the first stage that
+  actually connects a live model runtime, defaulting to Ollama
+  `qwen2.5:14b`, and validates paraphrase robustness, structured memory,
+  partial-information completion, relevance filtering, and UI diagnostics
+  before either downstream refinement path is trusted.
 
 ## Workflow Debug Map
 
@@ -207,9 +225,10 @@ The workflow index is grouped by debugging purpose, not just build order:
 4. Provider diagnostics:
    - `/workflows/provider-feedback/`
 5. Feedback pipeline:
-   - `/workflows/chat-selection/` (Step 7 chatbox + selection + labeling context)
+   - `/workflows/chat-selection/` (Step 7 chat intake + selection + labeling context)
+   - `/workflows/chat-intent/` (Step 8 intent compilation)
+   - `/workflows/intent-runtime-validation/` (Step 8.5 live-model validation gate)
 6. Future workflows:
-   - `/workflows/chat-intent/`
    - `/workflows/instruction-constraints/` (Path A: metric learning constraints preview)
    - `/workflows/instruction-ssdbcodi/` (Path B: DirectFeedbackPlan preview)
    - `/workflows/metric-refinement-loop/` (Path A end-to-end)
@@ -235,39 +254,52 @@ See `docs/workflows.md` for the current workflow contract and grouping rules.
 
 Actionable user feedback should become stable structured instructions.
 
-Initial instruction types:
+Step 8 defines the shared instruction schema and emits Phase 1 intents. Step
+8.5 validates that a live model can fill the same structure reliably across
+multi-turn conversation before Step 9 consumes it.
+
+Phase 1 intents:
 
 ```text
-assign_cluster
-assign_new_class
-same_class
-different_class
-split_into_n_classes
-merge_groups
-is_outlier
-not_outlier
+feature_weight
+group_similar
+group_dissimilar
+merge_clusters
+anchor_point
+ignore_cluster
+split_cluster
+reclassify_outlier
 needs_clarification
 non_actionable
+meta_query
 ```
 
 Example:
 
 ```json
 {
-  "instruction_type": "same_class",
-  "status": "actionable",
-  "source": "chat_intent",
-  "target": {
-    "source": "selected_points",
-    "point_ids": ["p1", "p7", "p9"]
-  },
-  "explicitness": "explicit",
-  "requires_followup": false,
-  "followup_question": null
+  "version": 4,
+  "constraints": [
+    {
+      "id": "c3",
+      "intent": "group_similar",
+      "group_a": {"source": "selection_group", "ref": "group_001"},
+      "group_b": {"source": "cluster", "ref": "cluster_2"}
+    }
+  ],
+  "last_delta": {
+    "operations": [
+      {"op": "add", "constraint_id": "c3"}
+    ]
+  }
 }
 ```
 
-If the user input is vague, incomplete, irrelevant, or too general, the system must not invent a hard constraint. It should ask for clarification or mark the message as non-actionable.
+If the user input is vague, incomplete, irrelevant, or too general, the system
+must not invent a hard constraint. Step 8 returns clarification or
+non-actionable output. Step 8.5 additionally stores relevant fragments in a
+draft, asks focused follow-up questions, and keeps irrelevant content out of
+the active instruction state.
 
 ## Development Order
 
@@ -303,21 +335,25 @@ Current planned order:
    - build chat UI with mock or real selection context.
 
 9. `intent_instruction`
-   - compile messages into structured instructions (shared by both update paths; emits the full shared + Path B-only intent set).
+   - compile messages into structured instructions (shared by both update paths; emits the full shared + Path B-only intent set) with a deterministic backend.
 
-10. Path A: `metric_learning_adapter` / Path B: `direct_feedback_adapter`
+10. Step 8.5 runtime validation
+    - connect the first live model runtime, defaulting to Ollama `qwen2.5:14b`.
+    - validate memory, partial-information completion, relevance filtering, and provider diagnostics before Step 9 begins.
+
+11. Path A: `metric_learning_adapter` / Path B: `direct_feedback_adapter`
    - 9A `metric_learning_adapter`: convert shared structured instructions into pair-based metric-learning constraints.
    - 9B `direct_feedback_adapter`: convert shared structured instructions (including `split_cluster` and `reclassify_outlier`) into a SSDBCODI-native `DirectFeedbackPlan` (seed updates, feature_scale, n_clusters, excluded/merged clusters).
 
-11. Path A: `metric_refinement_orchestrator` / Path B: `direct_refinement_orchestrator`
+12. Path A: `metric_refinement_orchestrator` / Path B: `direct_refinement_orchestrator`
     - 10A `metric_refinement_orchestrator`: fit metric `M`, apply `L = chol(M)` as linear pre-transform, rerun projection and algorithm adapters on `X · L`, track Path A rollback history.
     - 10B `direct_refinement_orchestrator`: rerun SSDBCODI directly with merged seeds and param overrides from the plan, rerun projection only when geometry changed, track Path B rollback history.
 
-12. `strategy_comparison` workflow
+13. `strategy_comparison` workflow
     - run the same structured feedback through both orchestrators and render outputs side-by-side with a per-point diff.
 
-13. integrated dashboard
-    - combine already-tested modules with the refinement strategy selector wired to whichever path the user chose.
+14. integrated dashboard
+    - combine already-tested modules and expose refinement triggers that choose which downstream path to run.
 
 ## Testing Expectations
 

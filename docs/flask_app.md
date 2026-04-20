@@ -87,6 +87,7 @@ Workflow routes:
 /workflows/provider-feedback/
 /workflows/chat-selection/
 /workflows/chat-intent/
+/workflows/intent-runtime-validation/
 /workflows/instruction-constraints/       Path A constraint preview
 /workflows/instruction-ssdbcodi/           Path B plan preview
 /workflows/metric-refinement-loop/         Path A end-to-end
@@ -100,7 +101,8 @@ Workflow routes:
 2. state boundary probes,
 3. visual integration tests,
 4. provider diagnostics,
-5. future workflows.
+5. feedback pipeline and runtime validation,
+6. future workflows.
 
 See `docs/workflows.md` for the detailed workflow map and route stability rule.
 
@@ -124,7 +126,9 @@ For example:
 5. `analysis-labeling` shows Steps 1-5 together on one visual debug page.
 6. `scatterplot` shows the Step 1-6 render payload with click/rectangle selection, saved groups, adjustable clusters, and labeling workflows.
 7. `provider-feedback` shows the Step 6.5 provider contract between `algorithm_adapters` and SSDBCODI score diagnostics.
-8. `chatbox` shows a chat UI with read-only selection and labeling context, refinement-strategy toggle, suggestion chips, and the `MockIntentProvider` instruction snapshot.
+8. `chatbox` shows a chat UI with read-only selection and labeling context, full suggestion chips, and the `MockIntentProvider` instruction snapshot.
+9. `intent-instruction` shows the two-stage router + extractor debug view: the active LLM provider label, example messages grouped by intent, a try-a-message form, and the resulting router category, `InstructionDelta`, and current `StructuredInstruction` state.
+10. `/workflows/intent-runtime-validation/` is a composite visual lab: it embeds the real scatterplot plus real selection and labeling context, then adds provider controls, memory state, incomplete draft state, and evaluation diagnostics for the first live-model gate.
 
 ## 7. Testing Layers
 

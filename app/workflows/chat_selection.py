@@ -7,7 +7,7 @@ from app.modules.chatbox.fixtures import (
     current_selection_context,
     current_selection_groups,
 )
-from app.modules.chatbox.service import get_chatbox_state, suggestion_chips_for_strategy
+from app.modules.chatbox.service import get_chatbox_state, suggestion_chips
 from app.modules.chatbox.state import get_debug_provider, get_debug_store_for_context
 
 
@@ -27,7 +27,7 @@ def create_blueprint() -> Blueprint:
         store = get_debug_store_for_context(selection_context)
         provider = get_debug_provider()
         state = get_chatbox_state(store, provider)
-        chips = suggestion_chips_for_strategy(state.strategy)
+        chips = suggestion_chips()
         return render_template(
             "workflows/chat_selection.html",
             selection_context=selection_context,
