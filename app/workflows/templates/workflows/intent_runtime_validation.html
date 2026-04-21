@@ -5,214 +5,332 @@
 {% block content %}
   <section class="intro">
     <p class="eyebrow">Step 8.5 Runtime Validation</p>
-    <h1>Intent Runtime Validation</h1>
+    <h1>Live Intent Runtime Validation</h1>
     <p>
-      This workflow layers the deterministic compiler from Step 8 onto the real
-      scatterplot, selection, and labeling state so visual grounding can be audited
-      before Step 9 consumes any structured instruction.
+      This workflow uses the real scatterplot, selection, labeling, and a runtime-configurable
+      model provider so you can validate grounded chat behavior before Step 9 consumes any
+      structured instruction.
     </p>
   </section>
 
   <section class="panel">
-    <h2>Workflow State</h2>
-    <form class="debug-form" method="get">
+    <div class="runtime-toolbar">
+      <div>
+        <h2>Runtime</h2>
+        <p class="small">
+          Session <code>{{ runtime_payload.storage.session_id }}</code> stores chat, grounding,
+          memory, and diagnostics under <code>{{ runtime_payload.storage.artifact_dir }}</code>.
+        </p>
+      </div>
+      <div class="runtime-badges">
+        <span>{{ runtime_config.provider_kind }}</span>
+        <span>{{ runtime_config.model_name }}</span>
+        <span>{{ grounded.cluster_ids | length }} clusters</span>
+        <span>{{ grounded.selection_context.selected_point_ids | length }} selected</span>
+      </div>
+    </div>
+
+    <form class="runtime-config-form" data-runtime-config-form>
       <label>
-        SSDBCODI bootstrap clusters
-        <input type="number" name="n_clusters" min="1" value="{{ grounded.n_clusters }}">
+        Provider
+        <select name="provider_kind">
+          <option value="ollama" {% if runtime_config.provider_kind == "ollama" %}selected{% endif %}>ollama</option>
+          <option value="mock" {% if runtime_config.provider_kind == "mock" %}selected{% endif %}>mock</option>
+        </select>
       </label>
-      <button class="button" type="submit">Refresh Step 8.5</button>
+      <label>
+        Model
+        <input name="model_name" value="{{ runtime_config.model_name }}" autocomplete="off">
+      </label>
+      <label>
+        Base URL
+        <input name="base_url" value="{{ runtime_config.base_url }}" autocomplete="off">
+      </label>
+      <label>
+        Temperature
+        <input name="temperature" type="number" step="0.1" value="{{ runtime_config.temperature }}">
+      </label>
+      <label>
+        Timeout
+        <input name="timeout_seconds" type="number" min="1" value="{{ runtime_config.timeout_seconds }}">
+      </label>
+      <label>
+        Max Tokens
+        <input name="max_output_tokens" type="number" min="1" value="{{ runtime_config.max_output_tokens }}">
+      </label>
+      <label class="runtime-toggle">
+        <input
+          type="checkbox"
+          name="allow_mock_fallback"
+          value="true"
+          {% if runtime_config.allow_mock_fallback %}checked{% endif %}
+        >
+        Allow mock fallback
+      </label>
+      <button class="button" type="submit">Apply Runtime</button>
+      <button type="button" data-runtime-health>Check Model</button>
+      <button type="button" data-runtime-action="reset">New Session</button>
     </form>
-    <dl class="details">
-      <dt>Dataset</dt>
-      <dd>{{ grounded.dataset.dataset_id }}</dd>
-      <dt>Dependency mode</dt>
-      <dd>{{ dependency_mode }}</dd>
-      <dt>Outer provider</dt>
-      <dd><code>{{ provider_label }}</code></dd>
-      <dt>Inner backend</dt>
-      <dd><code>{{ llm_label }}</code> (deterministic mock)</dd>
-      <dt>Visible clusters</dt>
-      <dd>{{ grounded.cluster_ids | length }}</dd>
-      <dt>Visible outliers</dt>
-      <dd>{{ grounded.outlier_point_ids | length }}</dd>
-      <dt>Selected points</dt>
-      <dd>{{ grounded.selection_context.selected_point_ids | length }}</dd>
-      <dt>Saved groups</dt>
-      <dd>{{ grounded.selection_groups | length }}</dd>
-      <dt>Label annotations</dt>
-      <dd>{{ grounded.labeling_state.annotations | length }}</dd>
-      <dt>Chat turns</dt>
-      <dd>{{ state.turns | length }}</dd>
-      <dt>Instruction version</dt>
-      <dd>{{ instruction.version }}</dd>
-    </dl>
-    <div class="actions">
-      <a href="{{ url_for('intent_runtime_validation_workflow.state_api', n_clusters=grounded.n_clusters) }}">State API</a>
-      <button type="button" data-runtime-action="clear-selection">Clear Selection</button>
-      <button type="button" data-runtime-action="clear-labels">Clear Labels</button>
-      <button type="button" data-runtime-action="reset-labels">Reset Labels</button>
-      <button type="button" data-runtime-action="clear">Clear Chat</button>
-      <button type="button" data-runtime-action="reset">Reset Compiler</button>
+
+    <div class="runtime-health" id="runtime-health">
+      <strong>Health:</strong>
+      {% set health = runtime_payload.runtime_diagnostics.get("health", {}) %}
+      {% if health.get("available") %}
+        connected to <code>{{ health.get("base_url") }}</code>
+        {% if health.get("model_present") %}
+          with model <code>{{ health.get("model_name") }}</code>
+        {% else %}
+          but model <code>{{ health.get("model_name") }}</code> is missing
+        {% endif %}
+      {% else %}
+        not connected
+      {% endif %}
     </div>
   </section>
 
-  <section class="panel">
-    <h2>Scatterplot</h2>
-    <p class="small">
-      Click a point to toggle selection, or drag a rectangle to add the enclosed points.
-      Then test chat references against the same live visual state.
-    </p>
-    <svg
-      class="debug-plot workflow-selection-plot"
-      viewBox="0 0 860 520"
-      role="img"
-      aria-label="Intent runtime validation scatterplot"
-      data-selection-plot
-    >
-      <line x1="56" y1="260" x2="804" y2="260" stroke="#dadce0"></line>
-      <line x1="430" y1="56" x2="430" y2="464" stroke="#dadce0"></line>
-      {% for point in grounded.render_payload.points %}
-        <g
-          class="workflow-point"
-          data-point-id="{{ point.point_id }}"
-          data-screen-x="{{ '%.2f'|format(point.screen_x) }}"
-          data-screen-y="{{ '%.2f'|format(point.screen_y) }}"
-          tabindex="0"
+  <section class="runtime-layout">
+    <div class="runtime-main-column">
+      <section class="panel">
+        <div class="runtime-toolbar">
+          <div>
+            <h2>Grounded Scatterplot</h2>
+            <p class="small">Select points visually, save groups, label them, then challenge the model from the chatbox.</p>
+          </div>
+          <div class="actions">
+            <button type="button" data-runtime-action="clear-selection">Clear Selection</button>
+            <button type="button" data-runtime-action="clear-labels">Clear Labels</button>
+            <button type="button" data-runtime-action="reset-labels">Reset Labels</button>
+          </div>
+        </div>
+
+        <svg
+          class="debug-plot workflow-selection-plot"
+          viewBox="0 0 860 520"
+          role="img"
+          aria-label="Intent runtime validation scatterplot"
+          data-selection-plot
         >
-          <circle
-            cx="{{ '%.2f'|format(point.screen_x) }}"
-            cy="{{ '%.2f'|format(point.screen_y) }}"
-            r="{{ 10 if point.is_outlier else 7 }}"
-            fill="{{ '#d6336c' if point.is_outlier else point.color }}"
-            stroke="{{ '#111827' if point.selected else '#202124' }}"
-            stroke-width="{{ 1.8 if point.selected else (1.8 if point.is_outlier else 1.1) }}"
-          ></circle>
-          {% if point.selected %}
-            <circle cx="{{ '%.2f'|format(point.screen_x) }}" cy="{{ '%.2f'|format(point.screen_y) }}" r="2.2" fill="#111827"></circle>
+          <line x1="56" y1="260" x2="804" y2="260" stroke="#dadce0"></line>
+          <line x1="430" y1="56" x2="430" y2="464" stroke="#dadce0"></line>
+          {% for point in grounded.render_payload.points %}
+            <g
+              class="workflow-point"
+              data-point-id="{{ point.point_id }}"
+              data-screen-x="{{ '%.2f'|format(point.screen_x) }}"
+              data-screen-y="{{ '%.2f'|format(point.screen_y) }}"
+              tabindex="0"
+            >
+              <circle
+                cx="{{ '%.2f'|format(point.screen_x) }}"
+                cy="{{ '%.2f'|format(point.screen_y) }}"
+                r="{{ 10 if point.is_outlier else 7 }}"
+                fill="{{ '#d6336c' if point.is_outlier else point.color }}"
+                stroke="{{ '#111827' if point.selected else '#202124' }}"
+                stroke-width="{{ 1.8 if point.selected else (1.8 if point.is_outlier else 1.1) }}"
+              ></circle>
+              {% if point.selected %}
+                <circle cx="{{ '%.2f'|format(point.screen_x) }}" cy="{{ '%.2f'|format(point.screen_y) }}" r="2.2" fill="#111827"></circle>
+              {% endif %}
+              <text x="{{ '%.2f'|format(point.screen_x + 10) }}" y="{{ '%.2f'|format(point.screen_y - 8) }}">{{ point.point_id }}</text>
+            </g>
+          {% endfor %}
+          <rect
+            class="selection-drag-box"
+            x="0"
+            y="0"
+            width="0"
+            height="0"
+            visibility="hidden"
+            data-selection-rect
+          ></rect>
+        </svg>
+
+        <div class="runtime-badges runtime-badges-spaced">
+          <span>{{ grounded.selection_context.selected_point_ids | length }} active selection</span>
+          <span>{{ grounded.selection_groups | length }} saved groups</span>
+          <span>{{ grounded.labeling_state.annotations | length }} labels</span>
+          <span>{{ grounded.outlier_point_ids | length }} visible outliers</span>
+        </div>
+      </section>
+
+      <section class="split">
+        <article>
+          <h2>Label Selected Points</h2>
+          <form class="debug-form" data-label-form>
+            <label>
+              Label
+              <select name="label_value">
+                {% for label in allowed_labels %}
+                  <option value="{{ label }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button class="button" type="submit">Apply Label</button>
+          </form>
+          <pre>{{ grounded.selection_context.selected_point_ids | list | tojson(indent=2) }}</pre>
+        </article>
+        <article>
+          <h2>Saved Selection Groups</h2>
+          <form class="debug-form" data-group-form>
+            <label>
+              Group name
+              <input name="group_name" placeholder="cluster bridge">
+            </label>
+            <button class="button" type="submit">Save Current Selection</button>
+          </form>
+          {% if grounded.selection_groups %}
+            <div class="selection-group-list">
+              {% for group in grounded.selection_groups %}
+                <article class="selection-group-card">
+                  <div>
+                    <h3>{{ group.group_name }}</h3>
+                    <p class="small">{{ group.point_ids | length }} points</p>
+                    <code>{{ group.point_ids | join(", ") }}</code>
+                  </div>
+                  <div class="actions">
+                    <button type="button" data-group-action="select" data-group-id="{{ group.group_id }}">
+                      Select
+                    </button>
+                    <button type="button" data-group-action="delete" data-group-id="{{ group.group_id }}">
+                      Delete
+                    </button>
+                  </div>
+                </article>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="small">No saved groups yet. Select points on the plot, then save the current selection.</p>
           {% endif %}
-          <text x="{{ '%.2f'|format(point.screen_x + 10) }}" y="{{ '%.2f'|format(point.screen_y - 8) }}">{{ point.point_id }}</text>
-        </g>
-      {% endfor %}
-      <rect
-        class="selection-drag-box"
-        x="0"
-        y="0"
-        width="0"
-        height="0"
-        visibility="hidden"
-        data-selection-rect
-      ></rect>
-    </svg>
-  </section>
+        </article>
+      </section>
+    </div>
 
-  <section class="split">
-    <article>
-      <h2>Chat Runtime</h2>
-      <form class="debug-form" data-chat-runtime-form>
-        <label>
-          Message
-          <input name="message" placeholder="e.g. merge clusters 1 and 2" autocomplete="off">
-        </label>
-        <button class="button" type="submit">Send</button>
-      </form>
-      <h3>Suggestion Chips</h3>
-      <pre>{{ chips_payload | tojson(indent=2) }}</pre>
-    </article>
-    <article>
-      <h2>Label Selected Points</h2>
-      <form class="debug-form" data-label-form>
-        <label>
-          Label
-          <select name="label_value">
-            {% for label in allowed_labels %}
-              <option value="{{ label }}">{{ label }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <button class="button" type="submit">Apply Label</button>
-      </form>
-      <h3>Current Selection</h3>
-      <pre>{{ grounded.selection_context.selected_point_ids | list | tojson(indent=2) }}</pre>
-    </article>
-  </section>
+    <aside class="runtime-chat-shell">
+      <div class="runtime-chat-header">
+        <div>
+          <h2>Chatbox</h2>
+          <p class="small">This panel talks to the current runtime config and writes every important state snapshot to disk.</p>
+        </div>
+        <div class="actions">
+          <button type="button" data-runtime-action="clear">Clear Chat</button>
+        </div>
+      </div>
 
-  <section class="panel">
-    <h2>Saved Selection Groups</h2>
-    <form class="debug-form" data-group-form>
-      <label>
-        Group name
-        <input name="group_name" placeholder="cluster bridge">
-      </label>
-      <button class="button" type="submit">Save Current Selection</button>
-    </form>
-    {% if grounded.selection_groups %}
-      <div class="selection-group-list">
-        {% for group in grounded.selection_groups %}
-          <article class="selection-group-card">
-            <div>
-              <h3>{{ group.group_name }}</h3>
-              <p class="small">{{ group.point_ids | length }} points</p>
-              <code>{{ group.point_ids | join(", ") }}</code>
-            </div>
-            <div class="actions">
-              <button type="button" data-group-action="select" data-group-id="{{ group.group_id }}">
-                Select {{ group.group_name }}
-              </button>
-              <button type="button" data-group-action="delete" data-group-id="{{ group.group_id }}">
-                Delete
-              </button>
-            </div>
-          </article>
+      <div class="runtime-chip-row">
+        {% for chip in chips_payload %}
+          <button
+            type="button"
+            class="runtime-chip"
+            data-chip-text="{{ chip.text }}"
+          >
+            {{ chip.text }}
+          </button>
         {% endfor %}
       </div>
-    {% else %}
-      <p class="small">No saved groups yet. Select points on the plot, then save the current selection.</p>
-    {% endif %}
+
+      {% if runtime_payload.memory_state.draft_state.pending_clarification %}
+        <div class="runtime-followup" id="followup-box">
+          <strong>Need clarification:</strong>
+          <span>{{ runtime_payload.memory_state.draft_state.pending_clarification }}</span>
+        </div>
+      {% else %}
+        <div class="runtime-followup" id="followup-box" hidden></div>
+      {% endif %}
+
+      <div class="runtime-chat-thread" id="chat-thread">
+        {% if state.turns %}
+          {% for turn in state.turns %}
+            <div class="runtime-message-row {{ turn.role }}" data-turn-id="{{ turn.turn_id }}">
+              <article class="runtime-message {{ turn.role }}">
+                <div class="runtime-message-role">{{ turn.role }}</div>
+                <div class="runtime-message-body">{{ turn.text }}</div>
+              </article>
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="runtime-empty-thread" id="chat-empty-state">Start by selecting points or naming a cluster and then ask the model what to do with them.</div>
+        {% endif %}
+      </div>
+
+      <form class="runtime-composer" data-chat-runtime-form>
+        <label class="runtime-composer-label">
+          Message
+          <textarea name="message" rows="4" placeholder="Try: how many clusters are there now? or merge clusters 1 and 2"></textarea>
+        </label>
+        <div class="runtime-composer-actions">
+          <button class="button" type="submit">Send</button>
+          <span class="small">Provider: <code id="composer-provider">{{ provider_label }}</code></span>
+        </div>
+      </form>
+
+      <div class="runtime-side-panels">
+        <section class="runtime-side-panel">
+          <h3>Memory Summary</h3>
+          <p id="memory-summary">{{ runtime_payload.memory_state.summary }}</p>
+        </section>
+        <section class="runtime-side-panel">
+          <h3>Current Instruction</h3>
+          <pre id="current-instruction">{{ instruction.to_dict() | tojson(indent=2) }}</pre>
+        </section>
+        <section class="runtime-side-panel">
+          <h3>Storage</h3>
+          <p class="small">Artifacts are persisted here:</p>
+          <code id="artifact-dir">{{ runtime_payload.storage.artifact_dir }}</code>
+          <pre id="storage-files">{{ runtime_payload.storage.files | tojson(indent=2) }}</pre>
+        </section>
+      </div>
+    </aside>
   </section>
 
-  <section class="split">
-    <article>
-      <h2>Last Response</h2>
-      <pre id="last-response">{{ last_response | tojson(indent=2) if last_response else "(no message sent yet)" }}</pre>
-      <h3>Chat History</h3>
-      <pre id="chat-history">{{ state.to_dict().turns | tojson(indent=2) }}</pre>
-    </article>
-    <article>
-      <h2>Current Structured Instruction</h2>
-      <pre id="current-instruction">{{ instruction.to_dict() | tojson(indent=2) }}</pre>
-      <h3>Runtime Diagnostics</h3>
+  <section class="runtime-detail-grid">
+    <details class="panel" open>
+      <summary>Evaluation and Diagnostics</summary>
       <pre id="runtime-diagnostics">{{ runtime_payload.runtime_diagnostics | tojson(indent=2) }}</pre>
-    </article>
-  </section>
-
-  <section class="split">
-    <article>
-      <h2>Grounded Context</h2>
-      <pre id="grounded-context">{{ runtime_payload.state.analysis_context | tojson(indent=2) }}</pre>
-      <h3>Label Context</h3>
-      <pre id="label-context">{{ runtime_payload.state.label_context | tojson(indent=2) }}</pre>
-    </article>
-    <article>
-      <h2>Memory and Evaluation</h2>
-      <pre id="memory-state">{{ runtime_payload.memory_state | tojson(indent=2) }}</pre>
-      <h3>Evaluation Results</h3>
       <pre id="evaluation-results">{{ runtime_payload.evaluation_results | tojson(indent=2) }}</pre>
-    </article>
+    </details>
+    <details class="panel">
+      <summary>Memory State</summary>
+      <pre id="memory-state">{{ runtime_payload.memory_state | tojson(indent=2) }}</pre>
+    </details>
+    <details class="panel">
+      <summary>Grounded Context</summary>
+      <pre id="grounded-context">{{ runtime_payload.state.analysis_context | tojson(indent=2) }}</pre>
+      <pre id="label-context">{{ runtime_payload.state.label_context | tojson(indent=2) }}</pre>
+    </details>
+    <details class="panel">
+      <summary>Chat State</summary>
+      <pre id="chat-history">{{ state.to_dict().turns | tojson(indent=2) }}</pre>
+      <pre id="last-response">{{ last_response | tojson(indent=2) if last_response else "(no message sent yet)" }}</pre>
+    </details>
   </section>
 
   <script>
     const workflowNClusters = "{{ grounded.n_clusters }}";
     const workflowBasePath = "/workflows/intent-runtime-validation";
 
+    const runtimeConfigPayload = () => {
+      const form = document.querySelector("[data-runtime-config-form]");
+      const values = new FormData(form);
+      return {
+        provider_kind: values.get("provider_kind"),
+        model_name: values.get("model_name"),
+        base_url: values.get("base_url"),
+        temperature: values.get("temperature"),
+        timeout_seconds: values.get("timeout_seconds"),
+        max_output_tokens: values.get("max_output_tokens"),
+        allow_mock_fallback: form.querySelector("[name=allow_mock_fallback]").checked
+      };
+    };
+
     const postJson = async (url, body = {}) => {
       return fetch(url, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({n_clusters: workflowNClusters, ...body})
+        body: JSON.stringify({n_clusters: workflowNClusters, ...runtimeConfigPayload(), ...body})
       });
     };
 
-    const reloadOrAlert = async (response) => {
+    const refreshOrAlert = async (response) => {
       if (!response.ok) {
         const payload = await response.json();
         alert(payload.error ? payload.error.message : "Workflow action failed");
@@ -221,35 +339,141 @@
       window.location.reload();
     };
 
+    const escapeHtml = (text) => String(text ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+    const renderChatThread = (turns) => {
+      const thread = document.getElementById("chat-thread");
+      if (!turns.length) {
+        thread.innerHTML = '<div class="runtime-empty-thread" id="chat-empty-state">Start by selecting points or naming a cluster and then ask the model what to do with them.</div>';
+        return;
+      }
+      thread.innerHTML = turns.map((turn) => `
+        <div class="runtime-message-row ${escapeHtml(turn.role)}" data-turn-id="${escapeHtml(turn.turn_id || "")}">
+          <article class="runtime-message ${escapeHtml(turn.role)}">
+            <div class="runtime-message-role">${escapeHtml(turn.role)}</div>
+            <div class="runtime-message-body">${escapeHtml(turn.text)}</div>
+          </article>
+        </div>
+      `).join("");
+      thread.scrollTop = thread.scrollHeight;
+    };
+
+    const appendTurnToThread = (role, text, { pending = false } = {}) => {
+      const thread = document.getElementById("chat-thread");
+      const emptyState = document.getElementById("chat-empty-state");
+      if (emptyState) {
+        emptyState.remove();
+      }
+      const row = document.createElement("div");
+      row.className = `runtime-message-row ${role}`;
+      const article = document.createElement("article");
+      article.className = `runtime-message ${role}${pending ? " pending" : ""}`;
+      article.innerHTML = `
+        <div class="runtime-message-role">${escapeHtml(role)}</div>
+        <div class="runtime-message-body">${escapeHtml(text)}</div>
+      `;
+      row.appendChild(article);
+      thread.appendChild(row);
+      thread.scrollTop = thread.scrollHeight;
+      return row;
+    };
+
+    const updateRuntimePanels = (runtime, responsePayload = null) => {
+      renderChatThread(runtime.chat_state.turns || []);
+      document.getElementById("current-instruction").textContent = JSON.stringify(runtime.current_instruction, null, 2);
+      document.getElementById("runtime-diagnostics").textContent = JSON.stringify(runtime.runtime_diagnostics, null, 2);
+      document.getElementById("evaluation-results").textContent = JSON.stringify(runtime.evaluation_results, null, 2);
+      document.getElementById("memory-state").textContent = JSON.stringify(runtime.memory_state, null, 2);
+      document.getElementById("memory-summary").textContent = runtime.memory_state.summary || "";
+      document.getElementById("grounded-context").textContent = JSON.stringify(runtime.state.analysis_context, null, 2);
+      document.getElementById("label-context").textContent = JSON.stringify(runtime.state.label_context, null, 2);
+      document.getElementById("chat-history").textContent = JSON.stringify(runtime.chat_state.turns, null, 2);
+      document.getElementById("storage-files").textContent = JSON.stringify(runtime.storage.files, null, 2);
+      document.getElementById("artifact-dir").textContent = runtime.storage.artifact_dir;
+      document.getElementById("composer-provider").textContent = runtime.runtime_diagnostics.provider_label;
+      if (responsePayload) {
+        document.getElementById("last-response").textContent = JSON.stringify(responsePayload, null, 2);
+        const followup = document.getElementById("followup-box");
+        if (responsePayload.requires_followup) {
+          followup.hidden = false;
+          followup.innerHTML = `<strong>Need clarification:</strong> <span>${responsePayload.followup_question}</span>`;
+        } else {
+          followup.hidden = true;
+          followup.innerHTML = "";
+        }
+      }
+    };
+
+    document.querySelector("[data-runtime-config-form]").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const response = await postJson(`${workflowBasePath}/api/runtime-config`);
+      refreshOrAlert(response);
+    });
+
+    document.querySelector("[data-runtime-health]").addEventListener("click", async () => {
+      const query = new URLSearchParams({...runtimeConfigPayload(), n_clusters: workflowNClusters});
+      const response = await fetch(`${workflowBasePath}/api/provider-health?${query.toString()}`);
+      if (!response.ok) {
+        await refreshOrAlert(response);
+        return;
+      }
+      const payload = await response.json();
+      document.getElementById("runtime-health").innerHTML = `<strong>Health:</strong> ${JSON.stringify(payload.data.health || payload.data, null, 2)}`;
+    });
+
+    document.querySelectorAll("[data-chip-text]").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelector("[name=message]").value = button.dataset.chipText;
+      });
+    });
+
     document.querySelector("[data-chat-runtime-form]").addEventListener("submit", async (event) => {
       event.preventDefault();
-      const input = event.currentTarget.querySelector("[name=message]");
+      const form = event.currentTarget;
+      const input = form.querySelector("[name=message]");
+      const submitButton = form.querySelector("button[type=submit]");
       const message = input.value.trim();
       if (!message) {
         alert("Message cannot be empty");
         return;
       }
-      const response = await postJson(`${workflowBasePath}/api/messages`, {message});
-      if (!response.ok) {
-        await reloadOrAlert(response);
-        return;
-      }
-      const payload = await response.json();
-      document.getElementById("last-response").textContent = JSON.stringify(payload.data.response, null, 2);
-      document.getElementById("chat-history").textContent = JSON.stringify(payload.data.runtime.chat_state.turns, null, 2);
-      document.getElementById("current-instruction").textContent = JSON.stringify(payload.data.runtime.current_instruction, null, 2);
-      document.getElementById("runtime-diagnostics").textContent = JSON.stringify(payload.data.runtime.runtime_diagnostics, null, 2);
-      document.getElementById("grounded-context").textContent = JSON.stringify(payload.data.runtime.state.analysis_context, null, 2);
-      document.getElementById("label-context").textContent = JSON.stringify(payload.data.runtime.state.label_context, null, 2);
-      document.getElementById("memory-state").textContent = JSON.stringify(payload.data.runtime.memory_state, null, 2);
-      document.getElementById("evaluation-results").textContent = JSON.stringify(payload.data.runtime.evaluation_results, null, 2);
+
+      appendTurnToThread("user", message);
+      const pendingNode = appendTurnToThread("assistant", "thinking...", {pending: true});
       input.value = "";
+      input.disabled = true;
+      submitButton.disabled = true;
+
+      try {
+        const response = await postJson(`${workflowBasePath}/api/messages`, {message});
+        if (!response.ok) {
+          pendingNode.remove();
+          input.value = message;
+          await refreshOrAlert(response);
+          return;
+        }
+        const payload = await response.json();
+        updateRuntimePanels(payload.data.runtime, payload.data.response);
+      } catch (error) {
+        pendingNode.remove();
+        input.value = message;
+        alert("Failed to send message: " + (error && error.message ? error.message : error));
+      } finally {
+        input.disabled = false;
+        submitButton.disabled = false;
+        input.focus();
+      }
     });
 
     document.querySelectorAll("[data-runtime-action]").forEach((button) => {
       button.addEventListener("click", async () => {
         const response = await postJson(`${workflowBasePath}/api/${button.dataset.runtimeAction}`);
-        reloadOrAlert(response);
+        refreshOrAlert(response);
       });
     });
 
@@ -264,7 +488,7 @@
           label_value: labelValue
         }
       );
-      reloadOrAlert(response);
+      refreshOrAlert(response);
     });
 
     document.querySelector("[data-group-form]").addEventListener("submit", async (event) => {
@@ -274,7 +498,7 @@
         `${workflowBasePath}/api/groups`,
         {group_name: form.get("group_name")}
       );
-      reloadOrAlert(response);
+      refreshOrAlert(response);
     });
 
     document.querySelectorAll("[data-group-action]").forEach((button) => {
@@ -285,9 +509,9 @@
         const response = await fetch(url, {
           method: action === "delete" ? "DELETE" : "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({n_clusters: workflowNClusters})
+          body: JSON.stringify({n_clusters: workflowNClusters, ...runtimeConfigPayload()})
         });
-        reloadOrAlert(response);
+        refreshOrAlert(response);
       });
     });
 
@@ -299,7 +523,7 @@
         `${workflowBasePath}/api/select`,
         {point_ids: pointIds, source, mode: "additive"}
       );
-      reloadOrAlert(response);
+      refreshOrAlert(response);
     };
 
     const plot = document.querySelector("[data-selection-plot]");

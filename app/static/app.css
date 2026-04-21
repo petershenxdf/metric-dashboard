@@ -567,6 +567,236 @@ dd {
   margin-top: 16px;
 }
 
+.runtime-toolbar {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.runtime-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.runtime-badges span,
+.runtime-health {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 14px;
+}
+
+.runtime-badges-spaced {
+  margin-top: 16px;
+}
+
+.runtime-config-form {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.runtime-config-form label,
+.runtime-composer-label {
+  display: grid;
+  gap: 6px;
+  color: #5f6368;
+  font-size: 14px;
+}
+
+.runtime-config-form input,
+.runtime-config-form select,
+.runtime-composer textarea {
+  min-height: 40px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  color: #202124;
+  font: inherit;
+  background: #ffffff;
+}
+
+.runtime-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.runtime-health {
+  margin-top: 16px;
+}
+
+.runtime-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.95fr);
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 24px;
+}
+
+.runtime-main-column {
+  display: grid;
+  gap: 16px;
+}
+
+.runtime-chat-shell {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  background: #ffffff;
+  position: sticky;
+  top: 18px;
+}
+
+.runtime-chat-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.runtime-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.runtime-chip {
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #202124;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.runtime-followup {
+  padding: 12px 14px;
+  border: 1px solid #f7c56f;
+  border-radius: 8px;
+  background: #fff7e6;
+  color: #8a5300;
+  line-height: 1.45;
+}
+
+.runtime-chat-thread {
+  display: grid;
+  gap: 12px;
+  max-height: 540px;
+  padding: 4px;
+  overflow: auto;
+}
+
+.runtime-message-row {
+  display: flex;
+}
+
+.runtime-message-row.user {
+  justify-content: flex-end;
+}
+
+.runtime-message-row.assistant {
+  justify-content: flex-start;
+}
+
+.runtime-empty-thread {
+  padding: 18px 14px;
+  border: 1px dashed #c8d4e5;
+  border-radius: 8px;
+  color: #5f6368;
+  background: #f8fafc;
+}
+
+.runtime-message {
+  display: grid;
+  gap: 6px;
+  max-width: min(92%, 560px);
+  padding: 12px 14px;
+  border-radius: 8px;
+  line-height: 1.5;
+}
+
+.runtime-message.user {
+  background: #e8f0fe;
+}
+
+.runtime-message.assistant {
+  background: #edf7f1;
+}
+
+.runtime-message.pending {
+  opacity: 0.7;
+  font-style: italic;
+}
+
+.runtime-message-role {
+  color: #5f6368;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.runtime-message-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.runtime-composer {
+  display: grid;
+  gap: 10px;
+}
+
+.runtime-composer textarea {
+  resize: vertical;
+}
+
+.runtime-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.runtime-side-panels {
+  display: grid;
+  gap: 12px;
+}
+
+.runtime-side-panel {
+  padding: 14px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.runtime-side-panel code {
+  display: block;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+
+.runtime-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.runtime-detail-grid details summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
 @media (max-width: 700px) {
   .topbar,
   .split,
@@ -575,9 +805,22 @@ dd {
   .mock-layout,
   .mock-toolbar,
   .selection-group-card,
-  .mock-bottom {
+  .mock-bottom,
+  .runtime-layout,
+  .runtime-toolbar,
+  .runtime-chat-header,
+  .runtime-composer-actions,
+  .runtime-detail-grid {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .runtime-config-form {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-chat-shell {
+    position: static;
   }
 
   .mock-scatter {

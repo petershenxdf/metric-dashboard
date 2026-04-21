@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Sequence, Tuple
+from typing import Mapping, Sequence, Tuple
 
 from ..schemas import (
     ALL_INTENT_TYPES,
@@ -84,6 +84,7 @@ class MockLlmProvider:
         message: str,
         context: DatasetContext,
         history: Sequence[Turn],
+        memory_context: Mapping[str, object] | None = None,
     ) -> RouterResult:
         text = (message or "").strip().lower()
         if not text:
@@ -145,6 +146,7 @@ class MockLlmProvider:
         context: DatasetContext,
         history: Sequence[Turn],
         current_instruction: StructuredInstruction,
+        memory_context: Mapping[str, object] | None = None,
     ) -> InstructionDelta:
         text = (message or "").strip().lower()
         intent = _match_intent(text)

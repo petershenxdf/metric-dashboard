@@ -43,6 +43,30 @@ text-only lab. The workflow should embed the real `scatterplot`, `selection`,
 and `labeling` module boundaries so language grounding can be validated against
 the same visual state the user actually sees.
 
+## Current Implementation Status
+
+The current repository already ships a working first Step 8.5 implementation:
+
+1. `/workflows/intent-runtime-validation/` is live as the composite validation
+   workflow.
+2. The workflow uses the real grounded `selection`, saved `selection_groups`,
+   real `labeling` annotations, and the effective cluster/outlier state derived
+   from the current analysis view.
+3. The live default provider is Ollama `qwen2.5:14b`.
+4. Prompt templates are file-backed and loaded from:
+   - `app/modules/intent_instruction/prompts/ollama/route_prompt.txt`
+   - `app/modules/intent_instruction/prompts/ollama/extract_prompt.txt`
+5. Runtime artifacts are persisted per session under:
+   - `runtime_data/intent_runtime_validation/<dataset_id>/<session_id>/`
+6. Persisted artifacts include runtime config, chat state, grounded state,
+   memory state, provider diagnostics, interaction history, and the exact last
+   route/extract prompts sent to the live model.
+
+The current implementation also has one important known risk: some live
+multi-turn slot-answer cases can still hit route-timeout fallback even when the
+final structured result is correct. That means the semantic path may succeed
+while the route stage is not yet as stable as the extract stage.
+
 ## Default Runtime
 
 The default first live runtime is:
@@ -75,6 +99,7 @@ class LlmProvider(Protocol):
         message: str,
         context: DatasetContext,
         history: Sequence[Turn],
+        memory_context: Mapping[str, object] | None = None,
     ) -> RouterResult: ...
 
     def extract(
@@ -83,6 +108,7 @@ class LlmProvider(Protocol):
         context: DatasetContext,
         history: Sequence[Turn],
         current_instruction: StructuredInstruction,
+        memory_context: Mapping[str, object] | None = None,
     ) -> InstructionDelta: ...
 ```
 
@@ -93,11 +119,10 @@ Step 8.5 adds runtime-facing configuration around that protocol:
   "provider_kind": "ollama",
   "model_name": "qwen2.5:14b",
   "base_url": "http://127.0.0.1:11434",
-  "timeout_seconds": 30,
+  "timeout_seconds": 45,
   "temperature": 0.1,
   "max_output_tokens": 800,
-  "supports_json_schema": true,
-  "auth_env_var": null
+  "allow_mock_fallback": true
 }
 ```
 
@@ -107,8 +132,32 @@ Required runtime behaviors:
 2. explicit model label,
 3. timeout handling,
 4. invalid-JSON diagnostics,
-5. capability flags such as schema mode support,
-6. room for future authentication when the provider is online.
+5. prompt-template visibility for debugging,
+6. persisted prompt artifacts for replay,
+7. room for future authentication when the provider is online.
+
+## Prompt and Artifact Debugging
+
+Prompt debugging is a first-class Step 8.5 requirement, not an afterthought.
+
+Current implementation rules:
+
+1. route and extract prompts are stored as standalone text templates in
+   `app/modules/intent_instruction/prompts/ollama/`,
+2. the workflow persists the exact last rendered route and extract prompt text
+   for each session,
+3. the diagnostics payload reports the prompt template paths plus the last
+   prompt text and prompt size,
+4. a prompt change should therefore be auditable without scraping console logs.
+
+This is important because wording failures can come from three different
+layers:
+
+1. route classification,
+2. extraction / slot filling,
+3. service-side final reply generation.
+
+Those layers should be debugged separately.
 
 ## Step Boundary
 
@@ -293,6 +342,27 @@ relevant and actionable
 ```
 
 That distinction is central to this step.
+
+## Reply Interpretation Rule
+
+The raw route output shown in diagnostics is not always the final assistant text
+shown in the chatbox.
+
+Current pipeline behavior:
+
+1. route produces an intermediate `RouterResult`,
+2. extract may still run to build or complete draft state,
+3. required-slot gating may override the raw route clarification,
+4. successful commits currently end with a deterministic service-side action
+   confirmation rather than a free-form model-authored confirmation.
+
+So if diagnostics show a raw clarification such as "Do you want me to split or
+group these points within cluster 2?", the chatbox may still show a different
+final reply if:
+
+1. the route was upgraded by draft-memory resolution,
+2. extraction produced a valid delta,
+3. the service committed the delta and returned its own confirmation text.
 
 ## Wording Robustness
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol, Sequence
+from typing import Mapping, Protocol, Sequence
 
 from ..schemas import (
     DatasetContext,
@@ -26,6 +26,7 @@ class LlmProvider(Protocol):
         message: str,
         context: DatasetContext,
         history: Sequence[Turn],
+        memory_context: Mapping[str, object] | None = None,
     ) -> RouterResult: ...
 
     def extract(
@@ -34,4 +35,5 @@ class LlmProvider(Protocol):
         context: DatasetContext,
         history: Sequence[Turn],
         current_instruction: StructuredInstruction,
+        memory_context: Mapping[str, object] | None = None,
     ) -> InstructionDelta: ...

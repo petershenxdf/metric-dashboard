@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Sequence, Tuple
+from typing import Mapping, Sequence, Tuple
 
 from .providers.base import LlmProvider
 from .schemas import (
@@ -21,8 +21,15 @@ def propose_delta(
     context: DatasetContext,
     history: Sequence[Turn],
     current_instruction: StructuredInstruction,
+    memory_context: Mapping[str, object] | None = None,
 ) -> InstructionDelta:
-    return llm.extract(message, context, history, current_instruction)
+    return llm.extract(
+        message,
+        context,
+        history,
+        current_instruction,
+        memory_context=memory_context,
+    )
 
 
 def apply_delta(

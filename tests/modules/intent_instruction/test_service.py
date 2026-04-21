@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import dataclass
 
 from app.modules.chatbox.schemas import ChatMessagePayload
 from app.modules.intent_instruction.providers.mock import MockLlmProvider
 from app.modules.intent_instruction.service import IntentInstructionProvider
+from app.modules.intent_instruction.schemas import DeltaOperation, InstructionDelta, RouterResult
 from app.shared.schemas import InstructionSnapshot
 
 
@@ -15,7 +17,7 @@ def _payload(
     unselected=("p3",),
     groups=(),
     label_context=None,
-) -> ChatMessagePayload:
+    ) -> ChatMessagePayload:
     default_label_context = {
         "analysis_context": {
             "feature_names": ["sepal_length", "petal_length"],
@@ -34,6 +36,54 @@ def _payload(
         label_context=merged_label_context,
         history_window=(),
     )
+
+
+@dataclass
+class SelectedPointsReclassifyLlm:
+    label: str = "selected-points-reclassify"
+
+    def route(self, message, context, history, memory_context=None):
+        return RouterResult(category="on_topic_actionable", confidence=0.9, reason="test")
+
+    def extract(self, message, context, history, current_instruction, memory_context=None):
+        return InstructionDelta(
+            operations=(
+                DeltaOperation(
+                    op="add",
+                    constraint_id="pending",
+                    intent="reclassify_outlier",
+                    payload={
+                        "anchor": {"source": "selected_points", "ref": "current"},
+                        "is_outlier": True,
+                    },
+                ),
+            )
+        )
+
+
+@dataclass
+class AmbiguousSplitLlm:
+    label: str = "ambiguous-split"
+
+    def route(self, message, context, history, memory_context=None):
+        return RouterResult(
+            category="on_topic_ambiguous",
+            confidence=0.82,
+            reason="missing target cluster",
+            clarification_question="Which cluster would you like me to split?",
+        )
+
+    def extract(self, message, context, history, current_instruction, memory_context=None):
+        return InstructionDelta(
+            operations=(
+                DeltaOperation(
+                    op="add",
+                    constraint_id="pending",
+                    intent="split_cluster",
+                    payload={"target_groups": []},
+                ),
+            )
+        )
 
 
 class IntentInstructionProviderTests(unittest.TestCase):
@@ -114,6 +164,85 @@ class IntentInstructionProviderTests(unittest.TestCase):
                 {"source": "cluster", "ref": "cluster_2"},
             ],
         )
+
+    def test_reclassify_selected_points_requires_single_point_grounding(self):
+        provider = IntentInstructionProvider(llm=SelectedPointsReclassifyLlm())
+        response = provider.respond(
+            _payload(
+                "the selected point should be an outlier",
+                selected=("alpha_01", "outlier_north"),
+                unselected=("beta_01",),
+            )
+        )
+        self.assertEqual(response.router_category, "on_topic_ambiguous")
+        self.assertIsNone(response.delta)
+        self.assertIn("alpha_01", response.reply)
+        self.assertIn("outlier_north", response.reply)
+        self.assertEqual(response.current_instruction_version, 0)
+
+    def test_collective_no_outlier_expands_to_per_point_ops(self):
+        @dataclass
+        class CollectiveReclassifyLlm:
+            label: str = "collective-reclassify"
+
+            def route(self, message, context, history, memory_context=None):
+                return RouterResult(category="on_topic_actionable", confidence=0.9, reason="test")
+
+            def extract(self, message, context, history, current_instruction, memory_context=None):
+                return InstructionDelta(
+                    operations=(
+                        DeltaOperation(
+                            op="add",
+                            constraint_id="pending",
+                            intent="reclassify_outlier",
+                            payload={
+                                "anchor": {"source": "selected_points", "ref": "current"},
+                                "is_outlier": False,
+                            },
+                        ),
+                    )
+                )
+
+        provider = IntentInstructionProvider(llm=CollectiveReclassifyLlm())
+        response = provider.respond(
+            _payload(
+                "there should be no outlier",
+                selected=("beta_01", "beta_02", "beta_03"),
+                unselected=("alpha_01",),
+                label_context={
+                    "analysis_context": {
+                        "feature_names": ["sepal_length", "petal_length"],
+                        "cluster_ids": ["cluster_1", "cluster_2", "cluster_3"],
+                        "outlier_point_ids": ["beta_03"],
+                        "selected_point_clusters": [
+                            {"point_id": "beta_01", "cluster_id": "cluster_2", "is_outlier": False},
+                            {"point_id": "beta_02", "cluster_id": "cluster_2", "is_outlier": False},
+                            {"point_id": "beta_03", "cluster_id": "cluster_2", "is_outlier": True},
+                        ],
+                    }
+                },
+            )
+        )
+        self.assertEqual(response.router_category, "on_topic_actionable")
+        self.assertIsNotNone(response.delta)
+        operations = response.delta["operations"]
+        self.assertEqual(len(operations), 1)
+        self.assertEqual(operations[0]["intent"], "reclassify_outlier")
+        self.assertEqual(operations[0]["payload"]["anchor"], {"source": "point_id", "ref": "beta_03"})
+        self.assertFalse(operations[0]["payload"]["is_outlier"])
+
+    def test_ambiguous_router_path_still_builds_draft_trace(self):
+        provider = IntentInstructionProvider(llm=AmbiguousSplitLlm())
+        response = provider.respond(_payload("split this cluster"))
+        trace = provider.trace_for("intent_service_test")
+        self.assertEqual(response.router_category, "on_topic_ambiguous")
+        self.assertTrue(response.requires_followup)
+        self.assertIsNone(response.delta)
+        self.assertEqual(
+            trace["proposed_delta"]["operations"][0]["intent"],
+            "split_cluster",
+        )
+        self.assertEqual(trace["reply_source"], "clarification_from_draft_or_router")
 
     def test_reset_clears_per_dataset_state(self):
         self.provider.respond(_payload("merge clusters 1 and 2"))

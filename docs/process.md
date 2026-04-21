@@ -763,9 +763,11 @@ Tasks:
 
 Current design status:
 
-1. Not implemented yet. Step 8 still ships `MockLlmProvider` only.
-2. Step 8.5 is the first step that actually connects a live model runtime.
-3. The default first model is Ollama `qwen2.5:14b`, but the provider contract must stay open for future local and online models.
+1. Implemented as `/workflows/intent-runtime-validation/` with a runtime-configurable live provider and persisted session artifacts.
+2. The default first live model is Ollama `qwen2.5:14b`, but the runtime config remains provider-agnostic for future local and online models.
+3. Prompt templates are file-backed under `app/modules/intent_instruction/prompts/ollama/` and the rendered prompts are persisted per session for debugging.
+4. Grounded context now includes real selection state, saved selection groups, manual labels, effective cluster/outlier state, recent chat turns, structured memory, and point-level catalog data.
+5. One current open issue remains: some live draft-slot turns can still hit route-timeout fallback even when extraction succeeds and the final structured result is correct.
 
 Validation suites:
 
@@ -791,6 +793,7 @@ Open `/workflows/intent-runtime-validation/` and confirm:
 8. completed multi-turn feedback promotes into final structured output.
 9. evaluation diagnostics show which validation packs passed or failed.
 10. visual references such as `these points`, `that cluster`, and current outliers can be audited by comparing the plot, context panels, and structured output on one screen.
+11. both user and assistant turns render in the chat thread so the visible UI matches the persisted transcript and chat-state JSON.
 
 Completion:
 

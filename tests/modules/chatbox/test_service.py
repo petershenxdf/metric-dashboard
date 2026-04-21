@@ -98,6 +98,21 @@ class ChatboxServiceTests(unittest.TestCase):
         self.assertEqual(payload.label_context["annotation_count"], 2)
         self.assertEqual(len(payload.label_context["active_annotations"]), 1)
 
+    def test_payload_includes_memory_context_when_available(self):
+        payload = build_payload(
+            self.store,
+            "alpha_01",
+            selection_context=self.context,
+            selection_groups=[],
+            label_context={},
+            memory_context={"draft_state": {"candidate_intent": "reclassify_outlier"}},
+        )
+        self.assertEqual(
+            payload.memory_context["draft_state"]["candidate_intent"],
+            "reclassify_outlier",
+        )
+        self.assertIn("memory_context", payload.to_dict())
+
     def test_payload_serialization_is_strategy_agnostic(self):
         payload = build_payload(
             self.store,

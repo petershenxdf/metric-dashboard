@@ -222,6 +222,9 @@ class DatasetContext:
     cluster_ids: Tuple[str, ...] = field(default_factory=tuple)
     outlier_point_ids: Tuple[str, ...] = field(default_factory=tuple)
     selection_group_names: Tuple[str, ...] = field(default_factory=tuple)
+    selection_groups: Tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
+    label_annotations: Tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
+    analysis_context: Mapping[str, Any] = field(default_factory=dict)
     selected_point_ids: Tuple[str, ...] = field(default_factory=tuple)
     unselected_point_ids: Tuple[str, ...] = field(default_factory=tuple)
 
@@ -233,6 +236,9 @@ class DatasetContext:
         object.__setattr__(
             self, "selection_group_names", tuple(self.selection_group_names or ())
         )
+        object.__setattr__(self, "selection_groups", tuple(dict(group) for group in (self.selection_groups or ())))
+        object.__setattr__(self, "label_annotations", tuple(dict(annotation) for annotation in (self.label_annotations or ())))
+        object.__setattr__(self, "analysis_context", dict(self.analysis_context or {}))
         object.__setattr__(
             self, "selected_point_ids", tuple(self.selected_point_ids or ())
         )
@@ -249,6 +255,9 @@ class DatasetContext:
             "outlier_point_ids": list(self.outlier_point_ids),
             "outlier_count": len(self.outlier_point_ids),
             "selection_group_names": list(self.selection_group_names),
+            "selection_groups": [dict(group) for group in self.selection_groups],
+            "label_annotations": [dict(annotation) for annotation in self.label_annotations],
+            "analysis_context": dict(self.analysis_context),
             "selected_point_ids": list(self.selected_point_ids),
             "unselected_point_ids": list(self.unselected_point_ids),
             "has_selection": bool(self.selected_point_ids),
@@ -277,6 +286,7 @@ class RouterResult:
     confidence: float
     reason: Optional[str] = None
     clarification_question: Optional[str] = None
+    reply_text: Optional[str] = None
 
     def __post_init__(self) -> None:
         category = clean_text(self.category, "category")
@@ -296,4 +306,5 @@ class RouterResult:
             "confidence": self.confidence,
             "reason": self.reason,
             "clarification_question": self.clarification_question,
+            "reply_text": self.reply_text,
         }

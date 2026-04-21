@@ -43,6 +43,7 @@ def build_payload(
     selection_context: SelectionContext,
     selection_groups: Sequence[SelectionGroup],
     label_context: Mapping,
+    memory_context: Mapping | None = None,
     history_window_size: int = DEFAULT_HISTORY_WINDOW,
 ) -> ChatMessagePayload:
     _validate_store(store)
@@ -61,6 +62,7 @@ def build_payload(
         selection_groups=tuple(group.to_dict() for group in selection_groups),
         label_context=dict(label_context or {}),
         history_window=window,
+        memory_context=dict(memory_context or {}),
     )
 
 
@@ -71,6 +73,7 @@ def submit_message(
     selection_context: SelectionContext,
     selection_groups: Sequence[SelectionGroup] = (),
     label_context: Mapping | None = None,
+    memory_context: Mapping | None = None,
     history_window_size: int = DEFAULT_HISTORY_WINDOW,
 ) -> tuple[ChatMessagePayload, ChatResponse]:
     payload = build_payload(
@@ -79,6 +82,7 @@ def submit_message(
         selection_context,
         selection_groups,
         label_context or {},
+        memory_context or {},
         history_window_size,
     )
 

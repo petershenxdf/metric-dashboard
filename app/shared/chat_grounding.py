@@ -53,19 +53,93 @@ class GroundedChatContext:
         return tuple(self.analysis.outlier_result.outlier_point_ids)
 
     def analysis_context_payload(self) -> Dict[str, Any]:
+        point_to_cluster = self._point_to_cluster()
+        point_to_features = self._point_to_features()
+        outlier_set = set(self.outlier_point_ids)
         return {
             "dataset_id": self.dataset.dataset_id,
             "feature_names": list(self.feature_names),
             "cluster_ids": list(self.cluster_ids),
             "cluster_count": len(self.cluster_ids),
+            "cluster_sizes": self._cluster_sizes(),
+            "feature_ranges": self._feature_ranges(),
+            "label_summary": self._label_summary(),
             "outlier_point_ids": list(self.outlier_point_ids),
             "outlier_count": len(self.outlier_point_ids),
+            "point_to_cluster": point_to_cluster,
+            "point_catalog": [
+                {
+                    "point_id": point_id,
+                    "cluster_id": point_to_cluster.get(point_id),
+                    "is_outlier": point_id in outlier_set,
+                    "features": point_to_features.get(point_id, {}),
+                }
+                for point_id in self.matrix.point_ids
+            ],
             "selected_point_ids": list(self.selection_context.selected_point_ids),
             "selected_count": len(self.selection_context.selected_point_ids),
+            "selected_point_clusters": [
+                {
+                    "point_id": point_id,
+                    "cluster_id": point_to_cluster.get(point_id),
+                    "is_outlier": point_id in outlier_set,
+                    "features": point_to_features.get(point_id, {}),
+                }
+                for point_id in self.selection_context.selected_point_ids
+            ],
             "unselected_point_ids": list(self.selection_context.unselected_point_ids),
             "unselected_count": len(self.selection_context.unselected_point_ids),
             "visible_point_count": len(self.render_payload.points),
         }
+
+    def _point_to_cluster(self) -> Dict[str, str]:
+        mapping: Dict[str, str] = {}
+        for assignment in self.analysis.cluster_result.assignments:
+            mapping[assignment.point_id] = assignment.cluster_id
+        return mapping
+
+    def _point_to_features(self) -> Dict[str, Dict[str, float]]:
+        names = tuple(self.matrix.feature_names)
+        mapping: Dict[str, Dict[str, float]] = {}
+        for point_id, row in zip(self.matrix.point_ids, self.matrix.values):
+            mapping[point_id] = {
+                name: round(float(value), 4) for name, value in zip(names, row)
+            }
+        return mapping
+
+    def _cluster_sizes(self) -> Dict[str, int]:
+        sizes: Dict[str, int] = {cluster_id: 0 for cluster_id in self.cluster_ids}
+        for assignment in self.analysis.cluster_result.assignments:
+            if assignment.cluster_id in sizes:
+                sizes[assignment.cluster_id] += 1
+            else:
+                sizes[assignment.cluster_id] = 1
+        return sizes
+
+    def _feature_ranges(self) -> Dict[str, Dict[str, float]]:
+        names = tuple(self.matrix.feature_names)
+        if not names or not self.matrix.values:
+            return {}
+        ranges: Dict[str, Dict[str, float]] = {}
+        for index, name in enumerate(names):
+            column = [row[index] for row in self.matrix.values]
+            ranges[name] = {
+                "min": round(min(column), 4),
+                "max": round(max(column), 4),
+                "mean": round(sum(column) / len(column), 4),
+            }
+        return ranges
+
+    def _label_summary(self) -> Dict[str, int]:
+        summary: Dict[str, int] = {}
+        for annotation in self.labeling_state.annotations:
+            label_type = getattr(annotation, "label_type", None)
+            label_value = getattr(annotation, "label_value", None)
+            if not label_type:
+                continue
+            key = f"{label_type}:{label_value}" if label_value is not None else label_type
+            summary[key] = summary.get(key, 0) + len(getattr(annotation, "point_ids", ()))
+        return summary
 
     def label_context_payload(self) -> Dict[str, Any]:
         annotations = [annotation.to_dict() for annotation in self.labeling_state.annotations]

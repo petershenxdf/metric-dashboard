@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Dict, Mapping
+from typing import Any, Mapping
 
 from flask import Blueprint, jsonify, render_template, request
 
 from app.modules.chatbox.schemas import DEFAULT_HISTORY_WINDOW
 from app.modules.chatbox.service import (
     clear_history,
-    create_chatbox_store,
     get_chatbox_state,
     submit_message,
     suggestion_chips,
 )
-from app.modules.intent_instruction.service import IntentInstructionProvider
 from app.modules.labeling.service import apply_labeling_action, clear_annotations
 from app.modules.labeling.state import (
     get_debug_store_for_context as get_labeling_store_for_context,
@@ -33,35 +30,16 @@ from app.shared.request_helpers import (
     request_payload,
     selection_groups_payload,
 )
+from app.workflows.intent_runtime_support import (
+    IntentRuntimeManager,
+    build_memory_context,
+    build_memory_state,
+)
 
 
-DEPENDENCY_MODE = "shared grounded context plus embedded scatterplot, selection, labeling, and chat runtime"
+DEPENDENCY_MODE = "visual grounding workflow with runtime-configurable live model and persisted session artifacts"
 
-
-@dataclass
-class _WorkflowRuntime:
-    provider: IntentInstructionProvider = field(default_factory=IntentInstructionProvider)
-    stores: Dict[str, object] = field(default_factory=dict)
-    last_responses: Dict[str, Mapping[str, object] | None] = field(default_factory=dict)
-
-    def store_for(self, dataset_id: str):
-        if dataset_id not in self.stores:
-            self.stores[dataset_id] = create_chatbox_store(dataset_id)
-        return self.stores[dataset_id]
-
-    def remember_response(self, dataset_id: str, response) -> None:
-        self.last_responses[dataset_id] = response.to_dict()
-
-    def last_response_for(self, dataset_id: str):
-        return self.last_responses.get(dataset_id)
-
-    def reset(self, dataset_id: str) -> None:
-        self.stores[dataset_id] = create_chatbox_store(dataset_id)
-        self.last_responses[dataset_id] = None
-        self.provider.reset(dataset_id)
-
-
-_runtime = _WorkflowRuntime()
+_runtime = IntentRuntimeManager()
 
 
 def create_blueprint() -> Blueprint:
@@ -75,112 +53,148 @@ def create_blueprint() -> Blueprint:
     @blueprint.get("/")
     def index():
         grounded = _grounded_state()
-        store = _runtime.store_for(grounded.selection_context.dataset_id)
-        provider = _runtime.provider
-        state = get_chatbox_state(store, provider)
-        instruction = provider.store.get(grounded.selection_context.dataset_id)
+        session = _runtime.session_for(
+            grounded.selection_context.dataset_id,
+            _config_updates_from_request(),
+        )
+        state = get_chatbox_state(session.chat_store, session.provider)
+        instruction = session.provider.store.get(grounded.selection_context.dataset_id)
+        runtime_payload = _runtime_payload(grounded, session, state, instruction)
         return render_template(
             "workflows/intent_runtime_validation.html",
             grounded=grounded,
             state=state,
             instruction=instruction,
             chips_payload=[chip.to_dict() for chip in suggestion_chips()],
-            provider_label=provider.label,
-            llm_label=provider.llm.label,
+            provider_label=session.provider.label,
+            llm_label=session.provider.llm.label,
             dependency_mode=DEPENDENCY_MODE,
             history_window=DEFAULT_HISTORY_WINDOW,
-            runtime_payload=_runtime_payload(grounded, state, instruction),
-            last_response=_runtime.last_response_for(grounded.selection_context.dataset_id),
+            runtime_payload=runtime_payload,
+            last_response=session.last_response,
             allowed_labels=_allowed_labels(grounded.n_clusters),
+            runtime_config=session.config.to_dict(),
         )
 
     @blueprint.get("/api/state")
     def state_api():
         grounded = _grounded_state()
-        store = _runtime.store_for(grounded.selection_context.dataset_id)
-        provider = _runtime.provider
-        state = get_chatbox_state(store, provider)
-        instruction = provider.store.get(grounded.selection_context.dataset_id)
-        return jsonify(
-            api_success(
-                _runtime_payload(grounded, state, instruction),
-                diagnostics={
-                    "dependency_mode": DEPENDENCY_MODE,
-                    "provider": provider.label,
-                    "llm": provider.llm.label,
-                },
-            )
+        session = _runtime.session_for(
+            grounded.selection_context.dataset_id,
+            _config_updates_from_request(),
         )
+        state = get_chatbox_state(session.chat_store, session.provider)
+        instruction = session.provider.store.get(grounded.selection_context.dataset_id)
+        runtime_payload = _runtime_payload(grounded, session, state, instruction)
+        return jsonify(api_success(runtime_payload, diagnostics=runtime_payload["runtime_diagnostics"]))
+
+    @blueprint.post("/api/runtime-config")
+    def runtime_config_api():
+        grounded = _grounded_state()
+        session = _runtime.session_for(grounded.selection_context.dataset_id)
+        try:
+            session = _runtime.apply_config(
+                grounded.selection_context.dataset_id,
+                _config_updates_from_request(),
+            )
+        except ValueError as exc:
+            return jsonify(api_error("invalid_runtime_config", str(exc))), 400
+
+        refreshed = _grounded_state()
+        state = get_chatbox_state(session.chat_store, session.provider)
+        instruction = session.provider.store.get(refreshed.selection_context.dataset_id)
+        runtime_payload = _runtime_payload(refreshed, session, state, instruction)
+        return jsonify(api_success(runtime_payload, diagnostics=runtime_payload["runtime_diagnostics"]))
+
+    @blueprint.get("/api/provider-health")
+    def provider_health_api():
+        grounded = _grounded_state()
+        session = _runtime.session_for(
+            grounded.selection_context.dataset_id,
+            _config_updates_from_request(),
+        )
+        diagnostics = _runtime.provider_diagnostics(session.dataset_id)
+        return jsonify(api_success(diagnostics, diagnostics=diagnostics))
 
     @blueprint.post("/api/messages")
     def messages_api():
         body: Mapping = request.get_json(silent=True) or {}
         message = body.get("message", "")
         grounded = _grounded_state()
-        store = _runtime.store_for(grounded.selection_context.dataset_id)
-        provider = _runtime.provider
+        session = _runtime.session_for(
+            grounded.selection_context.dataset_id,
+            _config_updates_from_request(),
+        )
+        state = get_chatbox_state(session.chat_store, session.provider)
+        instruction = session.provider.store.get(grounded.selection_context.dataset_id)
+        pre_runtime_payload = {
+            "state": grounded.state_payload(),
+            "chat_state": state.to_dict(),
+            "current_instruction": instruction.to_dict(),
+        }
+        memory_context = build_memory_context(pre_runtime_payload, session)
 
         try:
             forwarded, response = submit_message(
-                store,
-                provider,
+                session.chat_store,
+                session.provider,
                 message=message,
                 selection_context=grounded.selection_context,
                 selection_groups=grounded.selection_groups,
                 label_context=grounded.label_context_payload(),
+                memory_context=memory_context,
                 history_window_size=DEFAULT_HISTORY_WINDOW,
             )
         except ValueError as exc:
             return jsonify(api_error("invalid_chat_message", str(exc))), 400
 
-        _runtime.remember_response(grounded.selection_context.dataset_id, response)
+        _runtime.remember_response(grounded.selection_context.dataset_id, forwarded, response)
         refreshed = _grounded_state()
-        state = get_chatbox_state(store, provider)
-        instruction = provider.store.get(refreshed.selection_context.dataset_id)
+        state = get_chatbox_state(session.chat_store, session.provider)
+        instruction = session.provider.store.get(refreshed.selection_context.dataset_id)
+        runtime_payload = _runtime_payload(refreshed, session, state, instruction)
         return jsonify(
             api_success(
                 {
                     "forwarded_payload": forwarded.to_dict(),
                     "response": response.to_dict(),
-                    "runtime": _runtime_payload(refreshed, state, instruction),
+                    "runtime": runtime_payload,
                 },
-                diagnostics={
-                    "dependency_mode": DEPENDENCY_MODE,
-                    "provider": provider.label,
-                    "llm": provider.llm.label,
-                },
+                diagnostics=runtime_payload["runtime_diagnostics"],
             )
         )
 
     @blueprint.post("/api/reset")
     def reset_api():
         grounded = _grounded_state()
-        _runtime.reset(grounded.selection_context.dataset_id)
-        store = _runtime.store_for(grounded.selection_context.dataset_id)
-        provider = _runtime.provider
-        state = get_chatbox_state(store, provider)
-        instruction = provider.store.get(grounded.selection_context.dataset_id)
-        return jsonify(
-            api_success(
-                _runtime_payload(grounded, state, instruction),
-                diagnostics={"dependency_mode": DEPENDENCY_MODE},
+        try:
+            session = _runtime.reset(
+                grounded.selection_context.dataset_id,
+                _config_updates_from_request(),
             )
-        )
+        except ValueError as exc:
+            return jsonify(api_error("invalid_runtime_config", str(exc))), 400
+
+        refreshed = _grounded_state()
+        state = get_chatbox_state(session.chat_store, session.provider)
+        instruction = session.provider.store.get(refreshed.selection_context.dataset_id)
+        runtime_payload = _runtime_payload(refreshed, session, state, instruction)
+        return jsonify(api_success(runtime_payload, diagnostics=runtime_payload["runtime_diagnostics"]))
 
     @blueprint.post("/api/clear")
     def clear_api():
         grounded = _grounded_state()
-        store = _runtime.store_for(grounded.selection_context.dataset_id)
-        clear_history(store)
-        provider = _runtime.provider
-        state = get_chatbox_state(store, provider)
-        instruction = provider.store.get(grounded.selection_context.dataset_id)
-        return jsonify(
-            api_success(
-                _runtime_payload(grounded, state, instruction),
-                diagnostics={"dependency_mode": DEPENDENCY_MODE},
-            )
+        session = _runtime.session_for(
+            grounded.selection_context.dataset_id,
+            _config_updates_from_request(),
         )
+        clear_history(session.chat_store)
+        _runtime.clear_chat(session.dataset_id)
+        refreshed = _grounded_state()
+        state = get_chatbox_state(session.chat_store, session.provider)
+        instruction = session.provider.store.get(refreshed.selection_context.dataset_id)
+        runtime_payload = _runtime_payload(refreshed, session, state, instruction)
+        return jsonify(api_success(runtime_payload, diagnostics=runtime_payload["runtime_diagnostics"]))
 
     @blueprint.post("/api/toggle")
     def toggle_api():
@@ -197,6 +211,10 @@ def create_blueprint() -> Blueprint:
     @blueprint.post("/api/groups")
     def save_group_api():
         grounded = _grounded_state()
+        session = _runtime.session_for(
+            grounded.selection_context.dataset_id,
+            _config_updates_from_request(),
+        )
         payload = request_payload(request)
         try:
             group = save_selection_group(
@@ -208,54 +226,78 @@ def create_blueprint() -> Blueprint:
         except ValueError as exc:
             return jsonify(api_error("invalid_selection_group", str(exc))), 400
 
+        _runtime.remember_manual_event(
+            session.dataset_id,
+            "selection_group_saved",
+            {"group": group.to_dict()},
+        )
+        refreshed = _grounded_state()
+        state = get_chatbox_state(session.chat_store, session.provider)
+        instruction = session.provider.store.get(refreshed.selection_context.dataset_id)
+        runtime_payload = _runtime_payload(refreshed, session, state, instruction)
         return jsonify(
             api_success(
                 {
                     "group": group.to_dict(),
-                    "groups": selection_groups_payload(grounded.selection_store),
+                    "runtime": runtime_payload,
                 },
-                diagnostics={"dependency_mode": DEPENDENCY_MODE},
+                diagnostics=runtime_payload["runtime_diagnostics"],
             )
         )
 
     @blueprint.post("/api/groups/<group_id>/select")
     def select_group_api(group_id: str):
         grounded = _grounded_state()
+        session = _runtime.session_for(
+            grounded.selection_context.dataset_id,
+            _config_updates_from_request(),
+        )
         try:
             result = select_selection_group(grounded.selection_store, group_id)
         except ValueError as exc:
             return jsonify(api_error("invalid_selection_group", str(exc))), 400
 
+        _runtime.remember_manual_event(
+            session.dataset_id,
+            "selection_group_selected",
+            {"selection": result.to_dict()},
+        )
         refreshed = _grounded_state()
+        state = get_chatbox_state(session.chat_store, session.provider)
+        instruction = session.provider.store.get(refreshed.selection_context.dataset_id)
+        runtime_payload = _runtime_payload(refreshed, session, state, instruction)
         return jsonify(
             api_success(
-                {
-                    "selection": result.to_dict(),
-                    "runtime": _runtime_payload(
-                        refreshed,
-                        get_chatbox_state(_runtime.store_for(refreshed.selection_context.dataset_id), _runtime.provider),
-                        _runtime.provider.store.get(refreshed.selection_context.dataset_id),
-                    ),
-                },
-                diagnostics={"dependency_mode": DEPENDENCY_MODE},
+                {"selection": result.to_dict(), "runtime": runtime_payload},
+                diagnostics=runtime_payload["runtime_diagnostics"],
             )
         )
 
     @blueprint.delete("/api/groups/<group_id>")
     def delete_group_api(group_id: str):
         grounded = _grounded_state()
+        session = _runtime.session_for(
+            grounded.selection_context.dataset_id,
+            _config_updates_from_request(),
+        )
         try:
             group = delete_selection_group(grounded.selection_store, group_id)
         except ValueError as exc:
             return jsonify(api_error("invalid_selection_group", str(exc))), 400
 
+        _runtime.remember_manual_event(
+            session.dataset_id,
+            "selection_group_deleted",
+            {"deleted_group": group.to_dict()},
+        )
+        refreshed = _grounded_state()
+        state = get_chatbox_state(session.chat_store, session.provider)
+        instruction = session.provider.store.get(refreshed.selection_context.dataset_id)
+        runtime_payload = _runtime_payload(refreshed, session, state, instruction)
         return jsonify(
             api_success(
-                {
-                    "deleted_group": group.to_dict(),
-                    "groups": selection_groups_payload(grounded.selection_store),
-                },
-                diagnostics={"dependency_mode": DEPENDENCY_MODE},
+                {"deleted_group": group.to_dict(), "runtime": runtime_payload},
+                diagnostics=runtime_payload["runtime_diagnostics"],
             )
         )
 
@@ -263,6 +305,10 @@ def create_blueprint() -> Blueprint:
     def label_api():
         payload = request_payload(request)
         grounded = _grounded_state()
+        session = _runtime.session_for(
+            grounded.selection_context.dataset_id,
+            _config_updates_from_request(),
+        )
         store = get_labeling_store_for_context(grounded.selection_context)
         try:
             action = str(payload.get("action", ""))
@@ -277,58 +323,61 @@ def create_blueprint() -> Blueprint:
         except ValueError as exc:
             return jsonify(api_error("invalid_labeling_action", str(exc))), 400
 
+        _runtime.remember_manual_event(
+            session.dataset_id,
+            "label_applied",
+            {"annotation": annotation.to_dict()},
+        )
         refreshed = _grounded_state()
+        state = get_chatbox_state(session.chat_store, session.provider)
+        instruction = session.provider.store.get(refreshed.selection_context.dataset_id)
+        runtime_payload = _runtime_payload(refreshed, session, state, instruction)
         return jsonify(
             api_success(
-                {
-                    "annotation": annotation.to_dict(),
-                    "runtime": _runtime_payload(
-                        refreshed,
-                        get_chatbox_state(_runtime.store_for(refreshed.selection_context.dataset_id), _runtime.provider),
-                        _runtime.provider.store.get(refreshed.selection_context.dataset_id),
-                    ),
-                },
-                diagnostics={"dependency_mode": DEPENDENCY_MODE},
+                {"annotation": annotation.to_dict(), "runtime": runtime_payload},
+                diagnostics=runtime_payload["runtime_diagnostics"],
             )
         )
 
     @blueprint.post("/api/clear-labels")
     def clear_labels_api():
         grounded = _grounded_state()
-        clear_annotations(get_labeling_store_for_context(grounded.selection_context))
-        refreshed = _grounded_state()
-        return jsonify(
-            api_success(
-                _runtime_payload(
-                    refreshed,
-                    get_chatbox_state(_runtime.store_for(refreshed.selection_context.dataset_id), _runtime.provider),
-                    _runtime.provider.store.get(refreshed.selection_context.dataset_id),
-                ),
-                diagnostics={"dependency_mode": DEPENDENCY_MODE},
-            )
+        session = _runtime.session_for(
+            grounded.selection_context.dataset_id,
+            _config_updates_from_request(),
         )
+        clear_annotations(get_labeling_store_for_context(grounded.selection_context))
+        _runtime.remember_manual_event(session.dataset_id, "labels_cleared", {})
+        refreshed = _grounded_state()
+        state = get_chatbox_state(session.chat_store, session.provider)
+        instruction = session.provider.store.get(refreshed.selection_context.dataset_id)
+        runtime_payload = _runtime_payload(refreshed, session, state, instruction)
+        return jsonify(api_success(runtime_payload, diagnostics=runtime_payload["runtime_diagnostics"]))
 
     @blueprint.post("/api/reset-labels")
     def reset_labels_api():
         grounded = _grounded_state()
-        reset_labeling_store_for_context(grounded.selection_context)
-        refreshed = _grounded_state()
-        return jsonify(
-            api_success(
-                _runtime_payload(
-                    refreshed,
-                    get_chatbox_state(_runtime.store_for(refreshed.selection_context.dataset_id), _runtime.provider),
-                    _runtime.provider.store.get(refreshed.selection_context.dataset_id),
-                ),
-                diagnostics={"dependency_mode": DEPENDENCY_MODE},
-            )
+        session = _runtime.session_for(
+            grounded.selection_context.dataset_id,
+            _config_updates_from_request(),
         )
+        reset_labeling_store_for_context(grounded.selection_context)
+        _runtime.remember_manual_event(session.dataset_id, "labels_reset", {})
+        refreshed = _grounded_state()
+        state = get_chatbox_state(session.chat_store, session.provider)
+        instruction = session.provider.store.get(refreshed.selection_context.dataset_id)
+        runtime_payload = _runtime_payload(refreshed, session, state, instruction)
+        return jsonify(api_success(runtime_payload, diagnostics=runtime_payload["runtime_diagnostics"]))
 
     return blueprint
 
 
 def _selection_action_response(action_name: str):
     grounded = _grounded_state()
+    session = _runtime.session_for(
+        grounded.selection_context.dataset_id,
+        _config_updates_from_request(),
+    )
     payload = request_payload(request)
     result, error = apply_selection_action_or_error(
         grounded.selection_store,
@@ -339,46 +388,42 @@ def _selection_action_response(action_name: str):
     if error is not None:
         return jsonify(api_error("invalid_selection_action", error)), 400
 
+    _runtime.remember_manual_event(
+        session.dataset_id,
+        "selection_updated",
+        {"selection": result.to_dict()},
+    )
     refreshed = _grounded_state()
-    state = get_chatbox_state(_runtime.store_for(refreshed.selection_context.dataset_id), _runtime.provider)
-    instruction = _runtime.provider.store.get(refreshed.selection_context.dataset_id)
+    state = get_chatbox_state(session.chat_store, session.provider)
+    instruction = session.provider.store.get(refreshed.selection_context.dataset_id)
+    runtime_payload = _runtime_payload(refreshed, session, state, instruction)
     return jsonify(
         api_success(
             {
                 "selection": result.to_dict(),
-                "runtime": _runtime_payload(refreshed, state, instruction),
+                "runtime": runtime_payload,
             },
-            diagnostics={"dependency_mode": DEPENDENCY_MODE},
+            diagnostics=runtime_payload["runtime_diagnostics"],
         )
     )
 
 
-def _runtime_payload(grounded, state, instruction):
-    dataset_id = grounded.selection_context.dataset_id
-    return {
+def _runtime_payload(grounded, session, state, instruction):
+    provider_diagnostics = _runtime.provider_diagnostics(session.dataset_id)
+    runtime_payload = {
         "state": grounded.state_payload(),
         "chat_state": state.to_dict(),
         "current_instruction": instruction.to_dict(),
         "runtime_diagnostics": {
+            **provider_diagnostics,
             "dependency_mode": DEPENDENCY_MODE,
-            "provider": _runtime.provider.label,
-            "llm": _runtime.provider.llm.label,
-            "mode": "deterministic_visual_grounding_lab",
+            "mode": (
+                "live_model_runtime"
+                if session.config.provider_kind == "ollama"
+                else "deterministic_mock_runtime"
+            ),
         },
-        "memory_state": {
-            "turn_count": len(state.turns),
-            "history_window": DEFAULT_HISTORY_WINDOW,
-            "recent_turns": [turn.to_dict() for turn in state.turns[-DEFAULT_HISTORY_WINDOW:]],
-            "last_response": _runtime.last_response_for(dataset_id),
-            "draft_state": {
-                "pending_clarification": (
-                    _runtime.last_response_for(dataset_id).get("followup_question")
-                    if _runtime.last_response_for(dataset_id)
-                    and _runtime.last_response_for(dataset_id).get("requires_followup")
-                    else None
-                ),
-            },
-        },
+        "memory_state": {},
         "evaluation_results": {
             "grounding_checks": {
                 "selection_auditable": True,
@@ -387,9 +432,12 @@ def _runtime_payload(grounded, state, instruction):
                 "visible_outlier_count": len(grounded.outlier_point_ids),
                 "saved_group_count": len(grounded.selection_groups),
             },
-            "status": "manual_runtime_validation_ready",
+            "status": "runtime_validation_ready",
         },
     }
+    runtime_payload["memory_state"] = build_memory_state(runtime_payload, session)
+    runtime_payload["storage"] = _runtime.persist_runtime_snapshot(session.dataset_id, runtime_payload)
+    return runtime_payload
 
 
 def _allowed_cluster_labels(n_clusters: int):
@@ -411,3 +459,24 @@ def _validate_label(action: str, label_value, n_clusters: int) -> None:
 
 def _grounded_state():
     return build_grounded_chat_context(n_clusters=n_clusters_from_request())
+
+
+def _config_updates_from_request() -> Mapping[str, Any]:
+    payload: Mapping[str, Any] = {}
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+    elif request.args:
+        payload = request.args.to_dict()
+    elif request.form:
+        payload = request.form.to_dict()
+
+    keys = {
+        "provider_kind",
+        "model_name",
+        "base_url",
+        "temperature",
+        "timeout_seconds",
+        "max_output_tokens",
+        "allow_mock_fallback",
+    }
+    return {key: payload[key] for key in keys if key in payload}

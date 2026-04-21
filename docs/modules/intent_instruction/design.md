@@ -81,13 +81,14 @@ app/modules/intent_instruction/
   extractor.py
   service.py
   store.py
-  memory.py          # Step 8.5 planned
-  drafts.py          # Step 8.5 planned
-  evaluation.py      # Step 8.5 planned
   providers/
     base.py
     mock.py
-    ollama.py        # Step 8.5 planned default live runtime
+    ollama.py
+  prompts/
+    ollama/
+      route_prompt.txt
+      extract_prompt.txt
     # cloud providers remain swappable follow-on work
   fixtures.py
   routes.py
@@ -110,17 +111,21 @@ The module never sends raw text straight to an extractor.
 Current Step 8 categories:
 
 1. `on_topic_actionable` - proceed to extraction.
-2. `on_topic_ambiguous` - extractor is skipped; a clarification question is returned.
+2. `on_topic_ambiguous` - still build a draft candidate so missing slots can be
+   tracked and a focused clarification can be returned.
 3. `meta_query` - the user is asking about current state, not giving feedback.
 4. `off_topic` - polite redirect with suggested example phrases.
 
-`partial` remains reserved in the shared schema surface, but the current Step 8
-implementation does not emit it yet. Step 8.5 turns `partial` into a real
-draft-updating path.
+`partial` remains reserved in the shared schema surface, but the current
+implementation represents the same idea through structured draft state plus
+`on_topic_ambiguous` follow-up handling.
 
 ### Stage B: Extractor
 
-Only `on_topic_actionable` reaches the extractor in the current build.
+Actionable messages reach the extractor for final delta creation. Ambiguous but
+relevant messages also reach the extractor in Step 8.5 so the system can store
+an incomplete `proposed_delta`, keep grounded fragments, and ask for the next
+missing slot without committing the final instruction state.
 
 The extractor emits an `InstructionDelta`, not a fully regenerated instruction
 state. The service layer applies the delta, allocates stable constraint IDs,
@@ -226,7 +231,13 @@ The pluggable router/extractor backend:
 class LlmProvider(Protocol):
     label: str
 
-    def route(self, message: str, context: DatasetContext, history: Sequence[Turn]) -> RouterResult: ...
+    def route(
+        self,
+        message: str,
+        context: DatasetContext,
+        history: Sequence[Turn],
+        memory_context: Mapping[str, object] | None = None,
+    ) -> RouterResult: ...
 
     def extract(
         self,
@@ -234,6 +245,7 @@ class LlmProvider(Protocol):
         context: DatasetContext,
         history: Sequence[Turn],
         current_instruction: StructuredInstruction,
+        memory_context: Mapping[str, object] | None = None,
     ) -> InstructionDelta: ...
 ```
 
@@ -280,12 +292,8 @@ class IntentProvider(Protocol):
 /modules/intent-instruction/api/state              current StructuredInstruction
 /modules/intent-instruction/api/reset              clear instruction state
 /modules/intent-instruction/api/examples           example messages
-/modules/intent-instruction/api/provider           Step 8.5 planned runtime config + health
-/modules/intent-instruction/api/memory             Step 8.5 planned conversation memory
-/modules/intent-instruction/api/draft              Step 8.5 planned incomplete instruction draft
-/modules/intent-instruction/api/evaluate           Step 8.5 planned evaluation packs
 /workflows/chat-intent/                            chat plus intent workflow
-/workflows/intent-runtime-validation/              Step 8.5 planned live-model validation gate
+/workflows/intent-runtime-validation/              Step 8.5 live-model validation gate
 ```
 
 ## Flask Debug Page Requirements
@@ -350,14 +358,23 @@ class DatasetContext:
     dataset_id: str
     feature_names: tuple[str, ...]
     cluster_ids: tuple[str, ...]
+    outlier_point_ids: tuple[str, ...]
     selection_group_names: tuple[str, ...]
+    selection_groups: tuple[Mapping[str, Any], ...]
+    label_annotations: tuple[Mapping[str, Any], ...]
+    analysis_context: Mapping[str, Any]
     selected_point_ids: tuple[str, ...]
     unselected_point_ids: tuple[str, ...]
 ```
 
-The `IntentInstructionProvider` builds this from `ChatMessagePayload` plus a
-small per-dataset feature-name lookup. Routers and extractors use it to
-resolve references such as "these points" or "cluster 2".
+The `IntentInstructionProvider` builds this from `ChatMessagePayload` plus the
+grounded workflow state. In Step 8.5 that means the live provider can see:
+
+1. current selected and unselected points,
+2. saved selection groups,
+3. manual label annotations,
+4. effective cluster and outlier state,
+5. point-level catalog data used for grounding and audit.
 
 ## Completion Criteria
 

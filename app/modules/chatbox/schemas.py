@@ -87,6 +87,7 @@ class ChatMessagePayload:
     selection_groups: Tuple[Mapping[str, Any], ...]
     label_context: Mapping[str, Any]
     history_window: Tuple[Mapping[str, Any], ...]
+    memory_context: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -101,6 +102,7 @@ class ChatMessagePayload:
             "selection_groups": [dict(group) for group in self.selection_groups],
             "label_context": dict(self.label_context),
             "history_window": [dict(turn) for turn in self.history_window],
+            "memory_context": dict(self.memory_context),
         }
 
 

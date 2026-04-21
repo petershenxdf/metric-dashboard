@@ -3,7 +3,11 @@
     "allow": [
       "Bash(python -m compileall app -q)",
       "Bash(git mv *)",
-      "Bash(python -m unittest discover -s tests/modules/ssdbcodi)"
+      "Bash(python -m unittest discover -s tests/modules/ssdbcodi)",
+      "Bash(python -m unittest discover -s tests)",
+      "Bash(git stash *)",
+      "Bash(python -m unittest tests.flask_app.test_shell_routes)",
+      "Bash(python -m unittest tests.modules.intent_instruction.test_ollama_provider -v)"
     ]
   }
 }
