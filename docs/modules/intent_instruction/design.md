@@ -69,7 +69,18 @@ Step 8.5 is the first stage that connects a live runtime (default Ollama
 5. UI visibility of provider state, memory state, draft state, and final output.
 
 See `docs/modules/intent_instruction/runtime_validation.md` for the full Step
-8.5 design.
+8.5 design. The Step 8.5 workflow reads its default provider/model/base URL
+from the repo-root `.env` file and lets the user override them per session on
+the runtime page. Prompt templates are loaded from the repo-root
+`prompts/intent_instruction/ollama/` directory. That same page now offers a
+processed/raw reply toggle:
+
+1. `processed` shows the normal workflow reply after routing, extraction,
+   required-slot checks, and deterministic confirmation handling.
+2. `raw` shows a separate freeform model-authored reply for the same grounded
+   request.
+3. Both modes still use the same `ChatMessagePayload`, `DatasetContext`,
+   memory payload, and `StructuredInstruction` commit path.
 
 ## Target Files
 
@@ -85,14 +96,17 @@ app/modules/intent_instruction/
     base.py
     mock.py
     ollama.py
-  prompts/
-    ollama/
-      route_prompt.txt
-      extract_prompt.txt
-    # cloud providers remain swappable follow-on work
   fixtures.py
   routes.py
   templates/intent_instruction/index.html
+
+prompts/
+  intent_instruction/
+    ollama/
+      route_prompt.txt
+      extract_prompt.txt
+      reply_prompt.txt
+    # cloud providers remain swappable follow-on work
 
 tests/modules/intent_instruction/
   test_router.py
@@ -219,6 +233,14 @@ Step 8.5 extends this with structured conversation memory owned by
 provenance, incomplete draft state, and irrelevant-turn logging. Chatbox still
 owns only UI history.
 
+The Step 8.5 raw-mode chat display must therefore be treated as diagnostics,
+not as an alternate compiler. The module still commits only the normal
+structured outputs:
+
+1. `RouterResult`
+2. `InstructionDelta`
+3. `StructuredInstruction`
+
 ## Two Protocol Layers
 
 There are two protocols in this module.
@@ -252,7 +274,9 @@ class LlmProvider(Protocol):
 Step 8 ships `MockLlmProvider` only: a deterministic keyword-based backend that
 makes the pipeline fully testable without external dependencies. Step 8.5 adds
 the first live provider runtime, defaulting to Ollama `qwen2.5:14b`, while
-keeping the same protocol open to future local or cloud providers.
+keeping the same protocol open to future local or cloud providers. The default
+runtime config is file-backed through `.env`, so local model changes do not
+require code edits.
 
 ### Outer: `IntentProvider`
 

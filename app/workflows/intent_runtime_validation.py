@@ -35,6 +35,10 @@ from app.workflows.intent_runtime_support import (
     build_memory_context,
     build_memory_state,
 )
+from app.workflows.intent_response_display import (
+    build_display_chat_state,
+    last_display_response,
+)
 
 
 DEPENDENCY_MODE = "visual grounding workflow with runtime-configurable live model and persisted session artifacts"
@@ -63,7 +67,11 @@ def create_blueprint() -> Blueprint:
         return render_template(
             "workflows/intent_runtime_validation.html",
             grounded=grounded,
-            state=state,
+            state=build_display_chat_state(
+                state,
+                session.interactions,
+                session.config.response_mode,
+            ),
             instruction=instruction,
             chips_payload=[chip.to_dict() for chip in suggestion_chips()],
             provider_label=session.provider.label,
@@ -71,7 +79,7 @@ def create_blueprint() -> Blueprint:
             dependency_mode=DEPENDENCY_MODE,
             history_window=DEFAULT_HISTORY_WINDOW,
             runtime_payload=runtime_payload,
-            last_response=session.last_response,
+            last_response=runtime_payload.get("last_response"),
             allowed_labels=_allowed_labels(grounded.n_clusters),
             runtime_config=session.config.to_dict(),
         )
@@ -113,7 +121,10 @@ def create_blueprint() -> Blueprint:
             grounded.selection_context.dataset_id,
             _config_updates_from_request(),
         )
-        diagnostics = _runtime.provider_diagnostics(session.dataset_id)
+        diagnostics = _runtime.provider_diagnostics(
+            session.dataset_id,
+            refresh_health=True,
+        )
         return jsonify(api_success(diagnostics, diagnostics=diagnostics))
 
     @blueprint.post("/api/messages")
@@ -158,6 +169,7 @@ def create_blueprint() -> Blueprint:
                 {
                     "forwarded_payload": forwarded.to_dict(),
                     "response": response.to_dict(),
+                    "display_response": runtime_payload.get("last_response"),
                     "runtime": runtime_payload,
                 },
                 diagnostics=runtime_payload["runtime_diagnostics"],
@@ -409,10 +421,17 @@ def _selection_action_response(action_name: str):
 
 
 def _runtime_payload(grounded, session, state, instruction):
+    if session.config.response_mode == "raw":
+        _runtime.ensure_freeform_replies(session.dataset_id)
+    display_state = build_display_chat_state(
+        state,
+        session.interactions,
+        session.config.response_mode,
+    )
     provider_diagnostics = _runtime.provider_diagnostics(session.dataset_id)
     runtime_payload = {
         "state": grounded.state_payload(),
-        "chat_state": state.to_dict(),
+        "chat_state": display_state.to_dict(),
         "current_instruction": instruction.to_dict(),
         "runtime_diagnostics": {
             **provider_diagnostics,
@@ -436,6 +455,10 @@ def _runtime_payload(grounded, session, state, instruction):
         },
     }
     runtime_payload["memory_state"] = build_memory_state(runtime_payload, session)
+    runtime_payload["last_response"] = last_display_response(
+        session.interactions,
+        session.config.response_mode,
+    )
     runtime_payload["storage"] = _runtime.persist_runtime_snapshot(session.dataset_id, runtime_payload)
     return runtime_payload
 
@@ -478,5 +501,6 @@ def _config_updates_from_request() -> Mapping[str, Any]:
         "timeout_seconds",
         "max_output_tokens",
         "allow_mock_fallback",
+        "response_mode",
     }
     return {key: payload[key] for key in keys if key in payload}

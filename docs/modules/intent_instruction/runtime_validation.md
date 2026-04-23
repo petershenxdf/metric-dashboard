@@ -53,14 +53,21 @@ The current repository already ships a working first Step 8.5 implementation:
    real `labeling` annotations, and the effective cluster/outlier state derived
    from the current analysis view.
 3. The live default provider is Ollama `qwen2.5:14b`.
-4. Prompt templates are file-backed and loaded from:
-   - `app/modules/intent_instruction/prompts/ollama/route_prompt.txt`
-   - `app/modules/intent_instruction/prompts/ollama/extract_prompt.txt`
-5. Runtime artifacts are persisted per session under:
+4. Runtime defaults are read from the repo-root `.env` file, while the workflow
+   form can override those values for the current in-memory session.
+5. The chat panel exposes two reply display modes on the same workflow page:
+   - `processed`: show the workflow's normal final reply after route/extract
+     handling and required-slot gating.
+   - `raw`: show a separate freeform model-authored reply for the same turn.
+6. Prompt templates are file-backed and loaded from:
+   - `prompts/intent_instruction/ollama/route_prompt.txt`
+   - `prompts/intent_instruction/ollama/extract_prompt.txt`
+   - `prompts/intent_instruction/ollama/reply_prompt.txt`
+7. Runtime artifacts are persisted per session under:
    - `runtime_data/intent_runtime_validation/<dataset_id>/<session_id>/`
-6. Persisted artifacts include runtime config, chat state, grounded state,
+8. Persisted artifacts include runtime config, chat state, grounded state,
    memory state, provider diagnostics, interaction history, and the exact last
-   route/extract prompts sent to the live model.
+   route/extract/reply prompts sent to the live model.
 
 The current implementation also has one important known risk: some live
 multi-turn slot-answer cases can still hit route-timeout fallback even when the
@@ -75,7 +82,24 @@ The default first live runtime is:
 provider: ollama
 model: qwen2.5:14b
 base_url: http://127.0.0.1:11434
+keep_alive: 30m
 ```
+
+Those values are the local defaults shipped in `.env`. Supported keys:
+
+```text
+METRIC_DASHBOARD_LLM_PROVIDER
+METRIC_DASHBOARD_LLM_MODEL
+METRIC_DASHBOARD_OLLAMA_BASE_URL
+METRIC_DASHBOARD_OLLAMA_KEEP_ALIVE
+METRIC_DASHBOARD_LLM_TEMPERATURE
+METRIC_DASHBOARD_LLM_TIMEOUT_SECONDS
+METRIC_DASHBOARD_LLM_MAX_OUTPUT_TOKENS
+METRIC_DASHBOARD_LLM_ALLOW_MOCK_FALLBACK
+```
+
+Editing `.env` changes the next app start's default runtime. The workflow UI
+still allows session-scoped overrides without editing files.
 
 This is only the default. The design must leave room for:
 
@@ -119,10 +143,12 @@ Step 8.5 adds runtime-facing configuration around that protocol:
   "provider_kind": "ollama",
   "model_name": "qwen2.5:14b",
   "base_url": "http://127.0.0.1:11434",
+  "keep_alive": "30m",
   "timeout_seconds": 45,
   "temperature": 0.1,
   "max_output_tokens": 800,
-  "allow_mock_fallback": true
+  "allow_mock_fallback": true,
+  "response_mode": "processed"
 }
 ```
 
@@ -130,11 +156,20 @@ Required runtime behaviors:
 
 1. health check,
 2. explicit model label,
-3. timeout handling,
-4. invalid-JSON diagnostics,
-5. prompt-template visibility for debugging,
-6. persisted prompt artifacts for replay,
-7. room for future authentication when the provider is online.
+3. model keep-alive so repeated turns do not cold-load Ollama on every message,
+4. timeout handling,
+5. invalid-JSON diagnostics,
+6. prompt-template visibility for debugging,
+7. persisted prompt artifacts for replay,
+8. room for future authentication when the provider is online.
+
+`response_mode` is intentionally a display-only runtime setting. Switching
+between `processed` and `raw` must not change:
+
+1. the grounded context sent to the provider,
+2. the transcript/history window sent to the provider,
+3. the structured memory payload,
+4. the final `StructuredInstruction` state transition rules.
 
 ## Prompt and Artifact Debugging
 
@@ -142,10 +177,10 @@ Prompt debugging is a first-class Step 8.5 requirement, not an afterthought.
 
 Current implementation rules:
 
-1. route and extract prompts are stored as standalone text templates in
-   `app/modules/intent_instruction/prompts/ollama/`,
-2. the workflow persists the exact last rendered route and extract prompt text
-   for each session,
+1. route, extract, and reply prompts are stored as standalone text templates in
+   `prompts/intent_instruction/ollama/`,
+2. the workflow persists the exact last rendered route, extract, and reply
+   prompt text for each session,
 3. the diagnostics payload reports the prompt template paths plus the last
    prompt text and prompt size,
 4. a prompt change should therefore be auditable without scraping console logs.
@@ -356,6 +391,15 @@ Current pipeline behavior:
 4. successful commits currently end with a deterministic service-side action
    confirmation rather than a free-form model-authored confirmation.
 
+The new raw-mode toggle exists precisely so both layers can be audited on the
+same page:
+
+1. `processed` mode shows the user-facing workflow reply,
+2. `raw` mode shows a separate direct-AI reply generated from the same
+   grounded context and memory,
+3. both modes still come from the same grounded request and same committed
+   instruction state.
+
 So if diagnostics show a raw clarification such as "Do you want me to split or
 group these points within cluster 2?", the chatbox may still show a different
 final reply if:
@@ -483,6 +527,7 @@ Recommended layout:
 4. Conversation panel
    - chat surface,
    - example prompts,
+   - processed/raw reply toggle,
    - per-turn router outcome,
    - assistant clarification or answer.
 
@@ -568,6 +613,8 @@ grounding workbench, not like separate modules stitched together loosely.
 9. A user should be able to audit any grounding error by comparing three things
    on one screen: the plot, the current context, and the model's interpreted
    structured state.
+10. Reply-mode switching must stay inside the same workflow UI; it should not
+    fork into a second Step 8.5 page or a second provider pipeline.
 
 ## Visual Validation Scenarios
 
@@ -653,8 +700,6 @@ Expected behavior:
 
 3. Dataset or plot state changes mid-session.
    - Expected: stale drafts are either invalidated or flagged for confirmation.
-
-## Evaluation Packs
 
 ## Evaluation Packs
 

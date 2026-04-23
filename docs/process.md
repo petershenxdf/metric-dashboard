@@ -765,7 +765,7 @@ Current design status:
 
 1. Implemented as `/workflows/intent-runtime-validation/` with a runtime-configurable live provider and persisted session artifacts.
 2. The default first live model is Ollama `qwen2.5:14b`, but the runtime config remains provider-agnostic for future local and online models.
-3. Prompt templates are file-backed under `app/modules/intent_instruction/prompts/ollama/` and the rendered prompts are persisted per session for debugging.
+3. Prompt templates are file-backed under `prompts/intent_instruction/ollama/` and the rendered prompts are persisted per session for debugging.
 4. Grounded context now includes real selection state, saved selection groups, manual labels, effective cluster/outlier state, recent chat turns, structured memory, and point-level catalog data.
 5. One current open issue remains: some live draft-slot turns can still hit route-timeout fallback even when extraction succeeds and the final structured result is correct.
 

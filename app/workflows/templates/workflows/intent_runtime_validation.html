@@ -25,12 +25,14 @@
       <div class="runtime-badges">
         <span>{{ runtime_config.provider_kind }}</span>
         <span>{{ runtime_config.model_name }}</span>
+        <span>{{ runtime_config.response_mode }} reply mode</span>
         <span>{{ grounded.cluster_ids | length }} clusters</span>
         <span>{{ grounded.selection_context.selected_point_ids | length }} selected</span>
       </div>
     </div>
 
     <form class="runtime-config-form" data-runtime-config-form>
+      <input type="hidden" name="response_mode" value="{{ runtime_config.response_mode }}">
       <label>
         Provider
         <select name="provider_kind">
@@ -71,6 +73,29 @@
       <button type="button" data-runtime-health>Check Model</button>
       <button type="button" data-runtime-action="reset">New Session</button>
     </form>
+
+    <div class="runtime-mode-toggle" aria-label="Chat response display mode">
+      <button
+        type="button"
+        class="runtime-mode-button{% if runtime_config.response_mode == 'processed' %} is-active{% endif %}"
+        data-response-mode="processed"
+      >
+        Processed Reply
+      </button>
+      <button
+        type="button"
+        class="runtime-mode-button{% if runtime_config.response_mode == 'raw' %} is-active{% endif %}"
+        data-response-mode="raw"
+      >
+        Direct AI Reply
+      </button>
+    </div>
+
+    <p class="small">
+      Defaults come from the repo-root <code>.env</code> file. Runtime form changes override
+      only the current in-memory session. `Processed` shows the cleaned workflow reply; `Direct AI`
+      shows a separate freeform model-authored reply built from the same grounded context and memory.
+    </p>
 
     <div class="runtime-health" id="runtime-health">
       <strong>Health:</strong>
@@ -238,8 +263,8 @@
       {% endif %}
 
       <div class="runtime-chat-thread" id="chat-thread">
-        {% if state.turns %}
-          {% for turn in state.turns %}
+        {% if runtime_payload.chat_state.turns %}
+          {% for turn in runtime_payload.chat_state.turns %}
             <div class="runtime-message-row {{ turn.role }}" data-turn-id="{{ turn.turn_id }}">
               <article class="runtime-message {{ turn.role }}">
                 <div class="runtime-message-role">{{ turn.role }}</div>
@@ -299,7 +324,7 @@
     </details>
     <details class="panel">
       <summary>Chat State</summary>
-      <pre id="chat-history">{{ state.to_dict().turns | tojson(indent=2) }}</pre>
+      <pre id="chat-history">{{ runtime_payload.chat_state.turns | tojson(indent=2) }}</pre>
       <pre id="last-response">{{ last_response | tojson(indent=2) if last_response else "(no message sent yet)" }}</pre>
     </details>
   </section>
@@ -318,6 +343,7 @@
         temperature: values.get("temperature"),
         timeout_seconds: values.get("timeout_seconds"),
         max_output_tokens: values.get("max_output_tokens"),
+        response_mode: values.get("response_mode"),
         allow_mock_fallback: form.querySelector("[name=allow_mock_fallback]").checked
       };
     };
@@ -458,7 +484,7 @@
           return;
         }
         const payload = await response.json();
-        updateRuntimePanels(payload.data.runtime, payload.data.response);
+        updateRuntimePanels(payload.data.runtime, payload.data.display_response || payload.data.response);
       } catch (error) {
         pendingNode.remove();
         input.value = message;
@@ -473,6 +499,15 @@
     document.querySelectorAll("[data-runtime-action]").forEach((button) => {
       button.addEventListener("click", async () => {
         const response = await postJson(`${workflowBasePath}/api/${button.dataset.runtimeAction}`);
+        refreshOrAlert(response);
+      });
+    });
+
+    document.querySelectorAll("[data-response-mode]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const form = document.querySelector("[data-runtime-config-form]");
+        form.querySelector("[name=response_mode]").value = button.dataset.responseMode;
+        const response = await postJson(`${workflowBasePath}/api/runtime-config`);
         refreshOrAlert(response);
       });
     });

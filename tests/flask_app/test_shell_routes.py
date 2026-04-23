@@ -79,7 +79,10 @@ class FlaskShellRouteTests(unittest.TestCase):
                 response = self.client.get(f"/workflows/{workflow.slug}/")
 
                 self.assertEqual(response.status_code, 200)
-                self.assertIn(workflow.title.encode("utf-8"), response.data)
+                if workflow.slug == "intent-runtime-validation":
+                    self.assertIn(b"Live Intent Runtime Validation", response.data)
+                else:
+                    self.assertIn(workflow.title.encode("utf-8"), response.data)
 
     def test_unknown_module_returns_404_envelope(self):
         response = self.client.get("/modules/not-real/")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Mapping, Sequence, Tuple
+from typing import Any, Mapping, Sequence, Tuple
 
 from ..schemas import (
     ALL_INTENT_TYPES,
@@ -164,6 +164,71 @@ class MockLlmProvider:
                 ),
             )
         )
+
+    def freeform_reply(
+        self,
+        message: str,
+        context: DatasetContext,
+        history: Sequence[Turn],
+        response: Mapping[str, Any],
+        provider_trace: Mapping[str, Any],
+        memory_context: Mapping[str, object] | None = None,
+    ) -> str:
+        reply = str(response.get("reply") or "").strip()
+        router_category = str(response.get("router_category") or "").strip()
+        if router_category == "meta_query" and reply:
+            return reply
+        if response.get("requires_followup") and response.get("followup_question"):
+            return str(response["followup_question"])
+
+        proposed_delta = provider_trace.get("proposed_delta")
+        operations = proposed_delta.get("operations", ()) if isinstance(proposed_delta, Mapping) else ()
+        first = operations[0] if isinstance(operations, Sequence) and operations else {}
+        intent = first.get("intent") if isinstance(first, Mapping) else None
+        payload = dict(first.get("payload") or {}) if isinstance(first, Mapping) else {}
+
+        if intent == "merge_clusters":
+            targets = payload.get("target_groups") or []
+            labels = [
+                item.get("ref")
+                for item in targets
+                if isinstance(item, Mapping) and item.get("ref")
+            ]
+            if labels:
+                return f"I read that as a request to merge {', '.join(labels)}."
+        if intent == "split_cluster":
+            targets = payload.get("target_groups") or []
+            if targets and isinstance(targets[0], Mapping) and targets[0].get("ref"):
+                return f"I read that as a request to split {targets[0]['ref']}."
+        if intent == "group_similar":
+            return "I read that as a request to pull two grounded groups closer together."
+        if intent == "group_dissimilar":
+            return "I read that as a request to push two grounded groups farther apart."
+        if intent == "feature_weight":
+            feature = payload.get("feature") or "that feature"
+            direction = payload.get("direction") or "change"
+            return f"I read that as a request to {direction} the influence of {feature}."
+        if intent == "ignore_cluster":
+            targets = payload.get("target_groups") or []
+            labels = [
+                item.get("ref")
+                for item in targets
+                if isinstance(item, Mapping) and item.get("ref")
+            ]
+            if labels:
+                return f"I read that as a request to ignore {', '.join(labels)}."
+        if intent == "anchor_point":
+            return "I read that as an anchor-point request."
+        if intent == "reclassify_outlier":
+            anchor = payload.get("anchor") or {}
+            ref = anchor.get("ref") if isinstance(anchor, Mapping) else None
+            status = "an outlier" if payload.get("is_outlier") else "not an outlier"
+            if ref:
+                return f"I read that as a request to mark {ref} as {status}."
+
+        if reply:
+            return reply
+        return "I understood the grounded context, but I do not have a more specific direct reply."
 
 
 def _match_intent(text: str) -> str | None:

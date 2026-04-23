@@ -3,33 +3,76 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
-from string import Template
 from typing import Any, Dict, Mapping, Sequence
 from urllib import error, request
+
+from app.shared.env import env_bool, env_float, env_int, env_text
+from app.shared.prompts import load_prompt_template, prompt_path
 
 from ..schemas import DeltaOperation, DatasetContext, InstructionDelta, RouterResult, StructuredInstruction, Turn
 from .mock import MockLlmProvider
 
 
-_PROMPT_DIR = Path(__file__).resolve().parents[1] / "prompts" / "ollama"
-_ROUTE_PROMPT_PATH = _PROMPT_DIR / "route_prompt.txt"
-_EXTRACT_PROMPT_PATH = _PROMPT_DIR / "extract_prompt.txt"
-_ROUTE_PROMPT_TEMPLATE = Template(_ROUTE_PROMPT_PATH.read_text(encoding="utf-8"))
-_EXTRACT_PROMPT_TEMPLATE = Template(_EXTRACT_PROMPT_PATH.read_text(encoding="utf-8"))
+_ROUTE_PROMPT_PATH = prompt_path("intent_instruction", "ollama", "route_prompt.txt")
+_EXTRACT_PROMPT_PATH = prompt_path("intent_instruction", "ollama", "extract_prompt.txt")
+_REPLY_PROMPT_PATH = prompt_path("intent_instruction", "ollama", "reply_prompt.txt")
+_ROUTE_PROMPT_TEMPLATE = load_prompt_template("intent_instruction", "ollama", "route_prompt.txt")
+_EXTRACT_PROMPT_TEMPLATE = load_prompt_template("intent_instruction", "ollama", "extract_prompt.txt")
+_REPLY_PROMPT_TEMPLATE = load_prompt_template("intent_instruction", "ollama", "reply_prompt.txt")
+
+_DEFAULT_MODEL_NAME = "qwen2.5:14b"
+_DEFAULT_BASE_URL = "http://127.0.0.1:11434"
+_DEFAULT_KEEP_ALIVE = "30m"
+_DEFAULT_TIMEOUT_SECONDS = 45
+_DEFAULT_TEMPERATURE = 0.1
+_DEFAULT_MAX_OUTPUT_TOKENS = 800
+_DEFAULT_ALLOW_MOCK_FALLBACK = True
+
+
+def _default_model_name() -> str:
+    return env_text("METRIC_DASHBOARD_LLM_MODEL", _DEFAULT_MODEL_NAME)
+
+
+def _default_base_url() -> str:
+    return env_text("METRIC_DASHBOARD_OLLAMA_BASE_URL", _DEFAULT_BASE_URL)
+
+
+def _default_keep_alive() -> str:
+    return env_text("METRIC_DASHBOARD_OLLAMA_KEEP_ALIVE", _DEFAULT_KEEP_ALIVE)
+
+
+def _default_timeout_seconds() -> int:
+    return env_int("METRIC_DASHBOARD_LLM_TIMEOUT_SECONDS", _DEFAULT_TIMEOUT_SECONDS)
+
+
+def _default_temperature() -> float:
+    return env_float("METRIC_DASHBOARD_LLM_TEMPERATURE", _DEFAULT_TEMPERATURE)
+
+
+def _default_max_output_tokens() -> int:
+    return env_int("METRIC_DASHBOARD_LLM_MAX_OUTPUT_TOKENS", _DEFAULT_MAX_OUTPUT_TOKENS)
+
+
+def _default_allow_mock_fallback() -> bool:
+    return env_bool(
+        "METRIC_DASHBOARD_LLM_ALLOW_MOCK_FALLBACK",
+        _DEFAULT_ALLOW_MOCK_FALLBACK,
+    )
 
 
 @dataclass
 class OllamaLlmProvider:
-    model_name: str = "qwen2.5:14b"
-    base_url: str = "http://127.0.0.1:11434"
-    timeout_seconds: int = 45
-    temperature: float = 0.1
-    max_output_tokens: int = 800
-    allow_mock_fallback: bool = True
+    model_name: str = field(default_factory=_default_model_name)
+    base_url: str = field(default_factory=_default_base_url)
+    keep_alive: str = field(default_factory=_default_keep_alive)
+    timeout_seconds: int = field(default_factory=_default_timeout_seconds)
+    temperature: float = field(default_factory=_default_temperature)
+    max_output_tokens: int = field(default_factory=_default_max_output_tokens)
+    allow_mock_fallback: bool = field(default_factory=_default_allow_mock_fallback)
     fallback: MockLlmProvider = field(default_factory=MockLlmProvider)
     _last_route: Dict[str, Any] = field(default_factory=dict)
     _last_extract: Dict[str, Any] = field(default_factory=dict)
+    _last_reply: Dict[str, Any] = field(default_factory=dict)
     _last_health: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -42,6 +85,7 @@ class OllamaLlmProvider:
             "label": self.label,
             "model_name": self.model_name,
             "base_url": self.base_url,
+            "keep_alive": self.keep_alive,
             "timeout_seconds": self.timeout_seconds,
             "temperature": self.temperature,
             "max_output_tokens": self.max_output_tokens,
@@ -49,13 +93,18 @@ class OllamaLlmProvider:
             "prompt_template_files": {
                 "route": str(_ROUTE_PROMPT_PATH),
                 "extract": str(_EXTRACT_PROMPT_PATH),
+                "reply": str(_REPLY_PROMPT_PATH),
             },
             "last_route": dict(self._last_route),
             "last_extract": dict(self._last_extract),
+            "last_reply": dict(self._last_reply),
             "last_health": dict(self._last_health),
         }
 
-    def health(self) -> Dict[str, Any]:
+    def health(self, force_refresh: bool = False) -> Dict[str, Any]:
+        if self._last_health and not force_refresh:
+            return dict(self._last_health)
+
         tags_url = f"{self.base_url.rstrip('/')}/api/tags"
         try:
             payload = self._request_json(tags_url)
@@ -169,12 +218,57 @@ class OllamaLlmProvider:
             }
             return delta
 
+    def freeform_reply(
+        self,
+        message: str,
+        context: DatasetContext,
+        history: Sequence[Turn],
+        response: Mapping[str, Any],
+        provider_trace: Mapping[str, Any],
+        memory_context: Mapping[str, object] | None = None,
+    ) -> str:
+        memory_context = memory_context or {}
+        prompt = _reply_prompt(
+            message,
+            context,
+            history,
+            response,
+            provider_trace,
+            memory_context,
+        )
+        try:
+            reply_text = self._generate_text(prompt)
+            cleaned_reply = _optional_text(reply_text) or str(response.get("reply") or "")
+            self._last_reply = {
+                "used_fallback": False,
+                "message": message,
+                "prompt_template_path": str(_REPLY_PROMPT_PATH),
+                "prompt_text": prompt,
+                "prompt_char_count": len(prompt),
+                "raw_response": _trim(reply_text),
+                "result": {"reply": cleaned_reply},
+            }
+            return cleaned_reply
+        except Exception as exc:
+            reply_text = self._fallback_freeform_reply(response, provider_trace, exc)
+            self._last_reply = {
+                "used_fallback": True,
+                "message": message,
+                "prompt_template_path": str(_REPLY_PROMPT_PATH),
+                "prompt_text": prompt,
+                "prompt_char_count": len(prompt),
+                "error": str(exc),
+                "result": {"reply": reply_text},
+            }
+            return reply_text
+
     def _generate_json(self, prompt: str) -> tuple[Mapping[str, Any], str]:
         body = {
             "model": self.model_name,
             "prompt": prompt,
             "stream": False,
             "format": "json",
+            "keep_alive": self.keep_alive,
             "options": {
                 "temperature": self.temperature,
                 "num_predict": self.max_output_tokens,
@@ -188,6 +282,23 @@ class OllamaLlmProvider:
         if not isinstance(parsed, Mapping):
             raise ValueError("ollama JSON response must be an object")
         return parsed, raw_response
+
+    def _generate_text(self, prompt: str) -> str:
+        body = {
+            "model": self.model_name,
+            "prompt": prompt,
+            "stream": False,
+            "keep_alive": self.keep_alive,
+            "options": {
+                "temperature": self.temperature,
+                "num_predict": min(self.max_output_tokens, 300),
+            },
+        }
+        payload = self._post_json(f"{self.base_url.rstrip('/')}/api/generate", body)
+        raw_response = payload.get("response", "") if isinstance(payload, Mapping) else ""
+        if not isinstance(raw_response, str) or not raw_response.strip():
+            raise ValueError("ollama response did not contain reply text")
+        return raw_response.strip()
 
     def _post_json(self, url: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         request_body = json.dumps(payload).encode("utf-8")
@@ -246,6 +357,26 @@ class OllamaLlmProvider:
         if self.allow_mock_fallback:
             return self.fallback.extract(message, context, history, current_instruction)
         return InstructionDelta(operations=())
+
+    def _fallback_freeform_reply(
+        self,
+        response: Mapping[str, Any],
+        provider_trace: Mapping[str, Any],
+        exc: Exception,
+    ) -> str:
+        if self.allow_mock_fallback:
+            return self.fallback.freeform_reply(
+                str(provider_trace.get("message") or ""),
+                DatasetContext(dataset_id="fallback"),
+                (),
+                response,
+                provider_trace,
+                {},
+            )
+        reply_text = _optional_text(response.get("reply"))
+        if reply_text is not None:
+            return reply_text
+        return f"I could not generate a direct reply: {exc}"
 
 
 def _router_result_from_payload(payload: Mapping[str, Any]) -> RouterResult:
@@ -1014,6 +1145,27 @@ def _extract_prompt(
         history_text=_history_text(history),
         history_json=json.dumps([turn.to_dict() for turn in history], ensure_ascii=True, indent=2),
         fewshot_text=fewshot_text,
+        message_json=json.dumps(message, ensure_ascii=True),
+    )
+
+
+def _reply_prompt(
+    message: str,
+    context: DatasetContext,
+    history: Sequence[Turn],
+    response: Mapping[str, Any],
+    provider_trace: Mapping[str, Any],
+    memory_context: Mapping[str, object],
+) -> str:
+    return _REPLY_PROMPT_TEMPLATE.substitute(
+        briefing=_build_briefing(context),
+        context_json=json.dumps(context.to_dict(), ensure_ascii=True, indent=2),
+        memory_summary=_compact_memory_summary(memory_context),
+        memory_json=json.dumps(memory_context, ensure_ascii=True, indent=2),
+        history_text=_history_text(history),
+        history_json=json.dumps([turn.to_dict() for turn in history], ensure_ascii=True, indent=2),
+        response_json=json.dumps(dict(response), ensure_ascii=True, indent=2),
+        provider_trace_json=json.dumps(dict(provider_trace), ensure_ascii=True, indent=2),
         message_json=json.dumps(message, ensure_ascii=True),
     )
 

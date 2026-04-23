@@ -12,33 +12,82 @@ from app.modules.intent_instruction.providers.mock import MockLlmProvider
 from app.modules.intent_instruction.providers.ollama import OllamaLlmProvider
 from app.modules.intent_instruction.service import IntentInstructionProvider
 from app.modules.intent_instruction.store import IntentInstructionStore
+from app.shared.env import env_bool, env_float, env_int, env_text
+from app.workflows.intent_response_display import (
+    DEFAULT_RESPONSE_MODE,
+    normalize_response_mode,
+)
 
 
 SUPPORTED_PROVIDER_KINDS = ("ollama", "mock")
 DEFAULT_PROVIDER_KIND = "ollama"
 DEFAULT_MODEL_NAME = "qwen2.5:14b"
 DEFAULT_BASE_URL = "http://127.0.0.1:11434"
+DEFAULT_KEEP_ALIVE = "30m"
+DEFAULT_TEMPERATURE = 0.1
+DEFAULT_TIMEOUT_SECONDS = 45
+DEFAULT_MAX_OUTPUT_TOKENS = 800
+DEFAULT_ALLOW_MOCK_FALLBACK = True
+
+
+def _default_provider_kind() -> str:
+    return env_text("METRIC_DASHBOARD_LLM_PROVIDER", DEFAULT_PROVIDER_KIND)
+
+
+def _default_model_name() -> str:
+    return env_text("METRIC_DASHBOARD_LLM_MODEL", DEFAULT_MODEL_NAME)
+
+
+def _default_base_url() -> str:
+    return env_text("METRIC_DASHBOARD_OLLAMA_BASE_URL", DEFAULT_BASE_URL)
+
+
+def _default_keep_alive() -> str:
+    return env_text("METRIC_DASHBOARD_OLLAMA_KEEP_ALIVE", DEFAULT_KEEP_ALIVE)
+
+
+def _default_temperature() -> float:
+    return env_float("METRIC_DASHBOARD_LLM_TEMPERATURE", DEFAULT_TEMPERATURE)
+
+
+def _default_timeout_seconds() -> int:
+    return env_int("METRIC_DASHBOARD_LLM_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)
+
+
+def _default_max_output_tokens() -> int:
+    return env_int("METRIC_DASHBOARD_LLM_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)
+
+
+def _default_allow_mock_fallback() -> bool:
+    return env_bool(
+        "METRIC_DASHBOARD_LLM_ALLOW_MOCK_FALLBACK",
+        DEFAULT_ALLOW_MOCK_FALLBACK,
+    )
 
 
 @dataclass(frozen=True)
 class IntentRuntimeConfig:
-    provider_kind: str = DEFAULT_PROVIDER_KIND
-    model_name: str = DEFAULT_MODEL_NAME
-    base_url: str = DEFAULT_BASE_URL
-    temperature: float = 0.1
-    timeout_seconds: int = 45
-    max_output_tokens: int = 800
-    allow_mock_fallback: bool = True
+    provider_kind: str = field(default_factory=_default_provider_kind)
+    model_name: str = field(default_factory=_default_model_name)
+    base_url: str = field(default_factory=_default_base_url)
+    keep_alive: str = field(default_factory=_default_keep_alive)
+    temperature: float = field(default_factory=_default_temperature)
+    timeout_seconds: int = field(default_factory=_default_timeout_seconds)
+    max_output_tokens: int = field(default_factory=_default_max_output_tokens)
+    allow_mock_fallback: bool = field(default_factory=_default_allow_mock_fallback)
+    response_mode: str = DEFAULT_RESPONSE_MODE
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "provider_kind": self.provider_kind,
             "model_name": self.model_name,
             "base_url": self.base_url,
+            "keep_alive": self.keep_alive,
             "temperature": self.temperature,
             "timeout_seconds": self.timeout_seconds,
             "max_output_tokens": self.max_output_tokens,
             "allow_mock_fallback": self.allow_mock_fallback,
+            "response_mode": self.response_mode,
         }
 
     def merged(self, payload: Mapping[str, Any] | None = None) -> "IntentRuntimeConfig":
@@ -49,6 +98,7 @@ class IntentRuntimeConfig:
 
         model_name = str(payload.get("model_name", self.model_name)).strip() or self.model_name
         base_url = str(payload.get("base_url", self.base_url)).strip() or self.base_url
+        keep_alive = str(payload.get("keep_alive", self.keep_alive)).strip() or self.keep_alive
         temperature = float(payload.get("temperature", self.temperature))
         timeout_seconds = max(1, int(payload.get("timeout_seconds", self.timeout_seconds)))
         max_output_tokens = max(1, int(payload.get("max_output_tokens", self.max_output_tokens)))
@@ -56,15 +106,20 @@ class IntentRuntimeConfig:
             payload.get("allow_mock_fallback", self.allow_mock_fallback),
             default=self.allow_mock_fallback,
         )
+        response_mode = normalize_response_mode(
+            payload.get("response_mode", self.response_mode)
+        )
 
         return IntentRuntimeConfig(
             provider_kind=provider_kind,
             model_name=model_name,
             base_url=base_url.rstrip("/"),
+            keep_alive=keep_alive,
             temperature=temperature,
             timeout_seconds=timeout_seconds,
             max_output_tokens=max_output_tokens,
             allow_mock_fallback=allow_mock_fallback,
+            response_mode=response_mode,
         )
 
 
@@ -103,8 +158,12 @@ class IntentRuntimeManager:
         new_config = session.config.merged(config_updates)
         if new_config == session.config:
             return session
+        should_rebuild_provider = _provider_runtime_settings(new_config) != _provider_runtime_settings(
+            session.config
+        )
         session.config = new_config
-        session.provider = _build_provider(new_config, session.instruction_store)
+        if should_rebuild_provider:
+            session.provider = _build_provider(new_config, session.instruction_store)
         self.record_event(dataset_id, "runtime_config_updated", {"config": new_config.to_dict()})
         return session
 
@@ -154,7 +213,11 @@ class IntentRuntimeManager:
         self.record_event(dataset_id, "session_started", {"config": config.to_dict()})
         return self._sessions[dataset_id]
 
-    def provider_diagnostics(self, dataset_id: str) -> Dict[str, Any]:
+    def provider_diagnostics(
+        self,
+        dataset_id: str,
+        refresh_health: bool = False,
+    ) -> Dict[str, Any]:
         session = self._sessions[dataset_id]
         llm = session.provider.llm
         diagnostics = {
@@ -165,7 +228,13 @@ class IntentRuntimeManager:
         if hasattr(llm, "diagnostics"):
             diagnostics["llm_diagnostics"] = llm.diagnostics()
         if hasattr(llm, "health"):
-            diagnostics["health"] = llm.health()
+            if refresh_health:
+                try:
+                    diagnostics["health"] = llm.health(force_refresh=True)
+                except TypeError:
+                    diagnostics["health"] = llm.health()
+            else:
+                diagnostics["health"] = llm.health()
         return diagnostics
 
     def storage_payload(self, dataset_id: str) -> Dict[str, Any]:
@@ -180,6 +249,7 @@ class IntentRuntimeManager:
             "runtime_diagnostics": str(session_dir / "runtime_diagnostics.json"),
             "last_route_prompt": str(session_dir / "last_route_prompt.txt"),
             "last_extract_prompt": str(session_dir / "last_extract_prompt.txt"),
+            "last_reply_prompt": str(session_dir / "last_reply_prompt.txt"),
             "interactions": str(session_dir / "interactions.json"),
             "event_log": str(session_dir / "event_log.json"),
             "session_manifest": str(session_dir / "session_manifest.json"),
@@ -210,8 +280,10 @@ class IntentRuntimeManager:
         llm_diagnostics = provider_diagnostics.get("llm_diagnostics", {})
         last_route = llm_diagnostics.get("last_route", {}) if isinstance(llm_diagnostics, Mapping) else {}
         last_extract = llm_diagnostics.get("last_extract", {}) if isinstance(llm_diagnostics, Mapping) else {}
+        last_reply = llm_diagnostics.get("last_reply", {}) if isinstance(llm_diagnostics, Mapping) else {}
         _write_text(session_dir / "last_route_prompt.txt", last_route.get("prompt_text") if isinstance(last_route, Mapping) else "")
         _write_text(session_dir / "last_extract_prompt.txt", last_extract.get("prompt_text") if isinstance(last_extract, Mapping) else "")
+        _write_text(session_dir / "last_reply_prompt.txt", last_reply.get("prompt_text") if isinstance(last_reply, Mapping) else "")
         _write_json(session_dir / "interactions.json", {"interactions": list(session.interactions)})
         _write_json(session_dir / "event_log.json", {"events": list(session.event_log)})
         _write_json(
@@ -236,6 +308,47 @@ class IntentRuntimeManager:
                 "payload": dict(payload),
             }
         )
+
+    def ensure_freeform_replies(self, dataset_id: str) -> None:
+        session = self._sessions[dataset_id]
+        for interaction in session.interactions:
+            provider_trace = interaction.get("provider_trace")
+            if not isinstance(provider_trace, Mapping):
+                provider_trace = {}
+                interaction["provider_trace"] = provider_trace
+
+            llm_trace = provider_trace.get("llm_trace")
+            if not isinstance(llm_trace, Mapping):
+                llm_trace = {}
+                provider_trace["llm_trace"] = llm_trace
+
+            reply_trace = llm_trace.get("reply")
+            if isinstance(reply_trace, Mapping):
+                raw_response = reply_trace.get("raw_response")
+                result = reply_trace.get("result")
+                if (
+                    isinstance(raw_response, str)
+                    and raw_response.strip()
+                ) or (
+                    isinstance(result, Mapping)
+                    and isinstance(result.get("reply"), str)
+                    and result.get("reply").strip()
+                ):
+                    continue
+
+            generated = session.provider.freeform_reply_for_interaction(interaction)
+            if not generated:
+                continue
+
+            reply_text = str(generated.get("reply") or "").strip()
+            trace = generated.get("trace")
+            if not isinstance(trace, Mapping):
+                trace = {
+                    "used_fallback": False,
+                    "raw_response": reply_text,
+                    "result": {"reply": reply_text},
+                }
+            llm_trace["reply"] = dict(trace)
 
     def _create_session(self, dataset_id: str, config: IntentRuntimeConfig) -> IntentRuntimeSession:
         instruction_store = IntentInstructionStore()
@@ -379,12 +492,26 @@ def _build_provider(
         llm = OllamaLlmProvider(
             model_name=config.model_name,
             base_url=config.base_url,
+            keep_alive=config.keep_alive,
             timeout_seconds=config.timeout_seconds,
             temperature=config.temperature,
             max_output_tokens=config.max_output_tokens,
             allow_mock_fallback=config.allow_mock_fallback,
         )
     return IntentInstructionProvider(llm=llm, store=store)
+
+
+def _provider_runtime_settings(config: IntentRuntimeConfig) -> tuple[Any, ...]:
+    return (
+        config.provider_kind,
+        config.model_name,
+        config.base_url,
+        config.keep_alive,
+        config.temperature,
+        config.timeout_seconds,
+        config.max_output_tokens,
+        config.allow_mock_fallback,
+    )
 
 
 def _draft_state_from_trace(

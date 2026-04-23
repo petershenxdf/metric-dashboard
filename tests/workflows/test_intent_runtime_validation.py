@@ -135,6 +135,38 @@ class IntentRuntimeValidationWorkflowTests(unittest.TestCase):
         self.assertEqual(body["data"]["runtime_diagnostics"]["provider_kind"], "mock")
         self.assertEqual(body["data"]["runtime_diagnostics"]["runtime_config"]["model_name"], "debug-model")
 
+    def test_runtime_config_api_switches_response_mode(self):
+        response = self.client.post(
+            "/workflows/intent-runtime-validation/api/runtime-config",
+            json={"provider_kind": "mock", "response_mode": "raw"},
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["data"]["runtime_diagnostics"]["runtime_config"]["response_mode"], "raw")
+
+    def test_raw_response_mode_renders_provider_outputs_in_chat_thread(self):
+        response = self.client.post(
+            "/workflows/intent-runtime-validation/api/messages",
+            json={
+                "message": "merge clusters 1 and 2",
+                "provider_kind": "mock",
+                "response_mode": "raw",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertIn(
+            "I read that as a request to merge cluster_1, cluster_2.",
+            body["data"]["display_response"]["reply"],
+        )
+
+        page = self.client.get(
+            "/workflows/intent-runtime-validation/?provider_kind=mock&response_mode=raw"
+        )
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"Direct AI Reply", page.data)
+        self.assertIn(b"I read that as a request to merge cluster_1, cluster_2.", page.data)
+
 
 if __name__ == "__main__":
     unittest.main()

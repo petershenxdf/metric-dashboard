@@ -632,6 +632,30 @@ dd {
   margin-top: 16px;
 }
 
+.runtime-mode-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.runtime-mode-button {
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid #dadce0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #202124;
+  font: inherit;
+  cursor: pointer;
+}
+
+.runtime-mode-button.is-active {
+  border-color: #2f6fed;
+  background: #e8f0fe;
+  color: #174ea6;
+}
+
 .runtime-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.95fr);
@@ -703,7 +727,7 @@ dd {
 }
 
 .runtime-message-row.user {
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .runtime-message-row.assistant {
@@ -728,10 +752,12 @@ dd {
 }
 
 .runtime-message.user {
+  border: 1px solid #c8d7f5;
   background: #e8f0fe;
 }
 
 .runtime-message.assistant {
+  border: 1px solid #cde6d7;
   background: #edf7f1;
 }
 

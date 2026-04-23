@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import unittest
 from unittest.mock import patch
 
@@ -191,7 +192,9 @@ class OllamaProviderTests(unittest.TestCase):
             },
         )
         prompt = mock_generate_json.call_args[0][0]
-        self.assertIn("route_prompt.txt", self.provider.diagnostics()["prompt_template_files"]["route"])
+        route_prompt_path = self.provider.diagnostics()["prompt_template_files"]["route"]
+        self.assertIn("prompts", route_prompt_path)
+        self.assertIn("route_prompt.txt", route_prompt_path)
         self.assertIn('"selection_groups"', prompt)
         self.assertIn('"group_name": "group A"', prompt)
         self.assertIn('"recent_turns"', prompt)
@@ -302,6 +305,79 @@ class OllamaProviderTests(unittest.TestCase):
         result = provider.route("merge clusters 1 and 2", self.context, ())
         self.assertEqual(result.category, "on_topic_actionable")
         self.assertTrue(provider.diagnostics()["last_route"]["used_fallback"])
+
+    @patch.object(OllamaLlmProvider, "_generate_text")
+    def test_freeform_reply_uses_root_reply_prompt(self, mock_generate_text):
+        mock_generate_text.return_value = "I understand this as a request to merge cluster_1 and cluster_2."
+
+        reply = self.provider.freeform_reply(
+            "merge clusters 1 and 2",
+            self.context,
+            (),
+            response={
+                "reply": "Okay, I recorded a merge for cluster_1, cluster_2.",
+                "router_category": "on_topic_actionable",
+            },
+            provider_trace={
+                "router_result": {"category": "on_topic_actionable"},
+                "proposed_delta": {
+                    "operations": [
+                        {
+                            "intent": "merge_clusters",
+                            "payload": {
+                                "target_groups": [
+                                    {"source": "cluster", "ref": "cluster_1"},
+                                    {"source": "cluster", "ref": "cluster_2"},
+                                ]
+                            },
+                        }
+                    ]
+                },
+            },
+            memory_context={"summary": "User wants to merge two clusters."},
+        )
+
+        self.assertIn("merge cluster_1 and cluster_2", reply.lower())
+        diagnostics = self.provider.diagnostics()
+        self.assertIn("reply_prompt.txt", diagnostics["prompt_template_files"]["reply"])
+        self.assertIn("Current processed workflow response JSON", diagnostics["last_reply"]["prompt_text"])
+        self.assertEqual(diagnostics["last_reply"]["result"]["reply"], reply)
+
+    def test_provider_reads_model_defaults_from_environment(self):
+        with patch.dict(
+            os.environ,
+            {
+                "METRIC_DASHBOARD_LLM_MODEL": "llama3.1:8b",
+                "METRIC_DASHBOARD_OLLAMA_KEEP_ALIVE": "45m",
+            },
+            clear=False,
+        ):
+            provider = OllamaLlmProvider()
+
+        self.assertEqual(provider.model_name, "llama3.1:8b")
+        self.assertEqual(provider.keep_alive, "45m")
+
+    @patch.object(OllamaLlmProvider, "_post_json")
+    def test_generate_json_sends_keep_alive_to_ollama(self, mock_post_json):
+        mock_post_json.return_value = {"response": '{"category":"meta_query","confidence":0.9}'}
+
+        self.provider._generate_json("hello")
+
+        request_payload = mock_post_json.call_args[0][1]
+        self.assertEqual(request_payload["keep_alive"], self.provider.keep_alive)
+
+    @patch.object(OllamaLlmProvider, "_request_json")
+    def test_health_uses_cached_result_until_explicit_refresh(self, mock_request_json):
+        mock_request_json.return_value = {"models": [{"name": self.provider.model_name}]}
+
+        first = self.provider.health()
+        second = self.provider.health()
+        refreshed = self.provider.health(force_refresh=True)
+
+        self.assertTrue(first["available"])
+        self.assertEqual(mock_request_json.call_count, 2)
+        self.assertEqual(second, first)
+        self.assertEqual(refreshed["model_name"], self.provider.model_name)
 
 
 if __name__ == "__main__":

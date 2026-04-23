@@ -18,6 +18,46 @@ Expected local URL:
 http://127.0.0.1:5000
 ```
 
+Live runtime defaults for the Step 8.5 chat workflow are read from the repo-root
+`.env` file. Supported keys:
+
+```text
+METRIC_DASHBOARD_LLM_PROVIDER
+METRIC_DASHBOARD_LLM_MODEL
+METRIC_DASHBOARD_OLLAMA_BASE_URL
+METRIC_DASHBOARD_OLLAMA_KEEP_ALIVE
+METRIC_DASHBOARD_LLM_TEMPERATURE
+METRIC_DASHBOARD_LLM_TIMEOUT_SECONDS
+METRIC_DASHBOARD_LLM_MAX_OUTPUT_TOKENS
+METRIC_DASHBOARD_LLM_ALLOW_MOCK_FALLBACK
+```
+
+Edit `.env` when you want to change the default model or Ollama endpoint, then
+restart `python run.py`. The runtime form on
+`/workflows/intent-runtime-validation/` still works as a session-only override.
+That same workflow also exposes a reply-mode toggle:
+
+1. `Processed Reply`
+   - shows the workflow's normal cleaned confirmation / clarification text.
+2. `Direct AI Reply`
+   - shows a separate freeform model-authored reply built from the same
+     grounded context and memory, while leaving the actual instruction
+     pipeline unchanged.
+
+Prompt templates now live under the repo-root `prompts/` folder:
+
+```text
+prompts/
+  intent_instruction/
+    ollama/
+      route_prompt.txt
+      extract_prompt.txt
+      reply_prompt.txt
+```
+
+Anything in the app that needs prompt files should read from there instead of
+module-local prompt folders.
+
 ## Product Goal
 
 The dashboard helps a user inspect high-dimensional data, select points, and give feedback that can guide metric learning.
@@ -205,7 +245,12 @@ Planned next gate before Step 9:
   actually connects a live model runtime, defaulting to Ollama
   `qwen2.5:14b`, and validates paraphrase robustness, structured memory,
   partial-information completion, relevance filtering, and UI diagnostics
-  before either downstream refinement path is trusted.
+  before either downstream refinement path is trusted. The default provider,
+  model, endpoint, and Ollama keep-alive window are read from `.env`, while the
+  workflow page can temporarily override them for the current session. The same
+  page now lets you flip the chat surface between processed replies and direct
+  AI replies without changing the grounded context, memory payload, or
+  underlying structured-instruction commit logic.
 
 ## Workflow Debug Map
 

@@ -57,7 +57,8 @@ class IntentInstructionProvider:
         dataset_id = payload.dataset_id
         context = self._build_context(payload)
         history = _turns_from_payload(payload.history_window)
-        snapshot = self.current_snapshot(dataset_id)
+        current_state = self.store.get(dataset_id)
+        snapshot = current_state.snapshot()
         trace: Dict[str, Any] = {
             "message": payload.message,
             "dataset_context": context.to_dict(),
@@ -74,6 +75,11 @@ class IntentInstructionProvider:
             memory_context=payload.memory_context,
         )
         trace["router_result"] = router_result.to_dict()
+        trace["llm_trace"] = {
+            "route": _llm_step_trace(self.llm, "last_route"),
+            "extract": None,
+            "reply": None,
+        }
 
         if router_result.category == "off_topic":
             reply = router_result.reply_text or (
@@ -112,7 +118,6 @@ class IntentInstructionProvider:
             self.traces[dataset_id] = trace
             return response
 
-        current_state = self.store.get(dataset_id)
         proposed = propose_delta(
             self.llm,
             payload.message,
@@ -122,6 +127,11 @@ class IntentInstructionProvider:
             memory_context=payload.memory_context,
         )
         trace["proposed_delta"] = proposed.to_dict()
+        trace["llm_trace"] = {
+            "route": _llm_step_trace(self.llm, "last_route"),
+            "extract": _llm_step_trace(self.llm, "last_extract"),
+            "reply": None,
+        }
 
         if router_result.category == "on_topic_ambiguous":
             clarification = (
@@ -211,6 +221,35 @@ class IntentInstructionProvider:
         self.traces[dataset_id] = trace
         return response
 
+    def freeform_reply_for_interaction(
+        self,
+        interaction: Mapping[str, Any],
+    ) -> Mapping[str, Any] | None:
+        if not hasattr(self.llm, "freeform_reply"):
+            return None
+
+        forwarded_payload = interaction.get("forwarded_payload")
+        response = interaction.get("response")
+        provider_trace = interaction.get("provider_trace")
+        if not isinstance(forwarded_payload, Mapping) or not isinstance(response, Mapping):
+            return None
+
+        payload = _chat_payload_from_forwarded_payload_dict(forwarded_payload)
+        context = self._build_context(payload)
+        history = _turns_from_payload(payload.history_window)
+        reply_text = self.llm.freeform_reply(
+            payload.message,
+            context,
+            history,
+            response=response,
+            provider_trace=provider_trace if isinstance(provider_trace, Mapping) else {},
+            memory_context=payload.memory_context,
+        )
+        return {
+            "reply": reply_text,
+            "trace": _llm_step_trace(self.llm, "last_reply"),
+        }
+
     # ----- helpers -----
 
     def _build_context(self, payload: ChatMessagePayload) -> DatasetContext:
@@ -255,6 +294,68 @@ def _turns_from_payload(history_window) -> tuple:
         if role and text:
             turns.append(Turn(role=role, text=text))
     return tuple(turns)
+
+
+def _chat_payload_from_forwarded_payload_dict(data: Mapping[str, Any]) -> ChatMessagePayload:
+    selection_context = data.get("selection_context")
+    if not isinstance(selection_context, Mapping):
+        selection_context = {}
+
+    selection_groups = data.get("selection_groups")
+    if not isinstance(selection_groups, Sequence) or isinstance(selection_groups, (str, bytes)):
+        selection_groups = ()
+
+    history_window = data.get("history_window")
+    if not isinstance(history_window, Sequence) or isinstance(history_window, (str, bytes)):
+        history_window = ()
+
+    label_context = data.get("label_context")
+    if not isinstance(label_context, Mapping):
+        label_context = {}
+
+    memory_context = data.get("memory_context")
+    if not isinstance(memory_context, Mapping):
+        memory_context = {}
+
+    return ChatMessagePayload(
+        message=str(data.get("message") or ""),
+        dataset_id=str(data.get("dataset_id") or ""),
+        selected_point_ids=tuple(selection_context.get("selected_point_ids") or ()),
+        unselected_point_ids=tuple(selection_context.get("unselected_point_ids") or ()),
+        selection_groups=tuple(
+            dict(group)
+            for group in selection_groups
+            if isinstance(group, Mapping)
+        ),
+        label_context=dict(label_context),
+        history_window=tuple(
+            dict(turn)
+            for turn in history_window
+            if isinstance(turn, Mapping)
+        ),
+        memory_context=dict(memory_context),
+    )
+
+
+def _llm_step_trace(llm, key: str) -> Mapping[str, Any] | None:
+    if not hasattr(llm, "diagnostics"):
+        return None
+
+    diagnostics = llm.diagnostics()
+    if not isinstance(diagnostics, Mapping):
+        return None
+
+    step_trace = diagnostics.get(key)
+    if not isinstance(step_trace, Mapping):
+        return None
+
+    return {
+        "used_fallback": step_trace.get("used_fallback"),
+        "raw_response": step_trace.get("raw_response"),
+        "result": dict(step_trace.get("result")) if isinstance(step_trace.get("result"), Mapping) else None,
+        "delta": dict(step_trace.get("delta")) if isinstance(step_trace.get("delta"), Mapping) else None,
+        "error": step_trace.get("error"),
+    }
 
 
 def _cluster_ids_from_label_context(label_context: Mapping[str, Any]) -> tuple:
