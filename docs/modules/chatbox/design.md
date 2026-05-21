@@ -241,7 +241,6 @@ Implemented. Current behavior:
 3. Chatbox reads selection and label context from the real `selection` and
    `labeling` debug stores and never mutates them. The instruction snapshot is
    owned by the provider, not by chatbox.
-4. `/workflows/intent-runtime-validation/` now includes a processed/raw reply
-   toggle on the shared workflow UI. The toggle only changes which assistant
-   text is rendered in the chat thread; the same grounded payload, history
-   window, memory context, and provider call still execute underneath.
+4. `/workflows/intent-runtime-validation/` now renders direct AI replies only.
+   The chatbox still only displays and forwards grounded payloads; label and
+   selection mutation remains owned by the explicit workflow controls.

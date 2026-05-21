@@ -29,6 +29,9 @@ class IntentRuntimeValidationWorkflowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Step 8.5 Runtime Validation", response.data)
         self.assertIn(b"Chatbox", response.data)
+        self.assertIn(b"SSDBCODI Runtime Grounding", response.data)
+        self.assertIn(b"Per-Point SSDBCODI Scores", response.data)
+        self.assertNotIn(b"Processed Reply", response.data)
 
     def test_state_api_exposes_grounded_runtime_payload(self):
         response = self.client.get("/workflows/intent-runtime-validation/api/state?provider_kind=mock")
@@ -39,6 +42,10 @@ class IntentRuntimeValidationWorkflowTests(unittest.TestCase):
         self.assertIn("memory_state", body["data"])
         self.assertIn("evaluation_results", body["data"])
         self.assertIn("storage", body["data"])
+        self.assertIn("ssdbcodi", body["data"]["state"])
+        self.assertIn("point_scores", body["data"]["state"]["ssdbcodi"])
+        self.assertFalse(body["data"]["state"]["ssdbcodi"]["ai_role"]["can_modify_labeling"])
+        self.assertIn("ssdbcodi", body["data"]["state"]["analysis_context"])
         self.assertEqual(body["data"]["runtime_diagnostics"]["provider_kind"], "mock")
 
     def test_message_round_trip_uses_same_grounded_cluster_resolution(self):
@@ -70,7 +77,7 @@ class IntentRuntimeValidationWorkflowTests(unittest.TestCase):
         response = self.client.get("/workflows/intent-runtime-validation/?provider_kind=mock")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"merge clusters 1 and 2", response.data)
-        self.assertIn(b"Okay, I recorded a merge for cluster_1, cluster_2.", response.data)
+        self.assertIn(b"I read that as a request to merge cluster_1, cluster_2.", response.data)
         self.assertIn(b"runtime-message-row user", response.data)
         self.assertIn(b"runtime-message-row assistant", response.data)
 
@@ -135,14 +142,50 @@ class IntentRuntimeValidationWorkflowTests(unittest.TestCase):
         self.assertEqual(body["data"]["runtime_diagnostics"]["provider_kind"], "mock")
         self.assertEqual(body["data"]["runtime_diagnostics"]["runtime_config"]["model_name"], "debug-model")
 
-    def test_runtime_config_api_switches_response_mode(self):
+    def test_runtime_config_api_keeps_direct_ai_response_mode(self):
         response = self.client.post(
             "/workflows/intent-runtime-validation/api/runtime-config",
-            json={"provider_kind": "mock", "response_mode": "raw"},
+            json={"provider_kind": "mock", "response_mode": "processed"},
         )
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
         self.assertEqual(body["data"]["runtime_diagnostics"]["runtime_config"]["response_mode"], "raw")
+
+    def test_page_exposes_manual_deepseek_flash_and_pro_switches(self):
+        page = self.client.get(
+            "/workflows/intent-runtime-validation/?provider_kind=deepseek&model_name=deepseek-v4-flash"
+        )
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'data-deepseek-model="deepseek-v4-flash"', page.data)
+        self.assertIn(b'data-deepseek-model="deepseek-v4-pro"', page.data)
+        self.assertIn(b"DeepSeek Flash", page.data)
+        self.assertIn(b"DeepSeek Pro", page.data)
+        self.assertIn(b"deepseek-v4-flash", page.data)
+
+        response = self.client.post(
+            "/workflows/intent-runtime-validation/api/runtime-config",
+            json={"provider_kind": "deepseek", "model_name": "deepseek-v4-pro"},
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        runtime_config = body["data"]["runtime_diagnostics"]["runtime_config"]
+        self.assertEqual(runtime_config["provider_kind"], "deepseek")
+        self.assertEqual(runtime_config["model_name"], "deepseek-v4-pro")
+
+    def test_ssdbcodi_params_are_forwarded_into_runtime_context(self):
+        response = self.client.get(
+            "/workflows/intent-runtime-validation/api/state"
+            "?provider_kind=mock&n_clusters=4&min_pts=3&alpha=0.4&beta=0.2&contamination=0.17&rscore_weight=0.65"
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        ssdbcodi = body["data"]["state"]["ssdbcodi"]
+        self.assertEqual(ssdbcodi["parameters"]["min_pts"], 3)
+        self.assertAlmostEqual(ssdbcodi["parameters"]["alpha"], 0.4)
+        self.assertAlmostEqual(ssdbcodi["parameters"]["beta"], 0.2)
+        self.assertAlmostEqual(ssdbcodi["parameters"]["contamination"], 0.17)
+        self.assertAlmostEqual(ssdbcodi["parameters"]["rscore_weight"], 0.65)
+        self.assertEqual(body["data"]["state"]["analysis_context"]["cluster_count"], 4)
 
     def test_raw_response_mode_renders_provider_outputs_in_chat_thread(self):
         response = self.client.post(
@@ -164,7 +207,7 @@ class IntentRuntimeValidationWorkflowTests(unittest.TestCase):
             "/workflows/intent-runtime-validation/?provider_kind=mock&response_mode=raw"
         )
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Direct AI Reply", page.data)
+        self.assertIn(b"Direct AI reply mode", page.data)
         self.assertIn(b"I read that as a request to merge cluster_1, cluster_2.", page.data)
 
 

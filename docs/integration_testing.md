@@ -203,12 +203,12 @@ Expected behavior before Step 9 starts:
 
 1. `/workflows/intent-runtime-validation/` shows provider health, active
    runtime config, a real embedded scatterplot, real selection/label state,
-   memory state, draft state, final structured output, and evaluation
-   diagnostics together.
+   SSDBCODI score diagnostics, memory state, draft state, final structured
+   output, and evaluation diagnostics together.
 2. The page uses the real `scatterplot`, `selection`, and `labeling` module
    boundaries rather than mock visual context.
-3. The default runtime is Ollama `qwen2.5:14b`, but the provider selection
-   surface stays generic enough for future local or online models.
+3. The default runtime is DeepSeek V4 Pro unless `.env` overrides it, and the
+   provider selection surface stays generic enough for local or online models.
 4. Wording variants such as `how many clusters`, `how many class`, and
    `what classes do we have` are handled as the same meta-query family.
 5. Incomplete but relevant turns update a structured draft and produce a
@@ -222,7 +222,10 @@ Expected behavior before Step 9 starts:
    same page.
 9. Selection changes, selection-group restore, and label changes are reflected
    in the context seen by the live model before the next turn is processed.
-10. Evaluation packs are replayable so paraphrase, visual-grounding,
+10. The visible chat surface shows direct AI replies only. The model may plan
+    and suggest labels or selections from SSDBCODI context, but it must not
+    mutate labels or selections automatically.
+11. Evaluation packs are replayable so paraphrase, visual-grounding,
     partial-memory, state-drift, and provider failure cases can be rechecked
     before Path A / Path B work proceeds.
 

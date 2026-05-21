@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block title %}Intent Runtime Validation Workflow{% endblock %}
+{% block page_class %} page-runtime-validation{% endblock %}
 
 {% block content %}
   <section class="intro">
@@ -25,17 +26,18 @@
       <div class="runtime-badges">
         <span>{{ runtime_config.provider_kind }}</span>
         <span>{{ runtime_config.model_name }}</span>
-        <span>{{ runtime_config.response_mode }} reply mode</span>
+        <span>Direct AI reply mode</span>
         <span>{{ grounded.cluster_ids | length }} clusters</span>
         <span>{{ grounded.selection_context.selected_point_ids | length }} selected</span>
       </div>
     </div>
 
     <form class="runtime-config-form" data-runtime-config-form>
-      <input type="hidden" name="response_mode" value="{{ runtime_config.response_mode }}">
+      <input type="hidden" name="response_mode" value="raw">
       <label>
         Provider
         <select name="provider_kind">
+          <option value="deepseek" {% if runtime_config.provider_kind == "deepseek" %}selected{% endif %}>deepseek</option>
           <option value="ollama" {% if runtime_config.provider_kind == "ollama" %}selected{% endif %}>ollama</option>
           <option value="mock" {% if runtime_config.provider_kind == "mock" %}selected{% endif %}>mock</option>
         </select>
@@ -74,27 +76,28 @@
       <button type="button" data-runtime-action="reset">New Session</button>
     </form>
 
-    <div class="runtime-mode-toggle" aria-label="Chat response display mode">
+    <div class="runtime-mode-toggle" aria-label="DeepSeek model mode">
       <button
         type="button"
-        class="runtime-mode-button{% if runtime_config.response_mode == 'processed' %} is-active{% endif %}"
-        data-response-mode="processed"
+        class="runtime-mode-button{% if runtime_config.provider_kind == 'deepseek' and runtime_config.model_name == 'deepseek-v4-flash' %} is-active{% endif %}"
+        data-deepseek-model="deepseek-v4-flash"
       >
-        Processed Reply
+        DeepSeek Flash
       </button>
       <button
         type="button"
-        class="runtime-mode-button{% if runtime_config.response_mode == 'raw' %} is-active{% endif %}"
-        data-response-mode="raw"
+        class="runtime-mode-button{% if runtime_config.provider_kind == 'deepseek' and runtime_config.model_name == 'deepseek-v4-pro' %} is-active{% endif %}"
+        data-deepseek-model="deepseek-v4-pro"
       >
-        Direct AI Reply
+        DeepSeek Pro
       </button>
     </div>
 
     <p class="small">
       Defaults come from the repo-root <code>.env</code> file. Runtime form changes override
-      only the current in-memory session. `Processed` shows the cleaned workflow reply; `Direct AI`
-      shows a separate freeform model-authored reply built from the same grounded context and memory.
+      only the current in-memory session. DeepSeek buttons switch between V4 Flash and V4 Pro.
+      This workflow now shows only direct model-authored replies built from the same grounded
+      context, memory, and SSDBCODI diagnostics.
     </p>
 
     <div class="runtime-health" id="runtime-health">
@@ -111,6 +114,63 @@
         not connected
       {% endif %}
     </div>
+  </section>
+
+  <section class="panel">
+    <div class="runtime-toolbar">
+      <div>
+        <h2>SSDBCODI Runtime Grounding</h2>
+        <p class="small">
+          The same SSDBCODI score fields from the module lab are now part of this
+          interaction workflow. They are fed into the model as planning context,
+          while label writes remain manual for this validation stage.
+        </p>
+      </div>
+      <div class="runtime-badges">
+        <span>rScore/lScore/simScore/tScore</span>
+        <span>{{ runtime_payload.state.ssdbcodi.seeds | length }} seeds</span>
+        <span>{{ runtime_payload.state.ssdbcodi.result.outlier_result.outlier_point_ids | length }} outliers</span>
+      </div>
+    </div>
+
+    <form class="runtime-config-form" data-ssdbcodi-controls-form>
+      <label>
+        Bootstrap k
+        <input type="number" name="n_clusters" min="1" value="{{ grounded.n_clusters }}">
+      </label>
+      <label>
+        MinPts
+        <input type="number" name="min_pts" min="1" value="{{ ssdbcodi_params.min_pts }}">
+      </label>
+      <label>
+        alpha
+        <input type="number" name="alpha" min="0" max="1" step="0.05" value="{{ ssdbcodi_params.alpha }}">
+      </label>
+      <label>
+        beta
+        <input type="number" name="beta" min="0" max="1" step="0.05" value="{{ ssdbcodi_params.beta }}">
+      </label>
+      <label>
+        Contamination
+        <input type="number" name="contamination" min="0.01" max="0.49" step="0.01" value="{{ ssdbcodi_params.contamination }}">
+      </label>
+      <label>
+        rScore weight
+        <input type="number" name="rscore_weight" min="0" max="1" step="0.05" value="{{ ssdbcodi_params.rscore_weight }}">
+      </label>
+      <button class="button" type="submit">Recompute Context</button>
+    </form>
+
+    <dl class="details">
+      <dt>AI mode</dt>
+      <dd>planning and suggestion only; no automatic labeling mutation</dd>
+      <dt>Future hook</dt>
+      <dd>model suggestions can later become reviewable proposed selection or label actions</dd>
+      <dt>SSDBCODI run</dt>
+      <dd><code>{{ runtime_payload.state.ssdbcodi.result.run_id }}</code></dd>
+      <dt>Manual labels</dt>
+      <dd>{{ grounded.labeling_state.annotations | length }} annotations are included as SSDBCODI seed overrides</dd>
+    </dl>
   </section>
 
   <section class="runtime-layout">
@@ -138,6 +198,7 @@
           <line x1="56" y1="260" x2="804" y2="260" stroke="#dadce0"></line>
           <line x1="430" y1="56" x2="430" y2="464" stroke="#dadce0"></line>
           {% for point in grounded.render_payload.points %}
+            {% set score = ssdbcodi_score_lookup.get(point.point_id) %}
             <g
               class="workflow-point"
               data-point-id="{{ point.point_id }}"
@@ -152,7 +213,19 @@
                 fill="{{ '#d6336c' if point.is_outlier else point.color }}"
                 stroke="{{ '#111827' if point.selected else '#202124' }}"
                 stroke-width="{{ 1.8 if point.selected else (1.8 if point.is_outlier else 1.1) }}"
-              ></circle>
+              >
+                {% if score %}
+                  <title>
+                    {{ point.point_id }}
+                    {{ "outlier" if point.is_outlier else point.cluster_id }}
+                    r={{ "%.3f"|format(score.r_score) }}
+                    l={{ "%.3f"|format(score.l_score) }}
+                    sim={{ "%.3f"|format(score.sim_score) }}
+                    t={{ "%.3f"|format(score.t_score) }}
+                    seed={{ score.seed_origin_point_id or "-" }}
+                  </title>
+                {% endif %}
+              </circle>
               {% if point.selected %}
                 <circle cx="{{ '%.2f'|format(point.screen_x) }}" cy="{{ '%.2f'|format(point.screen_y) }}" r="2.2" fill="#111827"></circle>
               {% endif %}
@@ -226,6 +299,111 @@
           {% else %}
             <p class="small">No saved groups yet. Select points on the plot, then save the current selection.</p>
           {% endif %}
+        </article>
+      </section>
+
+      <section class="split">
+        <article>
+          <h2>SSDBCODI Cluster Counts</h2>
+          <div class="chip-row">
+            {% for cluster_id, count in runtime_payload.state.ssdbcodi.cluster_counts.items() %}
+              <span>{{ cluster_id }}: {{ count }}</span>
+            {% endfor %}
+          </div>
+        </article>
+        <article>
+          <h2>SSDBCODI Diagnostics</h2>
+          <dl>
+            <dt>Bootstrap used</dt>
+            <dd>{{ "yes" if runtime_payload.state.ssdbcodi.result.parameters.bootstrap_used else "no" }}</dd>
+            <dt>Manual seeds</dt>
+            <dd>{{ runtime_payload.state.ssdbcodi.result.diagnostics.manual_seed_count }}</dd>
+            <dt>Bootstrap seeds</dt>
+            <dd>{{ runtime_payload.state.ssdbcodi.result.diagnostics.bootstrap_seed_count }}</dd>
+            <dt>Labeled outliers</dt>
+            <dd>{{ runtime_payload.state.ssdbcodi.result.diagnostics.labeled_outlier_count }}</dd>
+            <dt>Outliers detected</dt>
+            <dd>{{ runtime_payload.state.ssdbcodi.result.outlier_result.outlier_point_ids | length }}</dd>
+          </dl>
+        </article>
+      </section>
+
+      <section class="panel">
+        <h2>Per-Point SSDBCODI Scores</h2>
+        <p class="small">
+          These score fields are included in the model's grounded context so it can plan,
+          explain, and suggest candidate labels without writing them automatically.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Point ID</th>
+                <th>Cluster</th>
+                <th>Outlier?</th>
+                <th>Selected?</th>
+                <th>Manual Labels</th>
+                <th>rScore</th>
+                <th>lScore</th>
+                <th>simScore</th>
+                <th>tScore</th>
+                <th>cDist</th>
+                <th>eMax</th>
+                <th>Seed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for point in grounded.render_payload.points %}
+                {% set score = ssdbcodi_score_lookup.get(point.point_id) %}
+                <tr>
+                  <td>{{ point.point_id }}</td>
+                  <td>{{ score.cluster_id if score else point.cluster_id }}</td>
+                  <td>{{ "yes" if point.is_outlier else "no" }}</td>
+                  <td>{{ "yes" if point.selected else "no" }}</td>
+                  <td>
+                    {% if point.manual_labels %}
+                      {% for label in point.manual_labels %}
+                        <code>{{ label.display_label }}</code>
+                      {% endfor %}
+                    {% else %}
+                      none
+                    {% endif %}
+                  </td>
+                  {% if score %}
+                    <td>{{ "%.4f"|format(score.r_score) }}</td>
+                    <td>{{ "%.4f"|format(score.l_score) }}</td>
+                    <td>{{ "%.4f"|format(score.sim_score) }}</td>
+                    <td>{{ "%.4f"|format(score.t_score) }}</td>
+                    <td>{{ "%.4f"|format(score.c_dist) }}</td>
+                    <td>{{ "%.4f"|format(score.e_max) }}</td>
+                    <td>{{ score.seed_origin_point_id or "-" }}</td>
+                  {% else %}
+                    <td colspan="7">missing score</td>
+                  {% endif %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="split">
+        <article>
+          <h2>SSDBCODI Seeds</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Point ID</th><th>Cluster</th><th>Source</th></tr></thead>
+              <tbody>
+                {% for seed in runtime_payload.state.ssdbcodi.seeds %}
+                  <tr><td>{{ seed.point_id }}</td><td>{{ seed.cluster_id }}</td><td>{{ seed.source }}</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <article>
+          <h2>SSDBCODI AI Context</h2>
+          <pre>{{ runtime_payload.state.analysis_context.ssdbcodi | tojson(indent=2) }}</pre>
         </article>
       </section>
     </div>
@@ -330,8 +508,8 @@
   </section>
 
   <script>
-    const workflowNClusters = "{{ grounded.n_clusters }}";
     const workflowBasePath = "/workflows/intent-runtime-validation";
+    const deepSeekBaseUrl = "https://api.deepseek.com";
 
     const runtimeConfigPayload = () => {
       const form = document.querySelector("[data-runtime-config-form]");
@@ -348,12 +526,35 @@
       };
     };
 
+    const ssdbcodiParamsPayload = () => {
+      const form = document.querySelector("[data-ssdbcodi-controls-form]");
+      const values = new FormData(form);
+      return {
+        n_clusters: values.get("n_clusters"),
+        min_pts: values.get("min_pts"),
+        alpha: values.get("alpha"),
+        beta: values.get("beta"),
+        contamination: values.get("contamination"),
+        rscore_weight: values.get("rscore_weight")
+      };
+    };
+
+    const currentWorkflowParams = () => ({
+      ...runtimeConfigPayload(),
+      ...ssdbcodiParamsPayload()
+    });
+
     const postJson = async (url, body = {}) => {
       return fetch(url, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({n_clusters: workflowNClusters, ...runtimeConfigPayload(), ...body})
+        body: JSON.stringify({...currentWorkflowParams(), ...body})
       });
+    };
+
+    const reloadWithCurrentParams = () => {
+      const query = new URLSearchParams(currentWorkflowParams());
+      window.location.href = `${workflowBasePath}/?${query.toString()}`;
     };
 
     const refreshOrAlert = async (response) => {
@@ -435,14 +636,18 @@
       }
     };
 
-    document.querySelector("[data-runtime-config-form]").addEventListener("submit", async (event) => {
+    document.querySelector("[data-runtime-config-form]").addEventListener("submit", (event) => {
       event.preventDefault();
-      const response = await postJson(`${workflowBasePath}/api/runtime-config`);
-      refreshOrAlert(response);
+      reloadWithCurrentParams();
+    });
+
+    document.querySelector("[data-ssdbcodi-controls-form]").addEventListener("submit", (event) => {
+      event.preventDefault();
+      reloadWithCurrentParams();
     });
 
     document.querySelector("[data-runtime-health]").addEventListener("click", async () => {
-      const query = new URLSearchParams({...runtimeConfigPayload(), n_clusters: workflowNClusters});
+      const query = new URLSearchParams(currentWorkflowParams());
       const response = await fetch(`${workflowBasePath}/api/provider-health?${query.toString()}`);
       if (!response.ok) {
         await refreshOrAlert(response);
@@ -503,12 +708,13 @@
       });
     });
 
-    document.querySelectorAll("[data-response-mode]").forEach((button) => {
-      button.addEventListener("click", async () => {
+    document.querySelectorAll("[data-deepseek-model]").forEach((button) => {
+      button.addEventListener("click", () => {
         const form = document.querySelector("[data-runtime-config-form]");
-        form.querySelector("[name=response_mode]").value = button.dataset.responseMode;
-        const response = await postJson(`${workflowBasePath}/api/runtime-config`);
-        refreshOrAlert(response);
+        form.querySelector("[name=provider_kind]").value = "deepseek";
+        form.querySelector("[name=model_name]").value = button.dataset.deepseekModel;
+        form.querySelector("[name=base_url]").value = deepSeekBaseUrl;
+        reloadWithCurrentParams();
       });
     });
 
@@ -544,7 +750,7 @@
         const response = await fetch(url, {
           method: action === "delete" ? "DELETE" : "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({n_clusters: workflowNClusters, ...runtimeConfigPayload()})
+          body: JSON.stringify(currentWorkflowParams())
         });
         refreshOrAlert(response);
       });

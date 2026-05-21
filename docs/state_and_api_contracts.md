@@ -86,7 +86,8 @@ The module also owns:
 3. extracted facts with provenance, confidence, and confirmation state,
 4. an `InstructionDraft` for relevant-but-incomplete feedback,
 5. an irrelevant-turn log so off-topic chatter is auditable but does not pollute the draft,
-6. provider/runtime health and evaluation status.
+6. provider/runtime health and evaluation status,
+7. direct AI reply traces for the Step 8.5 interaction lab.
 
 `intent_instruction` is also responsible for allocating stable constraint IDs. The extractor emits `InstructionDelta` operations with `constraint_id: "pending"`; the service rewrites those to monotonic IDs (`c1`, `c2`, ...) inside `apply_delta` and advances the version counter on the owning `IntentInstructionStore`. Off-topic, meta-query, and ambiguous messages never mutate this state.
 
@@ -95,8 +96,11 @@ Step 7 and Step 8 are strategy-agnostic. Path choice (`metric_learning` vs
 and orchestrators, not to chat intake or intent compilation.
 
 Step 8.5 is also strategy-agnostic. It is a validation gate for the live model
-runtime, memory policy, and structured-output reliability. It must complete
-before Step 9 adapters are trusted with the resulting instruction state.
+runtime, memory policy, SSDBCODI-grounded planning, and structured-output
+reliability. It must complete before reviewable suggestion UX and Step 9
+adapters are trusted with the resulting instruction state. In this gate, the AI
+does not own label or selection mutation; it can only suggest what the user may
+apply through manual controls.
 
 These two sources feed two parallel adapters:
 

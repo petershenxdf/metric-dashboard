@@ -735,6 +735,7 @@ Build:
 ```text
 intent runtime validation workflow
 real-model LLM provider runtime
+SSDBCODI score grounding
 structured conversation memory + draft state
 evaluation suite + provider diagnostics
 ```
@@ -744,30 +745,32 @@ Why:
 Step 8 proves the compiler boundary, but it still uses a deterministic mock
 backend. Before Step 9 consumes chat-derived instructions, the project needs a
 real-model gate that validates wording robustness, memory, relevance filtering,
-partial-information accumulation, and schema-valid structured output.
+partial-information accumulation, SSDBCODI-aware planning, and schema-valid
+structured output. At this stage the model can suggest and explain label or
+selection ideas, but only manual UI controls mutate labeling and selection.
 
 Tasks:
 
-1. Implement a real `LlmProvider` runtime with default config `provider: ollama`, `model: qwen2.5:14b`, `base_url: http://127.0.0.1:11434`.
-2. Keep the runtime provider-agnostic so future Ollama models or online providers can be swapped through configuration instead of branching the workflow design.
-3. Embed the real `scatterplot`, `selection`, and `labeling` module boundaries into `/workflows/intent-runtime-validation/` so the live model is validated against the actual visible plot state.
+1. Implement a real `LlmProvider` runtime with default config `provider: deepseek`, `model: deepseek-v4-pro`, `base_url: https://api.deepseek.com`.
+2. Keep the runtime provider-agnostic so Ollama models or online providers can be swapped through configuration instead of branching the workflow design.
+3. Embed the real `scatterplot`, `selection`, `labeling`, and SSDBCODI module boundaries into `/workflows/intent-runtime-validation/` so the live model is validated against the actual visible plot state and score diagnostics.
 4. Add structured conversation memory owned by `intent_instruction`: append-only transcript, rolling summary, working memory, extracted facts with provenance and confidence, incomplete instruction draft, unresolved slots, and irrelevant-turn log.
 5. Activate `partial` handling: extract usable fragments from incomplete user messages, store them in structured form, and ask one focused follow-up question instead of discarding the turn.
 6. Distinguish `off_topic`, `meta_query`, `relevant_but_incomplete`, `actionable`, and correction/overwrite cases before mutating structured state.
 7. Validate paraphrase robustness for wording variants such as `how many clusters`, `how many class`, and `what classes do we have`.
 8. Validate visual grounding cases such as `these points`, `that cluster`, `the selected group`, and label-aware outlier references against the real plot state.
 9. Promote incomplete multi-turn feedback to final `StructuredInstruction` state only when the required fields are present; otherwise keep it in draft form.
-10. Add `/workflows/intent-runtime-validation/` as a composite visual lab: real scatterplot, real selection/labeling context, chat intake, provider/model controls, memory panels, draft state, final structured output, and evaluation diagnostics on one page.
+10. Add `/workflows/intent-runtime-validation/` as a composite visual lab: real scatterplot, real selection/labeling context, SSDBCODI scores/seeds/diagnostics, chat intake, provider/model controls, memory panels, draft state, final structured output, and evaluation diagnostics on one page.
 11. Define replayable evaluation packs for paraphrases, meta-queries, irrelevant turns, partial completion, multi-turn memory, contradiction/correction, visual grounding, state drift, and provider timeout/failure.
 12. Record explicit pass/fail gates that must be satisfied before Step 9 starts.
 
 Current design status:
 
 1. Implemented as `/workflows/intent-runtime-validation/` with a runtime-configurable live provider and persisted session artifacts.
-2. The default first live model is Ollama `qwen2.5:14b`, but the runtime config remains provider-agnostic for future local and online models.
+2. The default live model is DeepSeek V4 Pro, but the runtime config remains provider-agnostic for local and online models.
 3. Prompt templates are file-backed under `prompts/intent_instruction/ollama/` and the rendered prompts are persisted per session for debugging.
-4. Grounded context now includes real selection state, saved selection groups, manual labels, effective cluster/outlier state, recent chat turns, structured memory, and point-level catalog data.
-5. One current open issue remains: some live draft-slot turns can still hit route-timeout fallback even when extraction succeeds and the final structured result is correct.
+4. Grounded context now includes real selection state, saved selection groups, manual labels, effective cluster/outlier state, SSDBCODI scores/seeds/diagnostics, recent chat turns, structured memory, and point-level catalog data.
+5. The visible chat surface is direct AI reply only. The AI is constrained to planning and suggestions; label/selection mutation remains manual until the next suggestion-review gate is built.
 
 Validation suites:
 
@@ -794,13 +797,15 @@ Open `/workflows/intent-runtime-validation/` and confirm:
 9. evaluation diagnostics show which validation packs passed or failed.
 10. visual references such as `these points`, `that cluster`, and current outliers can be audited by comparing the plot, context panels, and structured output on one screen.
 11. both user and assistant turns render in the chat thread so the visible UI matches the persisted transcript and chat-state JSON.
+12. SSDBCODI `rScore`, `lScore`, `simScore`, `tScore`, seed, and outlier diagnostics are visible and included in the AI context.
 
 Completion:
 
 Step 9 does not begin until a real-model runtime is wired through
-`LlmProvider`, the default Ollama `qwen2.5:14b` path works, and the validation
-gates for intent robustness, memory, structured extraction, and UI clarity all
-pass.
+`LlmProvider`, the default DeepSeek V4 Pro path works, and the validation gates
+for intent robustness, memory, structured extraction, SSDBCODI grounding, and UI
+clarity all pass. The next gate after this is a reviewable AI label/selection
+suggestion workflow before automatic refinement is enabled.
 
 ---
 
@@ -1194,8 +1199,10 @@ Chatbox receives selection/label context and intent module outputs structured in
 Goal:
 
 `/workflows/intent-runtime-validation/` proves a live provider runtime
-(default Ollama `qwen2.5:14b`), structured memory, partial-information draft
-handling, and schema-valid structured output before either Step 9 path begins.
+(default DeepSeek V4 Pro unless `.env` overrides it), SSDBCODI-grounded direct
+AI planning, structured memory, partial-information draft handling, and
+schema-valid structured output before reviewable suggestion UX and either Step
+9 path begins.
 
 ### Milestone 6A: Path A Refinement Loop
 

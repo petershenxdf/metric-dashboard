@@ -68,26 +68,30 @@ Step 8 promotes the chatbox boundary from the mock provider to the real
 deterministic `MockLlmProvider` so the compiler boundary stays easy to debug.
 
 Step 8.5 is the real-model runtime gate. It connects `intent_instruction` to a
-live provider runtime (default Ollama `qwen2.5:14b`) and validates memory,
-paraphrase robustness, relevance filtering, partial-information accumulation,
-and schema-valid structured output before Path A / Path B adapters are allowed
-to consume the result.
+live provider runtime (default DeepSeek V4 Pro unless `.env` overrides it) and
+validates memory, paraphrase robustness, relevance filtering, partial-information
+accumulation, SSDBCODI score grounding, and direct AI planning replies before
+Path A / Path B adapters are allowed to consume the result. In this gate, the
+model suggests and explains; label and selection writes still happen only
+through explicit manual controls.
 
 | Step | Route | Purpose |
 | --- | --- | --- |
 | 7 | `/workflows/chat-selection/` | Chat UI reads current selection and labeling context, records mock intents, and proves the intake boundary without choosing a refinement path. |
 | 8 | `/workflows/chat-intent/` | Chat text becomes structured instruction deltas at the real `intent_instruction` module boundary, still using the deterministic Step 8 backend so compilation can be debugged independently of live-model behavior. |
-| 8.5 | `/workflows/intent-runtime-validation/` | Live-model validation gate: real scatterplot + selection + labeling context, real provider runtime, grounded conversation memory, partial draft completion, relevance filtering, and evaluation diagnostics before Step 9 begins. |
+| 8.5 | `/workflows/intent-runtime-validation/` | Live-model validation gate: real scatterplot + selection + labeling context, SSDBCODI scores/seeds/diagnostics, real provider runtime, grounded conversation memory, direct AI replies, and evaluation diagnostics before suggestion validation begins. |
 
 ### Future Workflows
 
 These placeholders are intentionally visible so future work has a planned
-integration path. After the Step 8.5 validation gate passes, Step 9 and Step
-10 fork into Path A (metric learning) and Path B (direct SSDBCODI) so the two
-update strategies can be debugged independently.
+integration path. After the Step 8.5 validation gate passes, Step 8.6 should
+validate reviewable model-generated label and selection suggestions. Step 9 and
+Step 10 then fork into Path A (metric learning) and Path B (direct SSDBCODI) so
+the two update strategies can be debugged independently.
 
 | Step | Route | Purpose |
 | --- | --- | --- |
+| 8.6 | `/workflows/intent-suggestion-review/` | Planned: model proposes labels/selections from SSDBCODI-grounded context; user approves, edits, or rejects before state changes. |
 | 9A | `/workflows/instruction-constraints/` | **Path A**: structured instructions and labels become metric-learning constraints. |
 | 9B | `/workflows/instruction-ssdbcodi/` | **Path B**: structured instructions and labels become a `DirectFeedbackPlan` (seeds, feature_scale, param_overrides). |
 | 10A | `/workflows/metric-refinement-loop/` | **Path A**: metric fit, transformed projection, rerun analysis, Path A rollback history. |

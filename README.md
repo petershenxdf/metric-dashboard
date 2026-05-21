@@ -19,12 +19,15 @@ http://127.0.0.1:5000
 ```
 
 Live runtime defaults for the Step 8.5 chat workflow are read from the repo-root
-`.env` file. Supported keys:
+`.env` file. Supported providers are `deepseek`, `ollama`, and `mock`.
+Supported keys:
 
 ```text
 METRIC_DASHBOARD_LLM_PROVIDER
 METRIC_DASHBOARD_LLM_MODEL
 METRIC_DASHBOARD_OLLAMA_BASE_URL
+METRIC_DASHBOARD_DEEPSEEK_BASE_URL
+METRIC_DASHBOARD_DEEPSEEK_API_KEY
 METRIC_DASHBOARD_OLLAMA_KEEP_ALIVE
 METRIC_DASHBOARD_LLM_TEMPERATURE
 METRIC_DASHBOARD_LLM_TIMEOUT_SECONDS
@@ -32,17 +35,17 @@ METRIC_DASHBOARD_LLM_MAX_OUTPUT_TOKENS
 METRIC_DASHBOARD_LLM_ALLOW_MOCK_FALLBACK
 ```
 
-Edit `.env` when you want to change the default model or Ollama endpoint, then
+Edit `.env` when you want to change the default model or provider endpoint, then
 restart `python run.py`. The runtime form on
 `/workflows/intent-runtime-validation/` still works as a session-only override.
-That same workflow also exposes a reply-mode toggle:
-
-1. `Processed Reply`
-   - shows the workflow's normal cleaned confirmation / clarification text.
-2. `Direct AI Reply`
-   - shows a separate freeform model-authored reply built from the same
-     grounded context and memory, while leaving the actual instruction
-     pipeline unchanged.
+For DeepSeek V4, use `METRIC_DASHBOARD_LLM_PROVIDER=deepseek` with
+`METRIC_DASHBOARD_LLM_MODEL=deepseek-v4-flash` or
+`METRIC_DASHBOARD_LLM_MODEL=deepseek-v4-pro`; the workflow page also exposes
+two buttons for switching between Flash and Pro in the current session.
+That same workflow now shows only direct model-authored replies. The model is
+used for planning and suggestions against the grounded scatterplot, selection,
+labeling, memory, and SSDBCODI score context; label and selection mutations
+remain explicit manual UI actions for this validation stage.
 
 Prompt templates now live under the repo-root `prompts/` folder:
 
@@ -242,15 +245,14 @@ The default algorithm-adapter fixture is `default_analysis_outlier_debug`, not I
 Planned next gate before Step 9:
 
 - `Step 8.5` is intentionally separate from Step 8. It is the first stage that
-  actually connects a live model runtime, defaulting to Ollama
-  `qwen2.5:14b`, and validates paraphrase robustness, structured memory,
-  partial-information completion, relevance filtering, and UI diagnostics
-  before either downstream refinement path is trusted. The default provider,
-  model, endpoint, and Ollama keep-alive window are read from `.env`, while the
-  workflow page can temporarily override them for the current session. The same
-  page now lets you flip the chat surface between processed replies and direct
-  AI replies without changing the grounded context, memory payload, or
-  underlying structured-instruction commit logic.
+  actually connects a live model runtime, now defaulting to DeepSeek V4 Pro
+  when `.env` does not override it. It validates paraphrase robustness,
+  structured memory, partial-information completion, relevance filtering,
+  SSDBCODI-aware planning, and UI diagnostics before either downstream
+  refinement path is trusted. The default provider, model, endpoint, and
+  provider-specific runtime options are read from `.env`, while the workflow
+  page can temporarily override them for the current session. Direct AI replies
+  are the only visible chat mode in this validation workflow.
 
 ## Workflow Debug Map
 
@@ -383,21 +385,26 @@ Current planned order:
    - compile messages into structured instructions (shared by both update paths; emits the full shared + Path B-only intent set) with a deterministic backend.
 
 10. Step 8.5 runtime validation
-    - connect the first live model runtime, defaulting to Ollama `qwen2.5:14b`.
-    - validate memory, partial-information completion, relevance filtering, and provider diagnostics before Step 9 begins.
+    - connect the live model runtime, defaulting to DeepSeek V4 Pro unless `.env` overrides it.
+    - validate memory, partial-information completion, relevance filtering, SSDBCODI score grounding, and provider diagnostics before Step 9 begins.
+    - keep direct AI replies in planning/suggestion mode only; manual label and selection controls remain the only state mutation path.
 
-11. Path A: `metric_learning_adapter` / Path B: `direct_feedback_adapter`
+11. Step 8.6 AI suggestion validation
+    - turn model planning output into reviewable proposed label and selection suggestions.
+    - verify user approval/rejection UX before any automatic refinement trigger exists.
+
+12. Path A: `metric_learning_adapter` / Path B: `direct_feedback_adapter`
    - 9A `metric_learning_adapter`: convert shared structured instructions into pair-based metric-learning constraints.
    - 9B `direct_feedback_adapter`: convert shared structured instructions (including `split_cluster` and `reclassify_outlier`) into a SSDBCODI-native `DirectFeedbackPlan` (seed updates, feature_scale, n_clusters, excluded/merged clusters).
 
-12. Path A: `metric_refinement_orchestrator` / Path B: `direct_refinement_orchestrator`
+13. Path A: `metric_refinement_orchestrator` / Path B: `direct_refinement_orchestrator`
     - 10A `metric_refinement_orchestrator`: fit metric `M`, apply `L = chol(M)` as linear pre-transform, rerun projection and algorithm adapters on `X · L`, track Path A rollback history.
     - 10B `direct_refinement_orchestrator`: rerun SSDBCODI directly with merged seeds and param overrides from the plan, rerun projection only when geometry changed, track Path B rollback history.
 
-13. `strategy_comparison` workflow
+14. `strategy_comparison` workflow
     - run the same structured feedback through both orchestrators and render outputs side-by-side with a per-point diff.
 
-14. integrated dashboard
+15. integrated dashboard
     - combine already-tested modules and expose refinement triggers that choose which downstream path to run.
 
 ## Testing Expectations

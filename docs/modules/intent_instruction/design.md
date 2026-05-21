@@ -59,28 +59,26 @@ without entangling the compiler with downstream refinement policy?
 Step 8 alone is not enough for the project goals because it still runs on
 `MockLlmProvider`.
 
-Step 8.5 is the first stage that connects a live runtime (default Ollama
-`qwen2.5:14b`) and validates five things before Step 9:
+Step 8.5 is the first stage that connects a live runtime (default DeepSeek V4
+Pro unless `.env` overrides it) and validates six things before Step 9:
 
 1. paraphrase robustness across different wording and structure,
 2. conversation memory that is stored in structured, auditable form,
 3. partial-information extraction plus focused follow-up questions,
 4. relevance filtering between irrelevant chatter and relevant-but-incomplete feedback,
-5. UI visibility of provider state, memory state, draft state, and final output.
+5. SSDBCODI score grounding for planning and suggestions,
+6. UI visibility of provider state, memory state, draft state, and final output.
 
 See `docs/modules/intent_instruction/runtime_validation.md` for the full Step
 8.5 design. The Step 8.5 workflow reads its default provider/model/base URL
 from the repo-root `.env` file and lets the user override them per session on
 the runtime page. Prompt templates are loaded from the repo-root
-`prompts/intent_instruction/ollama/` directory. That same page now offers a
-processed/raw reply toggle:
-
-1. `processed` shows the normal workflow reply after routing, extraction,
-   required-slot checks, and deterministic confirmation handling.
-2. `raw` shows a separate freeform model-authored reply for the same grounded
-   request.
-3. Both modes still use the same `ChatMessagePayload`, `DatasetContext`,
-   memory payload, and `StructuredInstruction` commit path.
+`prompts/intent_instruction/ollama/` directory. That same page now shows only
+direct freeform model-authored replies for the grounded request. The reply must
+stay in planning/suggestion mode: it may propose labels or selections, but those
+proposals do not mutate state until a future review workflow lets the user
+approve them. The same `ChatMessagePayload`, `DatasetContext`, memory payload,
+and `StructuredInstruction` commit path remain auditable in diagnostics.
 
 ## Target Files
 
@@ -273,10 +271,10 @@ class LlmProvider(Protocol):
 
 Step 8 ships `MockLlmProvider` only: a deterministic keyword-based backend that
 makes the pipeline fully testable without external dependencies. Step 8.5 adds
-the first live provider runtime, defaulting to Ollama `qwen2.5:14b`, while
-keeping the same protocol open to future local or cloud providers. The default
-runtime config is file-backed through `.env`, so local model changes do not
-require code edits.
+the first live provider runtime, defaulting to DeepSeek V4 Pro unless `.env`
+overrides it, while keeping the same protocol open to local or cloud providers.
+The default runtime config is file-backed through `.env`, so model changes do
+not require code edits.
 
 ### Outer: `IntentProvider`
 

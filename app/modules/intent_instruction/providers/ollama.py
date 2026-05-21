@@ -524,6 +524,26 @@ _ROUTE_FEWSHOT = [
         "confidence": 0.88,
     },
     {
+        "message": "how many clusters should there be",
+        "category": "meta_query",
+        "reply_text": (
+            "This is a recommendation question. I would use the current clustering as "
+            "context, then compare nearby K values against the visible cluster sizes, "
+            "outliers, and SSDBCODI score patterns before choosing."
+        ),
+        "confidence": 0.9,
+    },
+    {
+        "message": "how many clusters shoukd be",
+        "category": "meta_query",
+        "reply_text": (
+            "Interpreting 'shoukd' as 'should': I would not answer with only the "
+            "current count. I would recommend a cluster count from the visible "
+            "structure and SSDBCODI evidence, then suggest the next K values to test."
+        ),
+        "confidence": 0.86,
+    },
+    {
         "message": "what class are the selected points",
         "category": "meta_query",
         "reply_text": "The selected points alpha_01 and alpha_02 are in cluster_1.",
@@ -1202,6 +1222,63 @@ def _build_briefing(context: DatasetContext) -> str:
         lines.append(f"- clusters ({len(context.cluster_ids)}): {joined}")
     else:
         lines.append("- clusters: (none resolved yet)")
+
+    ssdbcodi_context = (
+        context.analysis_context.get("ssdbcodi")
+        if isinstance(context.analysis_context, Mapping)
+        else None
+    )
+    if isinstance(ssdbcodi_context, Mapping) and ssdbcodi_context:
+        parameters = ssdbcodi_context.get("parameters")
+        if isinstance(parameters, Mapping) and parameters:
+            params_text = ", ".join(f"{key}={value}" for key, value in parameters.items())
+            lines.append(f"- ssdbcodi parameters: {params_text}")
+
+        ssdbcodi_counts = ssdbcodi_context.get("cluster_counts")
+        if isinstance(ssdbcodi_counts, Mapping) and ssdbcodi_counts:
+            counts_text = ", ".join(
+                f"{cluster_id}({count})" for cluster_id, count in ssdbcodi_counts.items()
+            )
+            lines.append(f"- ssdbcodi cluster_counts: {counts_text}")
+
+        ssdbcodi_outliers = ssdbcodi_context.get("outlier_point_ids")
+        if (
+            isinstance(ssdbcodi_outliers, Sequence)
+            and not isinstance(ssdbcodi_outliers, (str, bytes))
+        ):
+            preview = ", ".join(str(point_id) for point_id in ssdbcodi_outliers[:8])
+            more = (
+                ""
+                if len(ssdbcodi_outliers) <= 8
+                else f", ... (+{len(ssdbcodi_outliers) - 8} more)"
+            )
+            lines.append(
+                f"- ssdbcodi outliers ({len(ssdbcodi_outliers)}): {preview or '(none)'}{more}"
+            )
+
+        seeds = ssdbcodi_context.get("seeds")
+        if isinstance(seeds, Sequence) and not isinstance(seeds, (str, bytes)) and seeds:
+            seed_lines = []
+            for seed in seeds[:8]:
+                if not isinstance(seed, Mapping):
+                    continue
+                point_id = seed.get("point_id")
+                cluster_id = seed.get("cluster_id")
+                source = seed.get("source")
+                seed_lines.append(f"{point_id}->{cluster_id} ({source})")
+            if seed_lines:
+                lines.append(f"- ssdbcodi seeds: {', '.join(seed_lines)}")
+
+        point_scores = ssdbcodi_context.get("point_scores")
+        if (
+            isinstance(point_scores, Sequence)
+            and not isinstance(point_scores, (str, bytes))
+            and point_scores
+        ):
+            lines.append(
+                "- ssdbcodi point_scores available: "
+                f"{len(point_scores)} points with r_score, l_score, sim_score, t_score, c_dist, e_max"
+            )
 
     point_catalog = context.analysis_context.get("point_catalog") if isinstance(context.analysis_context, Mapping) else None
     if isinstance(point_catalog, Sequence) and not isinstance(point_catalog, (str, bytes)) and point_catalog:

@@ -48,6 +48,10 @@ a:hover {
   padding: 32px 0;
 }
 
+.page-runtime-validation {
+  width: min(1480px, calc(100% - 32px));
+}
+
 .intro {
   max-width: 760px;
   margin-bottom: 28px;
@@ -658,7 +662,7 @@ dd {
 
 .runtime-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.95fr);
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 440px);
   gap: 16px;
   align-items: start;
   margin-bottom: 24px;
@@ -667,17 +671,27 @@ dd {
 .runtime-main-column {
   display: grid;
   gap: 16px;
+  min-width: 0;
 }
 
 .runtime-chat-shell {
   display: grid;
   gap: 14px;
+  min-width: 0;
+  max-width: 440px;
   padding: 18px;
   border: 1px solid #dadce0;
   border-radius: 8px;
   background: #ffffff;
   position: sticky;
   top: 18px;
+}
+
+.runtime-main-column > .panel,
+.runtime-main-column > .split,
+.runtime-chat-shell,
+.runtime-side-panel {
+  min-width: 0;
 }
 
 .runtime-chat-header {
@@ -691,10 +705,13 @@ dd {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  max-height: 132px;
+  overflow: auto;
 }
 
 .runtime-chip {
   min-height: 36px;
+  max-width: 100%;
   padding: 8px 10px;
   border: 1px solid #dadce0;
   border-radius: 8px;
@@ -717,7 +734,7 @@ dd {
 .runtime-chat-thread {
   display: grid;
   gap: 12px;
-  max-height: 540px;
+  max-height: min(420px, 38vh);
   padding: 4px;
   overflow: auto;
 }
@@ -803,6 +820,7 @@ dd {
   border: 1px solid #dadce0;
   border-radius: 8px;
   background: #f8fafc;
+  overflow: hidden;
 }
 
 .runtime-side-panel code {
@@ -847,6 +865,7 @@ dd {
 
   .runtime-chat-shell {
     position: static;
+    max-width: none;
   }
 
   .mock-scatter {
@@ -857,5 +876,16 @@ dd {
   .mock-message.assistant {
     margin-left: 0;
     margin-right: 0;
+  }
+}
+
+@media (max-width: 1180px) {
+  .runtime-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-chat-shell {
+    position: static;
+    max-width: none;
   }
 }

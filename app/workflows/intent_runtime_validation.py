@@ -35,6 +35,13 @@ from app.workflows.intent_runtime_support import (
     build_memory_context,
     build_memory_state,
 )
+from app.modules.ssdbcodi.service import (
+    DEFAULT_ALPHA,
+    DEFAULT_BETA,
+    DEFAULT_CONTAMINATION,
+    DEFAULT_MIN_PTS,
+    DEFAULT_RSCORE_WEIGHT,
+)
 from app.workflows.intent_response_display import (
     build_display_chat_state,
     last_display_response,
@@ -82,6 +89,8 @@ def create_blueprint() -> Blueprint:
             last_response=runtime_payload.get("last_response"),
             allowed_labels=_allowed_labels(grounded.n_clusters),
             runtime_config=session.config.to_dict(),
+            ssdbcodi_params=grounded.ssdbcodi_params,
+            ssdbcodi_score_lookup=_ssdbcodi_score_lookup(grounded),
         )
 
     @blueprint.get("/api/state")
@@ -438,7 +447,7 @@ def _runtime_payload(grounded, session, state, instruction):
             "dependency_mode": DEPENDENCY_MODE,
             "mode": (
                 "live_model_runtime"
-                if session.config.provider_kind == "ollama"
+                if session.config.provider_kind in {"ollama", "deepseek"}
                 else "deterministic_mock_runtime"
             ),
         },
@@ -471,6 +480,13 @@ def _allowed_labels(n_clusters: int):
     return [*_allowed_cluster_labels(n_clusters), "outlier"]
 
 
+def _ssdbcodi_score_lookup(grounded) -> Mapping[str, Mapping[str, Any]]:
+    return {
+        score.point_id: score.to_dict()
+        for score in grounded.ssdbcodi_result.point_scores
+    }
+
+
 def _validate_label(action: str, label_value, n_clusters: int) -> None:
     if action == "assign_cluster" and label_value in set(_allowed_cluster_labels(n_clusters)):
         return
@@ -481,7 +497,49 @@ def _validate_label(action: str, label_value, n_clusters: int) -> None:
 
 
 def _grounded_state():
-    return build_grounded_chat_context(n_clusters=n_clusters_from_request())
+    return build_grounded_chat_context(
+        n_clusters=n_clusters_from_request(),
+        ssdbcodi_params=_ssdbcodi_params_from_request(),
+    )
+
+
+def _ssdbcodi_params_from_request() -> Mapping[str, Any]:
+    payload: Mapping[str, Any] = {}
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+    elif request.args:
+        payload = request.args.to_dict()
+    elif request.form:
+        payload = request.form.to_dict()
+
+    params = {
+        "min_pts": _int_value(payload.get("min_pts"), DEFAULT_MIN_PTS),
+        "alpha": _float_value(payload.get("alpha"), DEFAULT_ALPHA),
+        "beta": _float_value(payload.get("beta"), DEFAULT_BETA),
+        "contamination": _float_value(payload.get("contamination"), DEFAULT_CONTAMINATION),
+        "rscore_weight": _float_value(payload.get("rscore_weight"), DEFAULT_RSCORE_WEIGHT),
+    }
+    return {
+        "min_pts": max(1, params["min_pts"]),
+        "alpha": max(0.0, min(1.0, params["alpha"])),
+        "beta": max(0.0, min(1.0, params["beta"])),
+        "contamination": max(0.01, min(0.49, params["contamination"])),
+        "rscore_weight": max(0.0, min(1.0, params["rscore_weight"])),
+    }
+
+
+def _int_value(value, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _float_value(value, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _config_updates_from_request() -> Mapping[str, Any]:
@@ -501,6 +559,5 @@ def _config_updates_from_request() -> Mapping[str, Any]:
         "timeout_seconds",
         "max_output_tokens",
         "allow_mock_fallback",
-        "response_mode",
     }
     return {key: payload[key] for key in keys if key in payload}

@@ -8,21 +8,25 @@ from typing import Any, Dict, Mapping
 from uuid import uuid4
 
 from app.modules.chatbox.service import create_chatbox_store
+from app.modules.intent_instruction.providers.deepseek import (
+    DEEPSEEK_FLASH_MODEL,
+    DEEPSEEK_MODEL_OPTIONS,
+    DEEPSEEK_PRO_MODEL,
+    DeepSeekLlmProvider,
+)
 from app.modules.intent_instruction.providers.mock import MockLlmProvider
 from app.modules.intent_instruction.providers.ollama import OllamaLlmProvider
 from app.modules.intent_instruction.service import IntentInstructionProvider
 from app.modules.intent_instruction.store import IntentInstructionStore
 from app.shared.env import env_bool, env_float, env_int, env_text
-from app.workflows.intent_response_display import (
-    DEFAULT_RESPONSE_MODE,
-    normalize_response_mode,
-)
 
 
-SUPPORTED_PROVIDER_KINDS = ("ollama", "mock")
-DEFAULT_PROVIDER_KIND = "ollama"
-DEFAULT_MODEL_NAME = "qwen2.5:14b"
-DEFAULT_BASE_URL = "http://127.0.0.1:11434"
+SUPPORTED_PROVIDER_KINDS = ("ollama", "deepseek", "mock")
+DEFAULT_PROVIDER_KIND = "deepseek"
+DEFAULT_MODEL_NAME = DEEPSEEK_PRO_MODEL
+DEFAULT_BASE_URL = "https://api.deepseek.com"
+DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEFAULT_KEEP_ALIVE = "30m"
 DEFAULT_TEMPERATURE = 0.1
 DEFAULT_TIMEOUT_SECONDS = 45
@@ -39,7 +43,10 @@ def _default_model_name() -> str:
 
 
 def _default_base_url() -> str:
-    return env_text("METRIC_DASHBOARD_OLLAMA_BASE_URL", DEFAULT_BASE_URL)
+    provider_kind = _default_provider_kind().strip().lower()
+    if provider_kind == "deepseek":
+        return env_text("METRIC_DASHBOARD_DEEPSEEK_BASE_URL", DEFAULT_DEEPSEEK_BASE_URL)
+    return env_text("METRIC_DASHBOARD_OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)
 
 
 def _default_keep_alive() -> str:
@@ -75,12 +82,13 @@ class IntentRuntimeConfig:
     timeout_seconds: int = field(default_factory=_default_timeout_seconds)
     max_output_tokens: int = field(default_factory=_default_max_output_tokens)
     allow_mock_fallback: bool = field(default_factory=_default_allow_mock_fallback)
-    response_mode: str = DEFAULT_RESPONSE_MODE
+    response_mode: str = "raw"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "provider_kind": self.provider_kind,
             "model_name": self.model_name,
+            "model_options": list(_model_options_for_provider(self.provider_kind)),
             "base_url": self.base_url,
             "keep_alive": self.keep_alive,
             "temperature": self.temperature,
@@ -96,8 +104,17 @@ class IntentRuntimeConfig:
         if provider_kind not in SUPPORTED_PROVIDER_KINDS:
             raise ValueError(f"provider_kind must be one of: {', '.join(SUPPORTED_PROVIDER_KINDS)}")
 
-        model_name = str(payload.get("model_name", self.model_name)).strip() or self.model_name
-        base_url = str(payload.get("base_url", self.base_url)).strip() or self.base_url
+        model_name = str(payload.get("model_name", self.model_name)).strip()
+        if not model_name:
+            model_name = _default_model_for_provider(provider_kind)
+
+        if provider_kind == "deepseek" and model_name not in DEEPSEEK_MODEL_OPTIONS:
+            raise ValueError(
+                f"DeepSeek model_name must be one of: {', '.join(DEEPSEEK_MODEL_OPTIONS)}"
+            )
+
+        base_url_default = _default_base_url_for_provider(provider_kind)
+        base_url = str(payload.get("base_url", self.base_url)).strip() or base_url_default
         keep_alive = str(payload.get("keep_alive", self.keep_alive)).strip() or self.keep_alive
         temperature = float(payload.get("temperature", self.temperature))
         timeout_seconds = max(1, int(payload.get("timeout_seconds", self.timeout_seconds)))
@@ -106,9 +123,10 @@ class IntentRuntimeConfig:
             payload.get("allow_mock_fallback", self.allow_mock_fallback),
             default=self.allow_mock_fallback,
         )
-        response_mode = normalize_response_mode(
-            payload.get("response_mode", self.response_mode)
-        )
+        # Step 8.5 is currently a direct-AI interaction lab. Keep the underlying
+        # display helper's processed mode available for tests and older traces,
+        # but force this runtime workflow to show direct model-authored replies.
+        response_mode = "raw"
 
         return IntentRuntimeConfig(
             provider_kind=provider_kind,
@@ -488,6 +506,15 @@ def _build_provider(
 ) -> IntentInstructionProvider:
     if config.provider_kind == "mock":
         llm = MockLlmProvider()
+    elif config.provider_kind == "deepseek":
+        llm = DeepSeekLlmProvider(
+            model_name=config.model_name,
+            base_url=config.base_url,
+            timeout_seconds=config.timeout_seconds,
+            temperature=config.temperature,
+            max_output_tokens=config.max_output_tokens,
+            allow_mock_fallback=config.allow_mock_fallback,
+        )
     else:
         llm = OllamaLlmProvider(
             model_name=config.model_name,
@@ -512,6 +539,30 @@ def _provider_runtime_settings(config: IntentRuntimeConfig) -> tuple[Any, ...]:
         config.max_output_tokens,
         config.allow_mock_fallback,
     )
+
+
+def _default_model_for_provider(provider_kind: str) -> str:
+    if provider_kind == "deepseek":
+        return DEEPSEEK_PRO_MODEL
+    if provider_kind == "mock":
+        return "mock"
+    return "qwen2.5:14b"
+
+
+def _model_options_for_provider(provider_kind: str) -> tuple[str, ...]:
+    if provider_kind == "deepseek":
+        return DEEPSEEK_MODEL_OPTIONS
+    if provider_kind == "mock":
+        return ("mock",)
+    return ()
+
+
+def _default_base_url_for_provider(provider_kind: str) -> str:
+    if provider_kind == "deepseek":
+        return DEFAULT_DEEPSEEK_BASE_URL
+    if provider_kind == "mock":
+        return ""
+    return DEFAULT_OLLAMA_BASE_URL
 
 
 def _draft_state_from_trace(

@@ -7,9 +7,12 @@ Categories:
   group points together / apart, ignore a cluster, anchor a point, reclassify an outlier).
 - on_topic_ambiguous: the user wants a refinement but the message lacks grounding
   (e.g. "move these together" when nothing is selected).
-- meta_query: the user is ASKING about the current state rather than requesting a change.
+- meta_query: the user is ASKING about the current state, or asking for grounded
+  planning/advice that should not mutate the interface yet.
   This includes:
     * counts ("how many clusters / classes / outliers / selected points")
+    * recommendations ("how many clusters should there be", "should cluster 4 exist",
+      "what K would you try", "which labels seem likely")
     * identity / membership ("what class are the selected points",
       "which cluster is p3 in", "what cluster do these points belong to")
     * listings ("what features are there", "which points are selected", "which points are outliers")
@@ -20,7 +23,15 @@ Categories:
 Rules:
 - Treat "cluster", "class", "category", "group", and "label" as likely clustering synonyms.
 - Treat "outlier", "anomaly", and "noise" as likely outlier-set synonyms.
+- Read small typos by intended meaning; for example "shoukd", "shoud", and "shuld"
+  usually mean "should".
 - If the message is a grounded state question, prefer meta_query.
+- Distinguish current-count questions from recommendation questions:
+  "how many clusters are there/currently/right now" asks for the current count, while
+  "how many clusters should there be / should be / would you recommend / is optimal"
+  asks for an evidence-based recommendation. For recommendation questions, classify
+  meta_query and draft advisory reply_text. Mention the current cluster count only as
+  context; do not answer with only the current count.
 - If the message is a slot answer to an active draft in structured memory, do not call it off_topic.
 - For meta_query you MUST draft a short natural-language reply_text that directly answers using
   the grounded state below. Use real point ids, cluster ids, group names, labels, and features.

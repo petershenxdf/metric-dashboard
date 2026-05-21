@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Mapping, Tuple
 
 from app.modules.algorithm_adapters.service import DEFAULT_N_CLUSTERS, run_default_analysis
 from app.modules.data_workspace.service import create_feature_matrix
@@ -11,6 +11,15 @@ from app.modules.projection.service import project_feature_matrix
 from app.modules.scatterplot.service import build_render_payload
 from app.modules.selection.service import get_selection_context, get_selection_state, list_selection_groups
 from app.modules.selection.state import get_debug_store_for_dataset
+from app.modules.ssdbcodi.service import (
+    DEFAULT_ALPHA,
+    DEFAULT_BETA,
+    DEFAULT_CONTAMINATION,
+    DEFAULT_MIN_PTS,
+    DEFAULT_RSCORE_WEIGHT,
+    SsdbcodiProvider,
+    cluster_counts as ssdbcodi_cluster_counts,
+)
 from app.shared.effective_analysis import apply_manual_labels_to_analysis
 from app.shared.fixtures import (
     DEFAULT_WORKFLOW_DATASET_ID,
@@ -34,6 +43,8 @@ class GroundedChatContext:
     labeling_state: object
     render_payload: object
     n_clusters: int
+    ssdbcodi_result: object
+    ssdbcodi_params: Mapping[str, Any]
 
     @property
     def feature_names(self) -> Tuple[str, ...]:
@@ -55,6 +66,7 @@ class GroundedChatContext:
     def analysis_context_payload(self) -> Dict[str, Any]:
         point_to_cluster = self._point_to_cluster()
         point_to_features = self._point_to_features()
+        score_lookup = self._ssdbcodi_scores_by_point_id()
         outlier_set = set(self.outlier_point_ids)
         return {
             "dataset_id": self.dataset.dataset_id,
@@ -73,6 +85,7 @@ class GroundedChatContext:
                     "cluster_id": point_to_cluster.get(point_id),
                     "is_outlier": point_id in outlier_set,
                     "features": point_to_features.get(point_id, {}),
+                    "ssdbcodi_scores": score_lookup.get(point_id),
                 }
                 for point_id in self.matrix.point_ids
             ],
@@ -84,12 +97,14 @@ class GroundedChatContext:
                     "cluster_id": point_to_cluster.get(point_id),
                     "is_outlier": point_id in outlier_set,
                     "features": point_to_features.get(point_id, {}),
+                    "ssdbcodi_scores": score_lookup.get(point_id),
                 }
                 for point_id in self.selection_context.selected_point_ids
             ],
             "unselected_point_ids": list(self.selection_context.unselected_point_ids),
             "unselected_count": len(self.selection_context.unselected_point_ids),
             "visible_point_count": len(self.render_payload.points),
+            "ssdbcodi": self.ssdbcodi_context_payload(),
         }
 
     def _point_to_cluster(self) -> Dict[str, str]:
@@ -141,6 +156,45 @@ class GroundedChatContext:
             summary[key] = summary.get(key, 0) + len(getattr(annotation, "point_ids", ()))
         return summary
 
+    def _ssdbcodi_scores_by_point_id(self) -> Dict[str, Dict[str, Any]]:
+        lookup: Dict[str, Dict[str, Any]] = {}
+        for score in getattr(self.ssdbcodi_result, "point_scores", ()):
+            lookup[score.point_id] = {
+                "cluster_id": score.cluster_id,
+                "is_outlier": score.is_outlier,
+                "r_score": round(float(score.r_score), 6),
+                "l_score": round(float(score.l_score), 6),
+                "sim_score": round(float(score.sim_score), 6),
+                "t_score": round(float(score.t_score), 6),
+                "c_dist": round(float(score.c_dist), 6),
+                "e_max": round(float(score.e_max), 6),
+                "seed_origin_point_id": score.seed_origin_point_id,
+            }
+        return lookup
+
+    def ssdbcodi_context_payload(self) -> Dict[str, Any]:
+        score_lookup = self._ssdbcodi_scores_by_point_id()
+        return {
+            "run_id": self.ssdbcodi_result.run_id,
+            "algorithm": self.ssdbcodi_result.algorithm,
+            "parameters": dict(self.ssdbcodi_params),
+            "diagnostics": dict(self.ssdbcodi_result.diagnostics),
+            "cluster_counts": ssdbcodi_cluster_counts(self.ssdbcodi_result),
+            "outlier_point_ids": list(self.ssdbcodi_result.outlier_result.outlier_point_ids),
+            "outlier_count": len(self.ssdbcodi_result.outlier_result.outlier_point_ids),
+            "seeds": [seed.to_dict() for seed in self.ssdbcodi_result.seeds],
+            "ai_role": {
+                "mode": "planning_and_suggestion_only",
+                "can_modify_labeling": False,
+                "future_action_hook": "label suggestions can later become reviewable proposed labeling actions",
+            },
+            "point_scores": [
+                {"point_id": point_id, **score_lookup[point_id]}
+                for point_id in self.matrix.point_ids
+                if point_id in score_lookup
+            ],
+        }
+
     def label_context_payload(self) -> Dict[str, Any]:
         annotations = [annotation.to_dict() for annotation in self.labeling_state.annotations]
         return {
@@ -148,6 +202,22 @@ class GroundedChatContext:
             "annotation_count": len(annotations),
             "active_annotations": annotations,
             "analysis_context": self.analysis_context_payload(),
+        }
+
+    def ssdbcodi_state_payload(self) -> Dict[str, Any]:
+        return {
+            "parameters": dict(self.ssdbcodi_params),
+            "result": self.ssdbcodi_result.to_dict(),
+            "cluster_counts": ssdbcodi_cluster_counts(self.ssdbcodi_result),
+            "seeds": [seed.to_dict() for seed in self.ssdbcodi_result.seeds],
+            "point_scores": [
+                score.to_dict() for score in self.ssdbcodi_result.point_scores
+            ],
+            "ai_role": {
+                "mode": "planning_and_suggestion_only",
+                "can_modify_labeling": False,
+                "future_action_hook": "label suggestions can later become reviewable proposed labeling actions",
+            },
         }
 
     def state_payload(self) -> Dict[str, Any]:
@@ -167,13 +237,23 @@ class GroundedChatContext:
             "label_context": self.label_context_payload(),
             "analysis_context": self.analysis_context_payload(),
             "render_payload": self.render_payload.to_dict(),
+            "ssdbcodi": self.ssdbcodi_state_payload(),
         }
 
 
 def build_grounded_chat_context(
     dataset_id: str = DEFAULT_WORKFLOW_DATASET_ID,
     n_clusters: int = DEFAULT_N_CLUSTERS,
+    ssdbcodi_params: Mapping[str, Any] | None = None,
 ) -> GroundedChatContext:
+    ssdbcodi_params = {
+        "min_pts": DEFAULT_MIN_PTS,
+        "alpha": DEFAULT_ALPHA,
+        "beta": DEFAULT_BETA,
+        "contamination": DEFAULT_CONTAMINATION,
+        "rscore_weight": DEFAULT_RSCORE_WEIGHT,
+        **dict(ssdbcodi_params or {}),
+    }
     dataset = analysis_selection_dataset(dataset_id)
     matrix = create_feature_matrix(dataset)
     projection = project_feature_matrix(matrix)
@@ -186,12 +266,37 @@ def build_grounded_chat_context(
     selection_groups = tuple(list_selection_groups(selection_store))
     labeling_state = get_labeling_state(get_labeling_store_for_context(selection_context))
     provider_labeling_state = labeling_state if labeling_state.annotations else None
-    raw_analysis = run_default_analysis(matrix, n_clusters=n_clusters)
+    raw_provider = SsdbcodiProvider(
+        min_pts=int(ssdbcodi_params["min_pts"]),
+        alpha=float(ssdbcodi_params["alpha"]),
+        beta=float(ssdbcodi_params["beta"]),
+        rscore_weight=float(ssdbcodi_params["rscore_weight"]),
+    )
+    provider = SsdbcodiProvider(
+        labeling_state=provider_labeling_state,
+        min_pts=int(ssdbcodi_params["min_pts"]),
+        alpha=float(ssdbcodi_params["alpha"]),
+        beta=float(ssdbcodi_params["beta"]),
+        rscore_weight=float(ssdbcodi_params["rscore_weight"]),
+    )
+    raw_analysis = run_default_analysis(
+        matrix,
+        n_clusters=n_clusters,
+        outlier_n_neighbors=int(ssdbcodi_params["min_pts"]),
+        outlier_contamination=float(ssdbcodi_params["contamination"]),
+        provider=raw_provider,
+    )
     provider_analysis = run_default_analysis(
         matrix,
         n_clusters=n_clusters,
+        outlier_n_neighbors=int(ssdbcodi_params["min_pts"]),
+        outlier_contamination=float(ssdbcodi_params["contamination"]),
         labeling_state=provider_labeling_state,
+        provider=provider,
     )
+    if provider.latest_result is None:
+        raise ValueError("SSDBCODI provider did not expose a latest result")
+    ssdbcodi_result = provider.latest_result
     analysis = apply_manual_labels_to_analysis(dataset, provider_analysis, labeling_state)
     render_payload = build_render_payload(
         dataset=dataset,
@@ -215,4 +320,6 @@ def build_grounded_chat_context(
         labeling_state=labeling_state,
         render_payload=render_payload,
         n_clusters=n_clusters,
+        ssdbcodi_result=ssdbcodi_result,
+        ssdbcodi_params=ssdbcodi_params,
     )

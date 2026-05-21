@@ -4,6 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
+from app.modules.intent_instruction.providers.deepseek import DEEPSEEK_FLASH_MODEL, DEEPSEEK_PRO_MODEL
 from app.workflows.intent_runtime_support import IntentRuntimeConfig
 
 
@@ -34,13 +35,30 @@ class IntentRuntimeSupportTests(unittest.TestCase):
         self.assertEqual(config.max_output_tokens, 1200)
         self.assertFalse(config.allow_mock_fallback)
 
-    def test_runtime_config_accepts_response_mode_without_provider_rebuild_fields(self):
+    def test_runtime_config_forces_direct_ai_response_mode(self):
         config = IntentRuntimeConfig()
 
-        updated = config.merged({"response_mode": "raw"})
+        updated = config.merged({"response_mode": "processed"})
 
         self.assertEqual(updated.response_mode, "raw")
         self.assertEqual(updated.model_name, config.model_name)
+
+    def test_runtime_config_accepts_deepseek_flash_and_pro_models(self):
+        config = IntentRuntimeConfig(provider_kind="deepseek", model_name=DEEPSEEK_PRO_MODEL)
+
+        flash = config.merged({"provider_kind": "deepseek", "model_name": DEEPSEEK_FLASH_MODEL})
+        pro = flash.merged({"provider_kind": "deepseek", "model_name": DEEPSEEK_PRO_MODEL})
+
+        self.assertEqual(flash.model_name, DEEPSEEK_FLASH_MODEL)
+        self.assertEqual(pro.model_name, DEEPSEEK_PRO_MODEL)
+        self.assertEqual(pro.base_url, "https://api.deepseek.com")
+        self.assertEqual(pro.to_dict()["model_options"], [DEEPSEEK_FLASH_MODEL, DEEPSEEK_PRO_MODEL])
+
+    def test_runtime_config_rejects_unknown_deepseek_model(self):
+        config = IntentRuntimeConfig(provider_kind="deepseek", model_name=DEEPSEEK_PRO_MODEL)
+
+        with self.assertRaises(ValueError):
+            config.merged({"provider_kind": "deepseek", "model_name": "deepseek-chat"})
 
 
 if __name__ == "__main__":

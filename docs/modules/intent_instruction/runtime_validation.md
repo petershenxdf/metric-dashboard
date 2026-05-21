@@ -14,7 +14,8 @@ model can:
 3. separate relevant from irrelevant content,
 4. convert incomplete user messages into structured draft state,
 5. ask focused follow-up questions until the instruction is usable,
-6. emit schema-valid structured output that later modules can trust.
+6. use SSDBCODI score diagnostics when planning or explaining suggestions,
+7. emit schema-valid structured output that later modules can trust.
 
 This document defines that gate.
 
@@ -25,10 +26,12 @@ Step 8.5 covers:
 1. live provider runtime integration,
 2. runtime configuration and provider abstraction,
 3. real scatterplot + selection + labeling integration,
-4. conversation memory design,
-5. relevance filtering and partial-information handling,
-6. UI and workflow requirements,
-7. evaluation packs and acceptance gates before Step 9.
+4. SSDBCODI score, seed, and outlier diagnostics in the grounded context,
+5. conversation memory design,
+6. relevance filtering and partial-information handling,
+7. direct AI reply planning mode,
+8. UI and workflow requirements,
+9. evaluation packs and acceptance gates before Step 9.
 
 Step 8.5 does not:
 
@@ -36,12 +39,13 @@ Step 8.5 does not:
 2. run metric learning,
 3. run SSDBCODI refinement,
 4. bypass the existing `StructuredInstruction` schema,
-5. move memory ownership into chatbox.
+5. move memory ownership into chatbox,
+6. automatically mutate labels or selections from model output.
 
 Step 8.5 must, however, consume the real upstream visual state. It is not a
-text-only lab. The workflow should embed the real `scatterplot`, `selection`,
-and `labeling` module boundaries so language grounding can be validated against
-the same visual state the user actually sees.
+text-only lab. The workflow embeds the real `scatterplot`, `selection`,
+`labeling`, and SSDBCODI module boundaries so language grounding can be
+validated against the same visual and score state the user actually sees.
 
 ## Current Implementation Status
 
@@ -52,37 +56,32 @@ The current repository already ships a working first Step 8.5 implementation:
 2. The workflow uses the real grounded `selection`, saved `selection_groups`,
    real `labeling` annotations, and the effective cluster/outlier state derived
    from the current analysis view.
-3. The live default provider is Ollama `qwen2.5:14b`.
+3. The live default provider is DeepSeek V4 Pro unless `.env` overrides it.
 4. Runtime defaults are read from the repo-root `.env` file, while the workflow
    form can override those values for the current in-memory session.
-5. The chat panel exposes two reply display modes on the same workflow page:
-   - `processed`: show the workflow's normal final reply after route/extract
-     handling and required-slot gating.
-   - `raw`: show a separate freeform model-authored reply for the same turn.
+5. The chat panel exposes only direct AI replies. The model is used for
+   planning and suggestions, while label and selection writes remain manual UI
+   actions.
 6. Prompt templates are file-backed and loaded from:
    - `prompts/intent_instruction/ollama/route_prompt.txt`
    - `prompts/intent_instruction/ollama/extract_prompt.txt`
    - `prompts/intent_instruction/ollama/reply_prompt.txt`
 7. Runtime artifacts are persisted per session under:
    - `runtime_data/intent_runtime_validation/<dataset_id>/<session_id>/`
-8. Persisted artifacts include runtime config, chat state, grounded state,
+8. Grounded state includes SSDBCODI `rScore`, `lScore`, `simScore`, `tScore`,
+   seeds, cluster counts, and outlier diagnostics.
+9. Persisted artifacts include runtime config, chat state, grounded state,
    memory state, provider diagnostics, interaction history, and the exact last
    route/extract/reply prompts sent to the live model.
 
-The current implementation also has one important known risk: some live
-multi-turn slot-answer cases can still hit route-timeout fallback even when the
-final structured result is correct. That means the semantic path may succeed
-while the route stage is not yet as stable as the extract stage.
-
 ## Default Runtime
 
-The default first live runtime is:
+The default live runtime is:
 
 ```text
-provider: ollama
-model: qwen2.5:14b
-base_url: http://127.0.0.1:11434
-keep_alive: 30m
+provider: deepseek
+model: deepseek-v4-pro
+base_url: https://api.deepseek.com
 ```
 
 Those values are the local defaults shipped in `.env`. Supported keys:
@@ -91,6 +90,8 @@ Those values are the local defaults shipped in `.env`. Supported keys:
 METRIC_DASHBOARD_LLM_PROVIDER
 METRIC_DASHBOARD_LLM_MODEL
 METRIC_DASHBOARD_OLLAMA_BASE_URL
+METRIC_DASHBOARD_DEEPSEEK_BASE_URL
+METRIC_DASHBOARD_DEEPSEEK_API_KEY
 METRIC_DASHBOARD_OLLAMA_KEEP_ALIVE
 METRIC_DASHBOARD_LLM_TEMPERATURE
 METRIC_DASHBOARD_LLM_TIMEOUT_SECONDS
@@ -140,15 +141,15 @@ Step 8.5 adds runtime-facing configuration around that protocol:
 
 ```json
 {
-  "provider_kind": "ollama",
-  "model_name": "qwen2.5:14b",
-  "base_url": "http://127.0.0.1:11434",
+  "provider_kind": "deepseek",
+  "model_name": "deepseek-v4-pro",
+  "base_url": "https://api.deepseek.com",
   "keep_alive": "30m",
   "timeout_seconds": 45,
   "temperature": 0.1,
   "max_output_tokens": 800,
   "allow_mock_fallback": true,
-  "response_mode": "processed"
+  "response_mode": "raw"
 }
 ```
 
@@ -156,15 +157,16 @@ Required runtime behaviors:
 
 1. health check,
 2. explicit model label,
-3. model keep-alive so repeated turns do not cold-load Ollama on every message,
+3. provider-specific keep-alive where applicable so repeated turns do not cold-load local models,
 4. timeout handling,
 5. invalid-JSON diagnostics,
 6. prompt-template visibility for debugging,
 7. persisted prompt artifacts for replay,
-8. room for future authentication when the provider is online.
+8. API-key authentication when the provider is online.
 
-`response_mode` is intentionally a display-only runtime setting. Switching
-between `processed` and `raw` must not change:
+`response_mode` is kept in the runtime snapshot for compatibility with older
+traces, but this workflow forces it to `raw`. Step 8.5 currently validates only
+direct model-authored replies. This must not change:
 
 1. the grounded context sent to the provider,
 2. the transcript/history window sent to the provider,
@@ -380,33 +382,22 @@ That distinction is central to this step.
 
 ## Reply Interpretation Rule
 
-The raw route output shown in diagnostics is not always the final assistant text
-shown in the chatbox.
+The route and extract outputs shown in diagnostics are not always the final
+assistant text shown in the chatbox.
 
 Current pipeline behavior:
 
 1. route produces an intermediate `RouterResult`,
 2. extract may still run to build or complete draft state,
-3. required-slot gating may override the raw route clarification,
-4. successful commits currently end with a deterministic service-side action
-   confirmation rather than a free-form model-authored confirmation.
+3. required-slot gating may override an intermediate clarification,
+4. the visible chatbox reply is a direct model-authored planning/suggestion
+   reply generated from the same grounded context and memory.
 
-The new raw-mode toggle exists precisely so both layers can be audited on the
-same page:
-
-1. `processed` mode shows the user-facing workflow reply,
-2. `raw` mode shows a separate direct-AI reply generated from the same
-   grounded context and memory,
-3. both modes still come from the same grounded request and same committed
-   instruction state.
-
-So if diagnostics show a raw clarification such as "Do you want me to split or
-group these points within cluster 2?", the chatbox may still show a different
-final reply if:
-
-1. the route was upgraded by draft-memory resolution,
-2. extraction produced a valid delta,
-3. the service committed the delta and returned its own confirmation text.
+Step 8.5 intentionally does not show the old processed confirmation mode. A
+direct reply may say what the model understands or recommends, but it must not
+claim that labels, selections, or refinement state have already changed. Any
+future model-generated label or selection output must become a reviewable
+suggestion before it can mutate state.
 
 ## Wording Robustness
 
@@ -506,7 +497,7 @@ Recommended layout:
    - run-evaluation controls,
    - reset controls,
    - current dependency mode badges (`real` for scatterplot / selection /
-     labeling, runtime provider clearly labeled).
+     labeling / SSDBCODI, runtime provider clearly labeled).
 
 2. Main visual area
    - a wide real `scatterplot` panel as the visual anchor of the page,
@@ -520,6 +511,7 @@ Recommended layout:
    - current selection context,
    - selection groups,
    - current label context,
+   - SSDBCODI score and seed diagnostics,
    - lightweight label actions or read-only label history,
    - current visual references such as `selected_points`, `cluster_2`,
      `outlier_set`, and saved group names.
@@ -527,7 +519,7 @@ Recommended layout:
 4. Conversation panel
    - chat surface,
    - example prompts,
-   - processed/raw reply toggle,
+   - direct AI reply text,
    - per-turn router outcome,
    - assistant clarification or answer.
 
@@ -746,7 +738,7 @@ Step 9 should not begin until Step 8.5 passes these gates.
 
 Required gates:
 
-1. Live provider health succeeds for the default Ollama runtime.
+1. Live provider health succeeds for the default DeepSeek V4 Pro runtime unless `.env` overrides it.
 2. Structured output is schema-valid on every curated validation case.
 3. Meta-query alias cases behave consistently across wording variants.
 4. Irrelevant turns do not pollute final instruction state.
@@ -755,7 +747,11 @@ Required gates:
 7. Corrections can update tentative or confirmed facts with provenance intact.
 8. Real scatterplot, selection, and labeling state are visibly embedded on the
    same page and stay consistent with chat/runtime state.
-9. UI clearly exposes provider state, memory state, draft state, and final state.
+9. SSDBCODI score fields, seeds, cluster counts, and outlier diagnostics are
+   visibly embedded and included in the grounded AI context.
+10. UI clearly exposes provider state, memory state, draft state, and final state.
+11. Direct AI replies remain planning/suggestion only and do not claim automatic
+    label or selection mutation.
 
 Suggested quantitative gates:
 
@@ -791,8 +787,8 @@ should therefore include a few extra safeguards:
      not hidden console details.
 
 6. Swap-ready runtime config
-   - switching from `qwen2.5:14b` to another Ollama model or an online provider
-   should change config, not workflow semantics.
+   - switching between DeepSeek Flash, DeepSeek Pro, Ollama, or mock should
+     change config, not workflow semantics.
 
 7. Visual auditability
    - every grounded reference should be inspectable against the real plot and
