@@ -25,7 +25,7 @@ It does not decide what the selected points mean. That semantic layer belongs to
 1. Rendering scatterplot geometry.
 2. Parsing chat messages.
 3. Running clustering or outlier detection.
-4. Running metric learning.
+4. Running rule generation or LLM interpretation.
 5. Assigning selected points to clusters or outlier labels.
 
 Selection groups are not semantic labels. They are named point sets that make

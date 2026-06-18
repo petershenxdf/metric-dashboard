@@ -37,6 +37,12 @@ _DEFAULT_MAX_OUTPUT_TOKENS = 800
 _DEFAULT_ALLOW_MOCK_FALLBACK = True
 
 
+class DeepSeekResponseContentError(ValueError):
+    def __init__(self, message: str, response_metadata: Mapping[str, Any]):
+        super().__init__(message)
+        self.response_metadata = dict(response_metadata)
+
+
 def _default_model_name() -> str:
     return env_text("METRIC_DASHBOARD_LLM_MODEL", _DEFAULT_MODEL_NAME)
 
@@ -283,11 +289,20 @@ class DeepSeekLlmProvider:
             }
             return reply_text
 
-    def _generate_json(self, prompt: str) -> tuple[Mapping[str, Any], str]:
+    def _generate_json(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        thinking: Mapping[str, str] | None = None,
+        reasoning_effort: str | None = None,
+    ) -> tuple[Mapping[str, Any], str]:
         payload = self._chat_completion(
             prompt,
             response_format={"type": "json_object"},
-            max_tokens=self.max_output_tokens,
+            max_tokens=max_tokens or self.max_output_tokens,
+            thinking=thinking,
+            reasoning_effort=reasoning_effort,
         )
         raw_response = _message_content(payload)
         parsed = json.loads(raw_response)
@@ -300,6 +315,8 @@ class DeepSeekLlmProvider:
             prompt,
             response_format=None,
             max_tokens=min(self.max_output_tokens, 300),
+            thinking=None,
+            reasoning_effort=None,
         )
         raw_response = _message_content(payload)
         if not raw_response.strip():
@@ -311,15 +328,20 @@ class DeepSeekLlmProvider:
         prompt: str,
         response_format: Mapping[str, str] | None,
         max_tokens: int,
+        *,
+        thinking: Mapping[str, str] | None,
+        reasoning_effort: str | None,
     ) -> Mapping[str, Any]:
         body: Dict[str, Any] = {
             "model": self.model_name,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
-            "thinking": {"type": "disabled"},
+            "thinking": dict(thinking or {"type": "disabled"}),
             "temperature": self.temperature,
             "max_tokens": max_tokens,
         }
+        if reasoning_effort is not None:
+            body["reasoning_effort"] = reasoning_effort
         if response_format is not None:
             body["response_format"] = dict(response_format)
         return self._post_json(f"{self.base_url.rstrip('/')}/chat/completions", body)
@@ -424,22 +446,76 @@ class DeepSeekLlmProvider:
 def _message_content(payload: Mapping[str, Any]) -> str:
     choices = payload.get("choices")
     if not isinstance(choices, Sequence) or isinstance(choices, (str, bytes)) or not choices:
-        raise ValueError("deepseek response did not contain choices")
+        raise DeepSeekResponseContentError(
+            "deepseek response did not contain choices",
+            _response_metadata(payload),
+        )
     first = choices[0]
     if not isinstance(first, Mapping):
-        raise ValueError("deepseek response choice must be an object")
+        raise DeepSeekResponseContentError(
+            "deepseek response choice must be an object",
+            _response_metadata(payload),
+        )
     message = first.get("message")
     if not isinstance(message, Mapping):
-        raise ValueError("deepseek response did not contain a message")
+        raise DeepSeekResponseContentError(
+            _content_error_message(payload, "deepseek response did not contain a message"),
+            _response_metadata(payload),
+        )
     content = message.get("content")
     if not isinstance(content, str) or not content.strip():
-        raise ValueError("deepseek response did not contain message content")
+        raise DeepSeekResponseContentError(
+            _content_error_message(payload, "deepseek response did not contain message content"),
+            _response_metadata(payload),
+        )
     return content
+
+
+def _content_error_message(payload: Mapping[str, Any], prefix: str) -> str:
+    metadata = _response_metadata(payload)
+    parts = [prefix]
+    finish_reason = metadata.get("finish_reason")
+    if finish_reason is not None:
+        parts.append(f"finish_reason={finish_reason}")
+    total_tokens = metadata.get("usage", {}).get("total_tokens") if isinstance(metadata.get("usage"), Mapping) else None
+    if total_tokens is not None:
+        parts.append(f"total_tokens={total_tokens}")
+    message_keys = metadata.get("message_keys")
+    if message_keys:
+        parts.append(f"message_keys={','.join(message_keys)}")
+    if len(parts) == 1:
+        return parts[0]
+    return f"{parts[0]} ({'; '.join(parts[1:])})"
+
+
+def _response_metadata(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    choices = payload.get("choices")
+    first = choices[0] if isinstance(choices, Sequence) and not isinstance(choices, (str, bytes)) and choices else {}
+    if not isinstance(first, Mapping):
+        first = {}
+    message = first.get("message")
+    if not isinstance(message, Mapping):
+        message = {}
+    content = message.get("content")
+    reasoning_content = message.get("reasoning_content")
+    usage = payload.get("usage")
+    return {
+        "id": payload.get("id"),
+        "model": payload.get("model"),
+        "finish_reason": first.get("finish_reason"),
+        "message_keys": sorted(str(key) for key in message.keys()),
+        "has_content": isinstance(content, str) and bool(content.strip()),
+        "content_length": len(content) if isinstance(content, str) else 0,
+        "has_reasoning_content": isinstance(reasoning_content, str) and bool(reasoning_content.strip()),
+        "reasoning_content_length": len(reasoning_content) if isinstance(reasoning_content, str) else 0,
+        "usage": dict(usage) if isinstance(usage, Mapping) else {},
+    }
 
 
 __all__ = [
     "DEEPSEEK_FLASH_MODEL",
     "DEEPSEEK_MODEL_OPTIONS",
     "DEEPSEEK_PRO_MODEL",
+    "DeepSeekResponseContentError",
     "DeepSeekLlmProvider",
 ]

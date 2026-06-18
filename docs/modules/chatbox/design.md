@@ -2,11 +2,14 @@
 
 ## Purpose
 
-The chatbox module is the dialogue intake surface for user feedback.
+The chatbox module is the legacy Step 7/8 dialogue intake surface for user
+feedback. It remains documented because it exists in the current repository,
+but the active post-Step-8.5 product direction is to replace this surface with
+`rule_panel`.
 
 It reads selection and labeling context, shows conversation history, and
 forwards each new message to a pluggable intent provider. It does not decide
-which downstream refinement path should run.
+downstream behavior.
 
 Direct point labels still belong to the labeling module. Chat text is only one
 way to produce feedback, and its compiled form is owned by
@@ -29,10 +32,10 @@ way to produce feedback, and its compiled form is owned by
 2. Owning manual label state.
 3. Owning structured instruction state.
 4. Parsing language internally.
-5. Choosing Path A vs Path B.
+5. Choosing downstream explanation behavior.
 6. Running clustering.
 7. Running outlier detection.
-8. Running metric learning.
+8. Running rule generation or LLM interpretation.
 9. Updating the scatterplot directly.
 
 ## Step 7 Contract
@@ -48,9 +51,8 @@ selection + selection groups + label context + recent chat turns
   -> ChatResponse + InstructionSnapshot
 ```
 
-Path choice begins later, when Step 9 adapters consume the compiled
-instruction state. That keeps Step 7 focused on intake rather than downstream
-execution policy.
+This module no longer defines the next build direction. The next product
+surface after Step 8.5 is the rule panel, not an update adapter.
 
 ## Target Files
 
@@ -118,7 +120,7 @@ This keeps prompts short and keeps the chatbox boundary simple.
 }
 ```
 
-No refinement strategy is attached here. Step 7 only captures feedback.
+No explanation strategy is attached here. Step 7 only captures legacy feedback.
 
 ## Response Contract
 
@@ -153,10 +155,9 @@ Suggestion chips cover all Phase 1 intents:
 7. `split_cluster`
 8. `reclassify_outlier`
 
-Chips that are only accepted later by Path B remain visible in Step 7. They
-should be marked, not hidden. Intake is supposed to expose the full feedback
-surface; downstream adapters decide whether a given intent is accepted,
-deferred, or transformed.
+This suggestion-chip vocabulary belongs to the legacy chat-feedback direction.
+Do not extend it for the new rule-panel direction unless the chat roadmap is
+explicitly reopened.
 
 ## Flask Routes
 
@@ -187,7 +188,7 @@ The page should show:
 8. A note showing whether selection, label, and instruction context are mocked or real.
 9. A provider status badge showing which provider is active.
 
-It should not show a refinement-strategy toggle at Step 7.
+It should not show an update-strategy toggle at Step 7.
 
 ## Testing
 
@@ -199,7 +200,7 @@ Unit tests:
 4. History window is truncated to the configured N turns.
 5. Chatbox service does not call clustering or outlier detection.
 6. Chatbox service does not mutate selection, labeling, or structured instruction state.
-7. Suggestion chips include both shared intents and Path B-only intents.
+7. Suggestion chips include the legacy full feedback vocabulary.
 
 Flask route tests:
 
@@ -236,11 +237,13 @@ Implemented. Current behavior:
 2. The intent provider is pluggable via the `IntentProvider` protocol. Step 7
    ships `MockIntentProvider` (deterministic keyword router + intent
    extractor). Step 8 swaps in the real `intent_instruction` module through
-   the same protocol, and Step 8.5 later validates a live model runtime
-   without changing the chatbox boundary.
+   the same protocol, and Step 8.5 validates a live model runtime without
+   changing the chatbox boundary.
 3. Chatbox reads selection and label context from the real `selection` and
    `labeling` debug stores and never mutates them. The instruction snapshot is
    owned by the provider, not by chatbox.
 4. `/workflows/intent-runtime-validation/` now renders direct AI replies only.
    The chatbox still only displays and forwards grounded payloads; label and
    selection mutation remains owned by the explicit workflow controls.
+5. Future work should move the product-facing surface to `rule_panel`, where
+   generated decision-tree rules are interpreted by DeepSeek.

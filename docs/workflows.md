@@ -59,7 +59,7 @@ This page verifies Step 6.5 provider promotion and score availability.
 
 ### Feedback Pipeline
 
-Step 7 is the strategy-agnostic chat intake workflow. It proves that chatbox
+Step 7 is the legacy strategy-agnostic chat intake workflow. It proves that chatbox
 can read selection and labeling context and forward messages without owning any
 upstream state.
 
@@ -67,47 +67,47 @@ Step 8 promotes the chatbox boundary from the mock provider to the real
 `intent_instruction` module, but the backend inside that module is still the
 deterministic `MockLlmProvider` so the compiler boundary stays easy to debug.
 
-Step 8.5 is the real-model runtime gate. It connects `intent_instruction` to a
-live provider runtime (default DeepSeek V4 Pro unless `.env` overrides it) and
-validates memory, paraphrase robustness, relevance filtering, partial-information
-accumulation, SSDBCODI score grounding, and direct AI planning replies before
-Path A / Path B adapters are allowed to consume the result. In this gate, the
-model suggests and explains; label and selection writes still happen only
-through explicit manual controls.
+Step 8.5 is the real-model runtime gate from the original chat direction. It
+connects `intent_instruction` to a live provider runtime (default DeepSeek V4
+Pro unless `.env` overrides it), validates SSDBCODI-grounded context, and keeps
+the provider/runtime foundation that the new rule-interpretation workflow can
+reuse.
 
 | Step | Route | Purpose |
 | --- | --- | --- |
-| 7 | `/workflows/chat-selection/` | Chat UI reads current selection and labeling context, records mock intents, and proves the intake boundary without choosing a refinement path. |
+| 7 | `/workflows/chat-selection/` | Chat UI reads current selection and labeling context, records mock intents, and proves the intake boundary without choosing a downstream update path. |
 | 8 | `/workflows/chat-intent/` | Chat text becomes structured instruction deltas at the real `intent_instruction` module boundary, still using the deterministic Step 8 backend so compilation can be debugged independently of live-model behavior. |
-| 8.5 | `/workflows/intent-runtime-validation/` | Live-model validation gate: real scatterplot + selection + labeling context, SSDBCODI scores/seeds/diagnostics, real provider runtime, grounded conversation memory, direct AI replies, and evaluation diagnostics before suggestion validation begins. |
+| 8.5 | `/workflows/intent-runtime-validation/` | Live-model validation gate: real scatterplot + selection + labeling context, SSDBCODI scores/seeds/diagnostics, real provider runtime, grounded conversation memory, and direct AI replies. |
 
-### Future Workflows
+### Rule Workflows
 
-These placeholders are intentionally visible so future work has a planned
-integration path. After the Step 8.5 validation gate passes, Step 8.6 should
-validate reviewable model-generated label and selection suggestions. Step 9 and
-Step 10 then fork into Path A (metric learning) and Path B (direct SSDBCODI) so
-the two update strategies can be debugged independently.
+These routes define the new post-Step-8.5 direction. Old branching update
+workflows are no longer the active plan.
 
 | Step | Route | Purpose |
 | --- | --- | --- |
-| 8.6 | `/workflows/intent-suggestion-review/` | Planned: model proposes labels/selections from SSDBCODI-grounded context; user approves, edits, or rejects before state changes. |
-| 9A | `/workflows/instruction-constraints/` | **Path A**: structured instructions and labels become metric-learning constraints. |
-| 9B | `/workflows/instruction-ssdbcodi/` | **Path B**: structured instructions and labels become a `DirectFeedbackPlan` (seeds, feature_scale, param_overrides). |
-| 10A | `/workflows/metric-refinement-loop/` | **Path A**: metric fit, transformed projection, rerun analysis, Path A rollback history. |
-| 10B | `/workflows/direct-refinement-loop/` | **Path B**: SSDBCODI re-run with merged seeds and param overrides, Path B rollback history. |
-| 11 | `/workflows/strategy-comparison/` | Run the same feedback through both paths and render their outputs side-by-side with a per-point diff. |
+| 8.6 | `/workflows/rule-panel-validation/` | Working: render current SSDBCODI diagnostics beside decision-tree rule cards for SSDBCODI clusters and anomalies. |
+| 8.7 | `/workflows/rule-interpretation/` | Working: show rule cards beside categorized label guidance: which points to label, why they need checking, how to label them, and optional DeepSeek V4 Pro provider mode. |
+| 8.8 | `/workflows/wine-dashboard/` | Working: integrated `wine.mat` rule dashboard with data, projection, SSDBCODI, selection, labeling, scatterplot, rule cards, category-first rule interpretation, and explicit DeepSeek/mock status; chatbox is excluded. |
 
-### Path-Specific Workflow Rules
+### Rule Workflow Rules
 
-1. Workflows under step 9 and step 10 should clearly label which path they
-   exercise.
-2. Path A workflows show Path A history only; Path B workflows show Path B
-   history only. Only `/workflows/strategy-comparison/` reads both histories.
-3. A `split_cluster` or `reclassify_outlier` intent should render an
-   `intent_deferred` error in Path A workflows and a completed run in Path B
-   workflows. The comparison workflow is the intended place to see both
-   behaviors next to each other.
+1. Rule workflows are read-only with respect to clustering, labeling, and
+   selection state.
+2. Rule cards explain current SSDBCODI output; decision trees do not replace
+   `ClusterResult`, `OutlierResult`, or `SsdbcodiResult`.
+3. DeepSeek interpretation must cite rule evidence and use only known feature
+   names, thresholds, point ids, cluster ids, and anomaly ids.
+4. Each category view must explain what that category examines before showing
+   recommendations.
+5. Main guidance should prioritize label targets, suspicion reasons, and
+   point-level label guidance in ordinary labeling language; quantitative
+   findings belong in audit details.
+6. If a category has no related candidate points, the page must show a clear
+   "no typical case" state instead of inventing a recommendation.
+7. Integrated dashboard pages must expose whether DeepSeek V4 Pro was actually
+   used or whether deterministic fallback guidance is being displayed.
+8. Rule quality warnings should be visible when coverage or purity is low.
 
 ## Ordering Rule
 

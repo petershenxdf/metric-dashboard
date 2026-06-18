@@ -95,9 +95,9 @@ python run.py
 After `python run.py`, manually inspect the relevant pages:
 
 ```text
-http://127.0.0.1:5000/
-http://127.0.0.1:5000/modules/
-http://127.0.0.1:5000/modules/<module_name>/
+http://127.0.0.1:5001/
+http://127.0.0.1:5001/modules/
+http://127.0.0.1:5001/modules/<module_name>/
 ```
 
 ## 5. Build Order
@@ -470,7 +470,7 @@ Open `/workflows/analysis-labeling/` and confirm:
 
 Completion:
 
-Manual labels can be created from selected points and inspected in Flask before chatbox or metric learning exists.
+Manual labels can be created from selected points and inspected in Flask before chatbox or rule interpretation exists.
 
 ---
 
@@ -572,8 +572,8 @@ Current implementation:
 4. Uses existing `selection` and `labeling` stores scoped per dataset.
 5. Pending labels are separate from Run & Store: `POST /api/label` saves
    feedback; `POST /api/run` recomputes and persists results.
-6. Per-point scores persisted in `SsdbcodiStore` for downstream metric-learning
-   consumption.
+6. Per-point scores persisted in `SsdbcodiStore` for rule-panel diagnostics
+   and LLM evidence.
 7. Output schemas reuse `ClusterResult` / `OutlierResult` from shared schemas.
 8. The `SsdbcodiProvider` implements the `AnalysisProvider` protocol and backs
    `algorithm_adapters.run_default_analysis()` by default.
@@ -585,7 +585,7 @@ Provider boundary:
 - `algorithm_adapters` already defines the `AnalysisProvider` protocol.
 - The default provider is `SsdbcodiProvider`; `SequentialLofThenKMeansProvider`
   remains as an explicit legacy provider for comparison.
-- All downstream code (scatterplot, workflows, metric-learning) continues to
+- All downstream code (scatterplot, workflows, rule panel) continues to
   work because the output schemas are unchanged.
 
 ---
@@ -620,7 +620,7 @@ Tasks:
 2. Display current selection context and selection groups.
 3. Display recent manual label context when available.
 4. Display the current `StructuredInstruction` panel (read from intent instruction).
-5. Display suggestion chips derived from dataset context. Chips for `split_cluster` and `reclassify_outlier` remain visible, but should be marked as Path B-only downstream intents instead of hidden.
+5. Display suggestion chips derived from dataset context. Chips for `split_cluster` and `reclassify_outlier` remain visible for legacy coverage, but should not imply that old branching update strategies are still the active roadmap.
 6. Submit user message with a truncated history window (default last 3 turns) plus context.
 7. Show assistant response including router category.
 8. Add `/modules/chatbox/`.
@@ -636,7 +636,7 @@ Unit tests:
 5. History window is truncated to the configured N turns.
 6. Chatbox does not call clustering or outlier detection.
 7. Chatbox does not mutate selection, labeling, or structured instruction state.
-8. Suggestion chips include both shared intents and Path B-only downstream intents.
+8. Suggestion chips include the legacy full feedback vocabulary.
 
 Flask visual check:
 
@@ -667,7 +667,10 @@ chat-intent workflow page
 
 Why:
 
-User language must become structured instructions before metric learning is touched. The module must be robust to off-topic, ambiguous, and partial messages.
+This legacy module turns user language into structured instructions and remains
+useful as provider/runtime infrastructure. The active product direction no
+longer feeds these instructions into an update path; it uses DeepSeek
+to explain generated rule cards.
 
 Tasks:
 
@@ -677,7 +680,7 @@ Tasks:
 4. Define the JSON-schema-shaped delta contract that future real providers must satisfy.
 5. Resolve group references (`selected_points`, `selection_group`, `cluster`, `outlier_set`, `point_id`).
 6. Generate clarification prompts for ambiguous messages. Keep `partial` reserved in the shared schema surface for Step 8.5 draft accumulation and follow-up prompting.
-7. Emit all eight Phase 1 intents: `feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`, `split_cluster`, `reclassify_outlier`. Path-specific acceptance is enforced downstream by the adapters, not by the extractor.
+7. Emit all eight Phase 1 intents: `feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`, `split_cluster`, `reclassify_outlier`. This remains legacy compiler coverage; the active roadmap no longer expands these intents into old update-strategy adapters.
 8. Forward only the last N turns (default 3) plus the current instruction snapshot to the backend, not full chat history.
 9. Add `/modules/intent-instruction/` with route, compile, state, reset, and examples APIs.
 10. Add `/workflows/chat-intent/`.
@@ -690,7 +693,7 @@ Current implementation:
 4. `StructuredInstruction` is owned by intent_instruction; the `InstructionSnapshot` view shared with chatbox was promoted to `app/shared/schemas.py` so both modules consume it without layering violations.
 5. `DatasetContext` bundles dataset_id, feature_names, cluster_ids, selection_group_names, and selected/unselected point ids so the router and extractor can resolve references like "these points" or "cluster 2" deterministically.
 6. The extractor emits `InstructionDelta`s whose operations carry a `pending` constraint_id placeholder; the service rewrites them to real IDs (`c1`, `c2`, ...) inside `apply_delta` and advances the version counter in `IntentInstructionStore`.
-7. Off-topic, meta-query, and ambiguous messages do not mutate state. Actionable messages produce a delta, advance the version, and return the resulting `ChatResponse`. Path B-only intents (`split_cluster`, `reclassify_outlier`) are compiled here without forcing a path decision; adapters handle acceptance later.
+7. Off-topic, meta-query, and ambiguous messages do not mutate state. Actionable messages produce a delta, advance the version, and return the resulting `ChatResponse`. `split_cluster` and `reclassify_outlier` remain supported as legacy intent outputs but do not define the next build direction.
 8. `/modules/intent-instruction/` exposes `/health`, `/api/route`, `/api/compile`, `/api/state`, `/api/reset`, and `/api/examples`. `/workflows/chat-intent/` wires the real `intent_instruction` module boundary into a chatbox shell so the structured instruction state can be observed across multiple turns while the backend is still deterministic.
 
 Unit tests (router):
@@ -743,11 +746,12 @@ evaluation suite + provider diagnostics
 Why:
 
 Step 8 proves the compiler boundary, but it still uses a deterministic mock
-backend. Before Step 9 consumes chat-derived instructions, the project needs a
-real-model gate that validates wording robustness, memory, relevance filtering,
-partial-information accumulation, SSDBCODI-aware planning, and schema-valid
-structured output. At this stage the model can suggest and explain label or
-selection ideas, but only manual UI controls mutate labeling and selection.
+backend. The project needs a real-model gate that validates wording robustness,
+memory, relevance filtering, partial-information accumulation,
+SSDBCODI-aware planning, and schema-valid structured output. This provider
+foundation is reused by the new rule-interpretation workflow. At this stage the
+model can suggest and explain label or selection ideas, but only manual UI
+controls mutate labeling and selection.
 
 Tasks:
 
@@ -762,7 +766,7 @@ Tasks:
 9. Promote incomplete multi-turn feedback to final `StructuredInstruction` state only when the required fields are present; otherwise keep it in draft form.
 10. Add `/workflows/intent-runtime-validation/` as a composite visual lab: real scatterplot, real selection/labeling context, SSDBCODI scores/seeds/diagnostics, chat intake, provider/model controls, memory panels, draft state, final structured output, and evaluation diagnostics on one page.
 11. Define replayable evaluation packs for paraphrases, meta-queries, irrelevant turns, partial completion, multi-turn memory, contradiction/correction, visual grounding, state drift, and provider timeout/failure.
-12. Record explicit pass/fail gates that must be satisfied before Step 9 starts.
+12. Record explicit pass/fail gates that must be satisfied before rule interpretation starts.
 
 Current design status:
 
@@ -801,330 +805,302 @@ Open `/workflows/intent-runtime-validation/` and confirm:
 
 Completion:
 
-Step 9 does not begin until a real-model runtime is wired through
-`LlmProvider`, the default DeepSeek V4 Pro path works, and the validation gates
-for intent robustness, memory, structured extraction, SSDBCODI grounding, and UI
-clarity all pass. The next gate after this is a reviewable AI label/selection
-suggestion workflow before automatic refinement is enabled.
+Rule interpretation should not begin until a real-model runtime is wired
+through `LlmProvider`, the default DeepSeek V4 Pro path works, and the
+validation gates for provider health, memory, structured extraction, SSDBCODI
+grounding, and UI clarity all pass. The next product surface after this gate is
+the read-only rule panel, not automatic updates.
 
 ---
 
-### Step 9A: Metric-Learning Adapter (Path A)
+### Step 8.6: Rule Panel
 
 Build:
 
 ```text
-metric_learning_adapter
-constraint_builder (pure)
-MetricLearnerProvider protocol (IdentityProvider, ItmlProvider)
-constraint preview Flask page
+rule_panel
+decision-tree surrogate rule generator
+rule cards for clusters and anomalies
+rule-panel validation workflow
 ```
 
 Why:
 
-Path A turns structured feedback into a learned Mahalanobis metric. Pair constraints from labeling and chat are collected in a single `ConstraintSet`, fed to ITML, and the resulting `L = chol(M)` is applied as a linear pre-transform to the feature matrix so projection and algorithm adapters can be reused unchanged. When SSDBCODI is the active provider, its per-point `tScore` values are available as auxiliary signal for constraint weighting.
+The project direction after Step 8.5 is rule explanation. The next product
+surface should explain the current SSDBCODI output. A shallow decision-tree
+surrogate can turn SSDBCODI cluster and anomaly assignments into
+human-readable feature-threshold rules while leaving the original clustering
+and anomaly provider unchanged. The decision tree is only a rule extractor; it
+does not perform clustering or outlier/anomaly detection.
 
 Tasks:
 
-1. Build `constraint_builder` as a pure function module:
-   - Labeling `assign_cluster` annotations become intra-label must-link pairs.
-   - `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point` become sampled pair constraints (bounded by `max_pairs_per_intent`, default 50).
-   - `feature_weight` populates a `feature_scale` dict, not pair lists.
-   - `ignore_cluster` excludes that cluster from all pair generation.
-   - `split_cluster` and `reclassify_outlier` are rejected with `intent_deferred` and a `suggested_strategy: "direct_ssdbcodi"` hint pointing to Path B.
-   - Detect conflicting must-link / cannot-link pairs and report them.
-2. Define `MetricLearnerProvider` protocol and implement:
-   - `IdentityProvider` - returns `M = I`, used for cold start or empty constraints.
-   - `ItmlProvider` - wraps `metric-learn` ITML, accepts must-link / cannot-link pairs and `feature_scale` via pre-scaling of `X`.
-3. Output a `LearnedMetric` containing `M`, `L = chol(M)`, provider name, constraint count, diagnostics.
-4. Applying the metric is a linear pre-transform: `X' = X · L` (with `feature_scale` folded in).
-5. Add `/modules/metric-learning-adapter/` with `constraints`, `fit`, and `providers` APIs.
-6. Show instruction input, annotation input, `ConstraintSet`, and learned `M` preview.
-7. Add `/workflows/instruction-constraints/` to show the full Path A constraint preview with real selection and labeling state.
+1. Create `app/modules/rule_panel/`.
+2. Read the existing dataset, feature matrix, SSDBCODI cluster result, anomaly
+   result, point scores, and optional labeling state through existing module
+   contracts.
+3. Train deterministic shallow decision-tree surrogates using SSDBCODI output
+   as fixed targets:
+   - one multi-class or one-vs-rest tree for SSDBCODI cluster labels,
+   - one binary tree for SSDBCODI anomaly-vs-normal flags when anomalies exist.
+4. Convert tree paths into rule cards with:
+   - target kind (`cluster` or `anomaly`),
+   - target id,
+   - raw dataset feature-threshold conditions,
+   - support count,
+   - coverage,
+   - purity,
+   - matched point ids,
+   - exception point ids.
+5. Use the uploaded `wine.mat` file as the default Step 8.6 visual and test
+   dataset, with rule conditions shown as raw wine features such as `alcohol`
+   and `proline`, not projected `x/y` coordinates.
+6. Add `/modules/rule-panel/` with rules, config, and health APIs.
+7. Add `/workflows/rule-panel-validation/` to show scatterplot, SSDBCODI
+   diagnostics, and generated rule cards together.
+8. Keep the rule panel read-only. It does not mutate selection, labeling,
+   SSDBCODI output, or projection.
 
 Unit tests:
 
-1. `group_similar` produces must-link pairs bounded by sampling cap.
-2. `group_dissimilar` produces cannot-link pairs.
-3. `merge_clusters` produces cross-cluster must-link pairs.
-4. `feature_weight` populates `feature_scale`, not pair lists.
-5. `anchor_point` produces must-link pairs from anchor to every target.
-6. `ignore_cluster` excludes that cluster's points.
-7. `split_cluster` and `reclassify_outlier` return `intent_deferred` with a Path B hint.
-8. Conflicting must-link/cannot-link pairs are reported.
-9. Labeling `assign_cluster` annotations merge with chat-derived constraints into the same `ConstraintSet`.
-10. `IdentityProvider.fit` returns `M = I`.
-11. `ItmlProvider.fit` with similar pairs reduces their distance under the learned metric.
+1. Rules are generated for every fixture cluster when enough points exist.
+2. Anomaly rules are generated when outlier flags exist.
+3. Rule conditions reference only known raw feature names from the source data.
+4. Matched point ids satisfy every rule condition.
+5. Coverage and purity are deterministic for fixed input.
+6. Low-purity rules expose exception point ids.
+7. Invalid tree config returns a consistent error.
 
 Flask visual check:
 
-Open `/modules/metric-learning-adapter/` and confirm:
+Open `/modules/rule-panel/` and confirm:
 
-1. sample instruction plus sample annotations produce a visible `ConstraintSet` with pair count and conflict list.
-2. the active provider is visible and switchable.
-3. fit produces a visible `M` preview and transformed feature matrix preview.
-4. a `split_cluster` instruction produces a clear "intent deferred" error that names Path B.
+1. one rule-card group appears for each current cluster,
+2. anomaly rules appear when current outliers exist,
+3. every rule card shows thresholds, support, coverage, purity, matched points,
+   and exceptions,
+4. changing tree depth or minimum leaf size changes rule complexity,
+5. the page clearly says rules are explanations of current output, not new
+   cluster truth.
+6. the page shows `wine_mat`, the raw wine feature list, feature usage, and rule
+   warning summaries.
 
 Completion:
 
-Path A feedback compilation can be inspected before the refinement loop, and the learned metric is usable as a pre-transform by projection and algorithm adapters.
+Rule cards explain the current SSDBCODI output in the browser without changing
+or replacing the clustering or anomaly state.
 
 ---
 
-### Step 9B: Direct Feedback Adapter (Path B)
+### Step 8.7: Rule Interpretation with DeepSeek
 
 Build:
 
 ```text
-direct_feedback_adapter
-plan_builder (pure)
-DirectFeedbackPlan schema
-direct feedback preview Flask page
+rule interpretation provider payload
+DeepSeek rule parser
+categorized label-guidance output
+rule interpretation workflow
 ```
 
 Why:
 
-Path B turns the same structured feedback into SSDBCODI-native inputs instead of a metric. SSDBCODI is semi-supervised and accepts seeds, `n_clusters`, contamination, and feature scales directly, so feedback can drive the algorithm without learning a Mahalanobis metric. Keeping Path B as its own adapter (and its own orchestrator in Step 10B) makes each strategy independently testable and keeps their error codes and debug pages clean.
+DeepSeek's new job is to interpret generated rules rather than parse free-form
+feedback into update instructions. The model should classify each
+interpretation into an auditable label/refinement category, cite evidence from
+the rule cards, and recommend what the user should label next.
 
 Tasks:
 
-1. Build `plan_builder` as a pure function module that compiles `StructuredInstruction` plus labeling annotations into a `DirectFeedbackPlan` (seed updates, `feature_scale`, `param_overrides`, `excluded_clusters`, `merged_cluster_groups`).
-2. Intent-to-plan mapping:
-   - `feature_weight` → `feature_scale` entry.
-   - `group_similar` → seed updates with a shared `cluster_id`.
-   - `group_dissimilar` → seed updates with distinct `cluster_id` values.
-   - `merge_clusters` → `merged_cluster_groups` entry and relabeled seeds.
-   - `anchor_point` → single seed update for the anchor.
-   - `ignore_cluster` → add to `excluded_clusters`.
-   - `split_cluster` → increment `param_overrides.n_clusters` and add interior seeds (Path B-native, not deferred).
-   - `reclassify_outlier` → seed update with `is_outlier: true`/`false` (Path B-native, not deferred).
-3. Labeling annotations override conflicting chat-derived seeds on the same point.
-4. Detect conflicts (point assigned to two clusters, point assigned and marked outlier, excluded cluster that is also referenced elsewhere, etc.).
-5. Add `/modules/direct-feedback-adapter/` with `plan` and `preview` APIs.
-6. Add `/workflows/instruction-ssdbcodi/` to show the full Path B plan preview with real selection and labeling state.
+1. Reuse the existing DeepSeek provider configuration from Step 8.5.
+2. Build a rule-interpretation request payload from `RuleSet`, SSDBCODI score
+   summaries, feature names, current cluster/anomaly ids, computed
+   `rule_guidance_metrics`, and `label_candidate_point_profiles`.
+3. Compute rule metrics before the prompt: support, coverage, purity,
+   exception rate, pair intersection count, pair Jaccard overlap, overlap
+   shares, shared features, boundary gaps, and candidate point ids.
+4. Require the model to classify output into one or more categories:
+   - `label_priority`
+   - `boundary_review`
+   - `overlap_merge_signal`
+   - `split_or_new_cluster_signal`
+   - `anomaly_label_review`
+   - `exception_relabel_review`
+   - `feature_label_strategy`
+   - `rule_confidence_audit`
+5. Require `category_explanation`, `label_targets`, `suspicion_reasons`,
+   `point_label_guidance`, `recommendation`, `quantitative_findings`, and
+   `suggested_label_actions`.
+6. Require evidence and action references to existing rule ids, features,
+   thresholds, target ids, and point ids.
+7. Validate that no unknown feature, threshold, cluster, anomaly, point id,
+   rule id, action reference, or category appears in the parsed output.
+8. Add `/modules/rule-panel/api/interpret` or a dedicated
+   `/modules/rule-panel/api/interpretation` endpoint.
+9. Add `/workflows/rule-interpretation/` to show rule cards beside categorized
+   DeepSeek output.
 
 Unit tests:
 
-1. `feature_weight` populates `feature_scale`, not seeds.
-2. `group_similar` produces `seed_updates` with a shared `cluster_id`.
-3. `group_dissimilar` produces `seed_updates` with distinct `cluster_id`s.
-4. `merge_clusters` produces a `merged_cluster_groups` entry and relabels seeds.
-5. `anchor_point` produces a single seed update for the anchor.
-6. `ignore_cluster` adds the cluster to `excluded_clusters`.
-7. `split_cluster` increments `n_clusters` in `param_overrides` and adds interior seeds.
-8. `reclassify_outlier` produces a seed update with the correct `is_outlier` flag.
-9. Labeling `assign_cluster` annotations override conflicting chat-derived seeds on the same point.
-10. Contradictory assignments are reported in `conflicts`.
+1. Valid model output is parsed into a `RuleInterpretation`.
+2. Unknown categories are rejected.
+3. Evidence referencing an unknown rule id is rejected.
+4. Evidence referencing an unknown feature or point id is rejected.
+5. Action guidance missing `recommendation`, `quantitative_findings`, or
+   `suggested_label_actions` is rejected.
+6. Mocked provider output can produce every interpretation category.
+7. Provider errors return diagnostics without changing the `RuleSet`.
 
 Flask visual check:
 
-Open `/modules/direct-feedback-adapter/` and confirm:
+Open `/workflows/rule-interpretation/` and confirm:
 
-1. sample instruction plus sample annotations produce a visible `DirectFeedbackPlan`.
-2. a `split_cluster` instruction is accepted (no `intent_deferred` error) and shows up in `param_overrides`.
-3. a `reclassify_outlier` instruction appears as an outlier seed update.
-4. contradictory seed assignments are listed in the conflicts panel.
+1. rule cards are visible before interpretation,
+2. interpretation categories are shown as focus cards with one-sentence
+   explanations,
+3. the main panel answers "which points to label", "why these points need
+   checking", and "how to label them",
+4. every interpretation cites rule evidence and quantitative findings in audit
+   details,
+5. warnings are shown when rules are broad, low-purity, contradictory, or have
+   no sample-level overlap for merge review.
 
 Completion:
 
-Path B feedback compilation can be inspected before the refinement loop, and all Phase 1 intents (including `split_cluster` and `reclassify_outlier`) produce valid plans.
+DeepSeek can turn generated rules into categorized, grounded label/refinement
+recommendations without owning or changing any dashboard state.
+
+Current status:
+
+Working. `/workflows/rule-interpretation/` shows wine rule cards beside
+categorized recommendations. The primary UI is a three-part label guidance
+panel: label targets, suspicion reasons, and point-level label guidance. Audit
+details still expose quantitative findings, suggested label actions, evidence,
+request payload, and provider diagnostics.
+`/modules/rule-panel/api/interpretation` exposes the same auditable contract.
+The workflow includes one button per interpretation category; clicking a
+category sends `focus_category` into the provider payload and returns a focused
+label/refinement recommendation for that category. The local default is
+deterministic `mock`; `provider_kind=deepseek` uses DeepSeek V4 Pro
+(`deepseek-v4-pro`) with thinking enabled and `reasoning_effort=high`, using
+the prompt at `prompts/rule_interpretation/deepseek/label_guidance_prompt.txt`.
+Provider fallback never mutates the `RuleSet`.
 
 ---
 
-### Step 10A: Metric Refinement Orchestrator (Path A)
+### Step 8.8: Integrated Rule Dashboard
 
 Build:
 
 ```text
-metric_refinement_orchestrator
-Path A refinement history + rollback
-Path A refinement timeline Flask page
+integrated rule dashboard
+scatterplot + SSDBCODI diagnostics + rule panel + rule interpretation
 ```
 
-Why:
-
-Path A's orchestrator coordinates modules for the metric-learning update strategy but should not contain their internal logic. It also records each run so users can inspect and revert changes. Keeping this separate from the Path B orchestrator keeps each strategy's step list, error codes, and history easy to debug.
-
-Tasks:
-
-1. Accept a refinement trigger with `strategy: "metric_learning"` from labeling, intent instruction, or a manual refine button.
-2. Call `metric_learning_adapter.build_constraints`, then `fit`.
-3. Apply the returned `L` to the feature matrix.
-4. Trigger updated projection on the transformed matrix.
-5. Rerun clustering and outlier detection through algorithm adapters on the transformed matrix.
-6. Record each completed run (constraints, learned metric, downstream run IDs, instruction version) in this orchestrator's own history.
-7. Support rollback to a prior run.
-8. Reject triggers that contain `split_cluster` or `reclassify_outlier` intents with a clear `intent_deferred` error and a pointer to Path B.
-9. Add `/modules/metric-refinement-orchestrator/` with run, history, rollback, and reset APIs.
-10. Add `/workflows/metric-refinement-loop/`.
-
-Unit tests:
-
-1. Actionable instruction triggers the flow in the expected step order.
-2. Empty instruction plus empty annotations produces an identity-metric run (no-op visible as a run).
-3. `split_cluster` / `reclassify_outlier` intent returns `intent_deferred` with a Path B suggestion before metric fit.
-4. Metric-fit failure returns diagnostics and leaves prior active run untouched.
-5. Projection failure returns diagnostics and preserves prior run.
-6. History is appended only on success.
-7. Rollback restores a prior run without recomputation.
-8. Path A reset clears only Path A history.
-
-Flask visual check:
-
-Open `/modules/metric-refinement-orchestrator/` and confirm:
-
-1. timeline shows each step.
-2. intermediate payloads (constraint set, metric metadata) are visible.
-3. failure and success states are understandable.
-4. history list shows prior runs and offers rollback buttons.
-5. deferred-intent errors name the intent clearly and suggest Path B.
-
-Completion:
-
-The Path A update loop can be debugged visually, and every successful Path A run is reversible before full dashboard integration.
-
----
-
-### Step 10B: Direct Refinement Orchestrator (Path B)
-
-Build:
+Current Step 8.8 integration surface:
 
 ```text
-direct_refinement_orchestrator
-Path B refinement history + rollback
-Path B refinement timeline Flask page
+/workflows/wine-dashboard/
 ```
+
+This working workflow uses the uploaded `wine.mat` dataset and composes Data
+Workspace, Projection, Algorithm Adapters/SSDBCODI, Selection, Labeling,
+Scatterplot, Rule Panel, and DeepSeek-ready rule interpretation. The existing
+chatbox UI is intentionally excluded.
 
 Why:
 
-Path B's orchestrator coordinates a different update sequence: `direct_feedback_adapter` builds a plan, `feature_scale` is applied as `X' = X · S`, SSDBCODI re-runs with merged seeds and param overrides, and projection is rerun only when feature geometry changed. The two orchestrators are intentionally separate so each strategy has its own step list, own history, and own debug surface.
+Only integrate after rule generation and rule interpretation are visible in
+their own pages. The integrated dashboard should keep the same module-first
+discipline: it composes outputs, it does not hide logic inside the shell.
 
 Tasks:
 
-1. Accept a refinement trigger with `strategy: "direct_ssdbcodi"` from labeling, intent instruction, or a manual direct-refine button.
-2. Call `direct_feedback_adapter.build_plan` to produce a `DirectFeedbackPlan`.
-3. Apply `feature_scale` (diagonal pre-scale) to the feature matrix when present.
-4. Merge `seed_updates` with existing bootstrap seeds and labeling outlier overrides.
-5. Call `algorithm_adapters.run_default_analysis` with the merged seeds and `param_overrides` so SSDBCODI re-runs with the new configuration.
-6. Trigger an updated projection on the transformed matrix when `feature_scale` changed; reuse projection when only seeds or `n_clusters` changed.
-7. Record each completed run in this orchestrator's own history.
-8. Support rollback to a prior Path B run.
-9. Add `/modules/direct-refinement-orchestrator/` with run, history, rollback, and reset APIs.
-10. Add `/workflows/direct-refinement-loop/`.
-
-Unit tests:
-
-1. Actionable instruction triggers the Path B step order.
-2. `split_cluster` intent produces a plan with `n_clusters += 1` and new seeds; the run completes without an `intent_deferred` error.
-3. `reclassify_outlier` intent flips the point's outlier state on the downstream analysis output.
-4. `feature_weight` intent populates `feature_scale` and the feature matrix is pre-scaled before SSDBCODI.
-5. Seeds from `anchor_point` intent are merged with bootstrap seeds.
-6. `ignore_cluster` intent removes that cluster's seeds from the merged set for this run.
-7. `merge_clusters` intent relabels seeds of the absorbed cluster(s).
-8. Projection is reused when only seed updates change and feature geometry is unchanged.
-9. SSDBCODI run failure returns diagnostics and preserves prior run.
-10. History is appended only on success.
-11. Rollback restores a prior Path B run without recomputation.
-12. Path B reset clears only Path B history.
-
-Flask visual check:
-
-Open `/modules/direct-refinement-orchestrator/` and confirm:
-
-1. timeline shows the Path B step list with `plan_build`, `feature_scale`, `ssdbcodi_run`, `projection`, `effective_analysis`.
-2. `DirectFeedbackPlan` preview is visible (seed updates, feature_scale, param overrides).
-3. a `split_cluster` instruction produces a visible new cluster on the downstream analysis.
-4. a `reclassify_outlier` instruction flips the target point's outlier state.
-5. history list shows prior Path B runs and offers rollback buttons.
-
-Completion:
-
-The Path B update loop can be debugged visually, and `split_cluster` / `reclassify_outlier` produce visible changes to the analysis state without `intent_deferred` errors.
-
----
-
-### Step 11: Strategy Comparison
-
-Build:
-
-```text
-/workflows/strategy-comparison/
-read-only comparison between Path A and Path B runs on the same feedback snapshot
-```
-
-Why:
-
-Path A and Path B use the same structured feedback but different update mechanisms. The comparison workflow runs the same feedback through both orchestrators and renders their outputs side-by-side so the two strategies can be evaluated on the same data.
-
-Tasks:
-
-1. Snapshot current `StructuredInstruction` and labeling annotations.
-2. Call `metric_refinement_orchestrator.run(strategy="metric_learning")` and `direct_refinement_orchestrator.run(strategy="direct_ssdbcodi")` on the snapshot.
-3. Render both results on one page: two SVG plots side-by-side, two cluster/outlier tables, and key differences (e.g., which points changed cluster, which were reclassified as outliers).
-4. Surface each run's timeline and any `intent_deferred` errors from Path A (so it's clear which intents Path B absorbed).
-5. Do not own refinement history; read from both orchestrators' histories.
-
-Unit tests:
-
-1. Comparison endpoint runs both orchestrators and returns both timelines.
-2. When the feedback contains `split_cluster`, Path A run reports `intent_deferred` and Path B run reports a new cluster.
-3. Comparison payload includes per-point diff summary between the two outputs.
-
-Flask visual check:
-
-Open `/workflows/strategy-comparison/` and confirm:
-
-1. both plots render using the same projection axes for fair visual comparison.
-2. per-point diff table highlights points whose cluster assignment or outlier flag differs between the two paths.
-3. Path A errors are clearly labeled rather than silently omitted.
-
-Completion:
-
-Developers can run the same feedback through both update strategies on one page and see which points differ between Path A and Path B.
-
----
-
-### Step 12: Integrated Dashboard
-
-Build:
-
-```text
-integrated dashboard
-```
-
-Why:
-
-Only integrate after individual modules and workflow demos work.
-
-Tasks:
-
-1. Compose data, projection, adapters, selection, labeling, scatterplot, chatbox, intent, both Path A and Path B adapters, both orchestrators, and the strategy comparison workflow.
-2. Keep dashboard shell thin.
-3. Show current state clearly.
-4. Make refinement loop visible, including the active strategy.
+1. Compose the existing scatterplot, SSDBCODI diagnostics, generated rules, and
+   rule interpretation preview on `/workflows/wine-dashboard/`.
+2. Keep the dashboard shell thin; generated data should come from rule-panel
+   and existing module APIs.
+3. Let the user inspect a cluster or anomaly in the plot and see the matching
+   rule card and interpretation.
+4. Surface rule quality warnings clearly.
+5. Keep direct label/selection controls explicit and manual.
+6. Do not add an update-strategy toggle.
 
 Unit tests:
 
 1. Integrated route returns 200.
-2. APIs return coherent state.
-3. Irrelevant chat does not trigger refinement.
-4. Actionable chat under `metric_learning` strategy triggers Path A flow.
-5. Actionable chat under `direct_ssdbcodi` strategy triggers Path B flow.
+2. Integrated state includes render payload, SSDBCODI diagnostics, `RuleSet`,
+   and latest `RuleInterpretation`.
+3. Rule-panel provider failures do not break base scatterplot rendering.
+4. LLM interpretation failures surface diagnostics without hiding rule cards.
 
 Flask visual check:
 
-Open `/` and confirm:
+Open `/workflows/wine-dashboard/` and confirm:
 
-1. scatterplot appears.
-2. selecting points updates selection and chatbox context.
-3. direct label actions create structured feedback.
-4. chat instruction produces structured output.
-5. switching the strategy toggle routes the next refinement to the matching orchestrator.
-6. valid instruction updates the visible state.
+1. scatterplot appears,
+2. each cluster has a visible rule summary,
+3. anomalies have separate rule summaries,
+4. selection and labeling controls update the effective SSDBCODI-facing state,
+5. rule conditions use raw wine feature names, not projected coordinates,
+6. the page has no chatbox surface.
 
 Completion:
 
-The first complete local human-in-the-loop workflow works in Flask, with both update strategies independently exercisable and comparable.
+The dashboard explains current clusters and anomalies through rule cards and
+categorized LLM interpretation, without claiming that the LLM changed the
+underlying analysis.
+
+Current status:
+
+Working through `/workflows/wine-dashboard/`. The page is now the Step 8.8
+integrated rule dashboard: it composes wine data, projection, SSDBCODI,
+selection, labeling, scatterplot rendering, decision-tree rule cards, and
+rule interpretation. The route accepts `provider_kind=deepseek|mock` and
+`focus_category=<category>`. By default it follows `.env` provider settings;
+with the current DeepSeek configuration it attempts `deepseek-v4-pro` and
+shows provider diagnostics, model name, and fallback status directly on the
+page. Tests use `provider_kind=mock` so automated checks do not consume
+DeepSeek tokens.
+
+DeepSeek token usage does not guarantee that usable JSON was returned. The
+provider now records missing-content and malformed-JSON response metadata
+(`finish_reason`, message keys, usage, and attempt errors), and the rule
+interpreter retries once with the same `deepseek-v4-pro` model in direct JSON
+mode if the initial thinking JSON call spends tokens but produces no valid
+final JSON.
+
+The Rule Interpretation panel is category-first. It shows one selectable
+category control per interpretation category; the integrated dashboard defaults
+to `label_priority` rather than a broad overview request. Each category either presents
+concrete candidate points or an explicit "no typical case" state. The
+user-facing guidance must be plain-language labeling advice: which wine ids to
+label, why those points are suspicious or strategically useful in human terms,
+and how each likely label outcome would affect merge, boundary,
+split/new-cluster, anomaly, or rule-audit decisions. Quantitative metrics stay
+available as audit evidence but should not be the main explanation.
+Recommended point ids must be linked back to the scatterplot through visual
+halos and interactive chips, so users can locate the exact wines without
+manually searching the plot. This locate interaction is temporary visual focus
+only and must not mutate selection or labels. User-facing terminology should
+stay consistent: `outlier score`, `current analysis`, `human label`, and
+`cutoff` are preferred over mixed expert terms.
+
+Selection is a lightweight interaction. Clicking or rectangle-selecting points
+must call only the selection API and update the scatterplot/selected-count UI
+in place; it must not reload the whole dashboard or trigger rule
+interpretation/DeepSeek. Full dashboard recomputation is reserved for actions
+that change the analysis meaning, such as labels, rule parameters, category
+focus, or provider controls.
+
+---
+
+### Removed: Old Branching Roadmap
+
+The old post-Step-8.5 branching update roadmap is no longer the active build
+order. Do not implement those modules from this process document unless the
+roadmap is explicitly reopened. The current build order after Step 8.5 is only:
+`rule_panel`, rule interpretation, and the integrated rule dashboard.
 
 ## 6. What Not To Do Early
 
@@ -1192,7 +1168,9 @@ Working. Debug page at `/modules/ssdbcodi/` with three fixtures, selection and l
 
 Goal:
 
-Chatbox receives selection/label context and intent module outputs structured instructions.
+Legacy chatbox receives selection/label context and intent module outputs
+structured instructions. This remains implemented history, not the next build
+direction.
 
 ### Milestone 5.5: Real LLM Validation Gate
 
@@ -1201,29 +1179,60 @@ Goal:
 `/workflows/intent-runtime-validation/` proves a live provider runtime
 (default DeepSeek V4 Pro unless `.env` overrides it), SSDBCODI-grounded direct
 AI planning, structured memory, partial-information draft handling, and
-schema-valid structured output before reviewable suggestion UX and either Step
-9 path begins.
+schema-valid structured output. The provider/runtime foundation is reused for
+rule interpretation.
 
-### Milestone 6A: Path A Refinement Loop
-
-Goal:
-
-Structured instruction flows through `metric_learning_adapter` and `metric_refinement_orchestrator`, producing a learned metric, a retransformed feature matrix, and rerun projection + SSDBCODI output.
-
-### Milestone 6B: Path B Refinement Loop
+### Milestone 6: Rule Panel
 
 Goal:
 
-The same structured instruction flows through `direct_feedback_adapter` and `direct_refinement_orchestrator`, producing SSDBCODI-native input updates (seeds, `n_clusters`, feature scales, labeled outliers) and rerun SSDBCODI output. `split_cluster` and `reclassify_outlier` work end-to-end without `intent_deferred` errors.
+Current SSDBCODI clusters and anomalies are converted into decision-tree rule
+cards with feature thresholds, coverage, purity, matched points, and exception
+points.
 
-### Milestone 6.5: Strategy Comparison
+Current status:
+
+Working. `/modules/rule-panel/` generates explanation-only decision-tree rule
+cards from SSDBCODI outputs, and `/workflows/rule-panel-validation/` exposes the
+source analysis, rule cards, and deterministic interpretation preview together.
+The default visual/test dataset is `wine.mat`; rule conditions and diagnostics
+use raw wine feature names rather than projected coordinates.
+
+### Milestone 6.5: Rule Interpretation
 
 Goal:
 
-`/workflows/strategy-comparison/` runs both paths on the same feedback snapshot and renders their analysis outputs side-by-side with a per-point diff.
+DeepSeek parses generated rule cards into categorized label/refinement
+recommendations: `label_priority`, `boundary_review`,
+`overlap_merge_signal`, `split_or_new_cluster_signal`,
+`anomaly_label_review`, `exception_relabel_review`,
+`feature_label_strategy`, and `rule_confidence_audit`.
+
+Current status:
+
+Working through `/workflows/rule-interpretation/` and
+`/modules/rule-panel/api/interpretation`. Model output is validated against
+known categories, rule ids, raw wine features, thresholds, target ids, and point
+ids before it becomes a `RuleInterpretation`. Category buttons are implemented
+in Step 8.7 through the `focus_category` request path. The interpretation
+contract now requires a concrete recommendation, quantitative findings, and
+suggested label actions.
 
 ### Milestone 7: Integrated Dashboard
 
 Goal:
 
-The full local dashboard supports at least one complete refinement cycle under each strategy.
+The full local dashboard explains current clusters and anomalies through the
+scatterplot, SSDBCODI diagnostics, rule cards, and categorized rule
+interpretation.
+
+Current status:
+
+Working through `/workflows/wine-dashboard/` for Step 8.8. It uses `wine.mat`,
+excludes the chatbox UI, and combines data, projection, SSDBCODI, selection,
+labeling, scatterplot rendering, rule cards, and rule interpretation. The page
+can use deterministic `mock` for testing or `deepseek-v4-pro` from `.env` for
+live point-level guidance, and it shows fallback status explicitly.
+Scatterplot selection updates are client-local after the lightweight selection
+API returns, so basic point selection does not spend DeepSeek tokens or wait for
+rule interpretation.

@@ -48,12 +48,9 @@ For every module, use four testing levels:
 | 7 | `chatbox` | `/modules/chatbox/` | `/workflows/chat-selection/` |
 | 8 | `intent_instruction` | `/modules/intent-instruction/` | `/workflows/chat-intent/` |
 | 8.5 | `intent_instruction` live runtime validation | `/modules/intent-instruction/` | `/workflows/intent-runtime-validation/` |
-| 9A | `metric_learning_adapter` (Path A) | `/modules/metric-learning-adapter/` | `/workflows/instruction-constraints/` |
-| 9B | `direct_feedback_adapter` (Path B) | `/modules/direct-feedback-adapter/` | `/workflows/instruction-ssdbcodi/` |
-| 10A | `metric_refinement_orchestrator` (Path A) | `/modules/metric-refinement-orchestrator/` | `/workflows/metric-refinement-loop/` |
-| 10B | `direct_refinement_orchestrator` (Path B) | `/modules/direct-refinement-orchestrator/` | `/workflows/direct-refinement-loop/` |
-| 11 | strategy comparison | n/a | `/workflows/strategy-comparison/` |
-| 12 | integrated dashboard | `/` | full app |
+| 8.6 | `rule_panel` rule generation | `/modules/rule-panel/` | `/workflows/rule-panel-validation/` |
+| 8.7 | `rule_panel` interpretation | `/modules/rule-panel/` | `/workflows/rule-interpretation/` |
+| 8.8 | integrated rule dashboard | `/workflows/wine-dashboard/` | full app |
 
 Not every workflow needs to be polished. A workflow page can be simple and diagnostic as long as it shows the interaction clearly.
 
@@ -199,7 +196,7 @@ Expected behavior:
 
 ### Step 8.5 Real-Model Validation
 
-Expected behavior before Step 9 starts:
+Expected behavior before rule interpretation starts:
 
 1. `/workflows/intent-runtime-validation/` shows provider health, active
    runtime config, a real embedded scatterplot, real selection/label state,
@@ -227,7 +224,67 @@ Expected behavior before Step 9 starts:
     mutate labels or selections automatically.
 11. Evaluation packs are replayable so paraphrase, visual-grounding,
     partial-memory, state-drift, and provider failure cases can be rechecked
-    before Path A / Path B work proceeds.
+    before rule interpretation work proceeds.
+
+### Step 8.6 Rule Panel
+
+Expected behavior:
+
+1. `/modules/rule-panel/` can generate decision-tree surrogate rules from the
+   current feature matrix plus SSDBCODI cluster/anomaly assignments.
+2. `/workflows/rule-panel-validation/` shows scatterplot context, SSDBCODI
+   diagnostics, and generated rule cards together.
+3. Each rule card shows target kind, target id, feature-threshold conditions,
+   support count, coverage, purity, matched point ids, exception point ids, and
+   quality diagnostics.
+4. Cluster rules and anomaly rules are visually separated.
+5. Rule generation is deterministic for a fixed dataset, model config, and
+   SSDBCODI output.
+6. Low-purity, overbroad, or missing-rule cases surface warnings instead of
+   being hidden.
+7. The rule panel is read-only with respect to selection, labeling, projection,
+   and SSDBCODI state.
+8. Decision-tree output is treated only as explanatory rule evidence; it is not
+   accepted as a new cluster assignment or outlier-detection result.
+
+### Step 8.7 Rule Interpretation
+
+Expected behavior:
+
+1. `/workflows/rule-interpretation/` shows generated rule cards before any LLM
+   interpretation is requested.
+2. DeepSeek receives a compact `RuleSet` payload with rule ids, features,
+   thresholds, coverage, purity, matched points, exceptions, optional score
+   summaries, and `label_candidate_point_profiles`.
+3. Parsed interpretation output uses only allowed categories:
+   `label_priority`, `boundary_review`, `overlap_merge_signal`,
+   `split_or_new_cluster_signal`, `anomaly_label_review`,
+   `exception_relabel_review`, `feature_label_strategy`, and
+   `rule_confidence_audit`.
+4. Every interpretation includes `category_explanation`, `label_targets`,
+   `suspicion_reasons`, `point_label_guidance`, `recommendation`,
+   `quantitative_findings`, and `suggested_label_actions`.
+5. Every interpretation cites existing rule ids and known evidence. Unknown
+   features, thresholds, cluster ids, anomaly ids, point ids, or categories are
+   rejected or flagged.
+6. Provider failures show diagnostics but do not remove raw rule cards.
+7. LLM output never mutates clustering, anomaly, selection, or labeling state.
+
+### Step 8.8 Integrated Rule Dashboard
+
+Expected behavior:
+
+1. `/workflows/wine-dashboard/` renders the full `wine.mat` workflow: data,
+   projection, SSDBCODI, selection, labeling, scatterplot, rule cards, and rule
+   interpretation.
+2. The page accepts `provider_kind=mock|deepseek` and `focus_category`.
+3. The page displays provider label, model name when available, and whether
+   deterministic fallback guidance is being shown.
+4. State API includes scatterplot payload, selection, labeling, `RuleSet`,
+   `interpretation_preview`, `interpretation_request`, and
+   `interpretation_diagnostics`.
+5. Selection and labeling actions preserve the current interpreter settings.
+6. DeepSeek failures must not hide the scatterplot or rule cards.
 
 ## 4. Allowed Alternate Build Path
 
@@ -248,7 +305,7 @@ Rules for this alternate path:
 
 1. Chatbox must not call clustering.
 2. Chatbox must not call outlier detection.
-3. Chatbox must not call metric learning.
+3. Chatbox must not call rule generation or LLM interpretation.
 4. Intent module must output structured instructions only.
 5. Mock selection and label context must be clearly labeled in the Flask page.
 6. When the real selection and labeling modules exist, the mock context should be replaceable through a small boundary.
@@ -282,14 +339,13 @@ Examples:
 3. Scatterplot before algorithm adapters exist:
    - use mock cluster and outlier assignments.
 
-4. `metric_refinement_orchestrator` before real metric learning exists:
-   - use mock metric update output.
+4. `rule_panel` before live SSDBCODI state is available:
+   - use fixture `AnalysisResult` / `SsdbcodiResult` data and clearly label it
+     mocked.
 
-5. `direct_refinement_orchestrator` before the SSDBCODI rerun integration is wired:
-   - use mock `DirectFeedbackPlan` input and mock SSDBCODI re-run output.
-
-6. `strategy-comparison` workflow before either orchestrator is wired:
-   - stub one or both orchestrator runs with fixture outputs and clearly label them mocked.
+5. Rule interpretation before DeepSeek is available:
+   - use a mock interpretation provider that emits valid category/evidence
+     payloads and clearly label it mocked.
 
 ## 6. Workflow Page Standard
 

@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Run the app
 python run.py
-# App available at http://127.0.0.1:5000
+# App available at http://127.0.0.1:5001
 
 # Run all tests
 python -m unittest discover -s tests
@@ -22,7 +22,7 @@ python -m compileall app tests
 
 ## Architecture
 
-This is a local Flask dashboard for human-in-the-loop metric learning. The stack is pure Python + Flask + vanilla JS - no frontend framework, no production database.
+This is a local Flask dashboard for human-in-the-loop clustering and anomaly explanation. The stack is pure Python + Flask + vanilla JS - no frontend framework, no production database.
 
 ### App Factory
 
@@ -78,25 +78,25 @@ State is owned by exactly one module - other modules read through contracts, nev
 | ssdbcodi per-point intermediate scores (`rScore`, `lScore`, `simScore`, `tScore`) | `ssdbcodi` |
 | selected point IDs | `selection` |
 | manual annotations | `labeling` |
-| chat history | `chatbox` |
-| structured instructions (shared) | `intent_instruction` |
-| metric constraints (Path A) | `metric_learning_adapter` |
-| direct feedback plan / active `DirectFeedbackPlan` (Path B) | `direct_feedback_adapter` |
-| Path A refinement history (`metric_refinement_runs`) | `metric_refinement_orchestrator` |
-| Path B refinement history (`direct_refinement_runs`) | `direct_refinement_orchestrator` |
+| chat history | `chatbox` (legacy Step 7/8 intake surface) |
+| structured instructions / runtime memory | `intent_instruction` (legacy Step 8/8.5 foundation) |
+| generated cluster/anomaly rules (`RuleSet`) | `rule_panel` |
+| categorized rule interpretation (`RuleInterpretation`) | `rule_panel` |
 
-### Current Pipeline (implemented through Step 8 compiler boundary; Step 8.5 live runtime is planned)
+### Current Pipeline And Active Direction
 
 ```
 data_workspace -> projection -> algorithm_adapters -> selection -> labeling -> scatterplot
-                                                                            \-> chatbox (Step 7) -> intent_instruction (Step 8) -> Step 8.5 live runtime validation
+                                                                            \-> chatbox (legacy Step 7) -> intent_instruction (legacy Step 8/8.5 provider foundation)
+scatterplot + SSDBCODI outputs -> rule_panel (Step 8.6) -> DeepSeek rule interpretation (Step 8.7)
 ```
 
 - `algorithm_adapters`: defaults to `SsdbcodiProvider`, preserving the same dashboard-facing `ClusterResult`, `OutlierResult`, and `AnalysisResult` schemas. `SequentialLofThenKMeansProvider` remains as an explicit legacy provider.
 - `selection`: supports `select`/`deselect`/`replace`/`toggle`/`clear`, named selection groups (not semantic labels), sources include `point_click`, `rectangle`, `lasso`, `api`, `workflow_fixture`, `selection_group`.
 - `labeling`: converts selected points into `assign_cluster`, `assign_new_class`, `mark_outlier`, `mark_not_outlier` annotations -> structured feedback instructions.
 - `scatterplot`: builds a render payload from upstream state; does not own selection or label truth.
-- `chatbox`: reads selection/selection-groups/label context from their owning modules without mutating them, forwards messages through an `IntentProvider` protocol (Step 7 ships `MockIntentProvider`; Step 8 swaps in the real `intent_instruction` module boundary), and stays strategy-agnostic. The mock `StructuredInstruction` snapshot lives inside the provider, not chatbox.
+- `chatbox`: legacy Step 7/8 dialogue intake. It reads selection/selection-groups/label context from their owning modules without mutating them and forwards messages through an `IntentProvider` protocol. The active post-Step-8.5 product surface is `rule_panel`, not an expanded chat workflow.
+- `rule_panel`: planned next module. It reads current SSDBCODI cluster/anomaly outputs and feature data, generates decision-tree surrogate rules for explanation only, and asks DeepSeek to interpret those rules without changing analysis truth. The decision tree is not a clustering or outlier-detection provider.
 
 The main manual test page for the full Step 1-6 path is `/workflows/scatter-labeling/`. The Step 7 page is `/workflows/chat-selection/`.
 
@@ -108,8 +108,8 @@ The main manual test page for the full Step 1-6 path is `/workflows/scatter-labe
 - `IntentProvider` protocol decouples chatbox from the intent-compilation pipeline: `respond(payload) -> ChatResponse`, `current_snapshot(dataset_id)`, `reset(dataset_id)`. Step 8 (`intent_instruction`) now also satisfies the same protocol, so `/workflows/chat-intent/` swaps in the real provider without chatbox code changes while `/modules/chatbox/` keeps the mock for isolated testing.
 - `ChatMessagePayload` includes: the message, dataset_id, selection context (selected/unselected point IDs), selection groups, label context, and truncated history window (default last 3 turns).
 - `ChatResponse` includes: `reply`, `router_category`, optional `delta`, `current_instruction_version`, optional `intent_type`, optional followup question, and `provider_label`.
-- Step 7 is intentionally strategy-agnostic. Path choice begins later, when Step 9 adapters consume the compiled instruction state.
-- Suggestion chips for `split_cluster` and `reclassify_outlier` remain visible in Step 7, but are marked as Path B-only downstream intents rather than hidden.
+- Step 7 is intentionally strategy-agnostic and remains implemented history. Future product work should move to `rule_panel` instead of adding more chat-intake behavior.
+- Suggestion chips for `split_cluster` and `reclassify_outlier` remain visible in the legacy chat UI for historical coverage, but they are not part of the new rule-panel direction.
 - Debug page at `/modules/chatbox/`, workflow at `/workflows/chat-selection/`. See `docs/modules/chatbox/design.md`.
 
 ### Intent Instruction Module (Step 8)
@@ -121,43 +121,42 @@ The main manual test page for the full Step 1-6 path is `/workflows/scatter-labe
   - Inner `LlmProvider` (owned here): `route(message, context, history) -> RouterResult`, `extract(message, context, history, current_instruction) -> InstructionDelta`. `MockLlmProvider` is the only provider that ships in Step 8; Step 8.5 and later can add live local or cloud providers without touching chatbox.
   - Outer `IntentProvider` (chatbox boundary): `IntentInstructionProvider` is the adapter that satisfies it using the inner `LlmProvider`.
 - Router categories: `on_topic_actionable`, `on_topic_ambiguous`, `partial`, `meta_query`, `off_topic`. Current Step 8 behavior only routes `on_topic_actionable` into the extractor; `partial` remains reserved in the shared schema surface.
-- Phase 1 intents (8): shared (`feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`) + Path B-only downstream intents (`split_cluster`, `reclassify_outlier`). Step 8 emits all eight without choosing Path A vs Path B; adapters enforce final acceptance later.
+- Phase 1 intents (8): `feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`, `split_cluster`, `reclassify_outlier`. These remain useful for understanding legacy chat-feedback state, but the active roadmap no longer expands them into update adapters.
 - `StructuredInstruction` (full state, owned here) vs `InstructionSnapshot` (narrow cross-module view, in `app/shared/schemas.py`). The extractor emits `InstructionDelta`s whose `constraint_id` starts as `pending`; the service rewrites it to a real ID (`c1`, `c2`, ...) inside `apply_delta` and advances the version counter.
 - Off-topic, meta-query, and ambiguous messages never mutate state.
 - Debug page at `/modules/intent-instruction/` with `/health`, `/api/route`, `/api/compile`, `/api/state`, `/api/reset`, `/api/examples`. Workflow at `/workflows/chat-intent/`. See `docs/modules/intent_instruction/design.md`.
 
-### Planned Runtime Validation Gate (Step 8.5)
+### Runtime Validation Foundation (Step 8.5)
 
 `Step 8.5` is the first stage that actually connects a live model runtime.
 
-- Default first runtime: Ollama `qwen2.5:14b` at `http://127.0.0.1:11434`.
-- Provider contract stays generic so future local or online models can slot in without changing Step 7 ownership boundaries.
+- Default runtime: DeepSeek V4 Pro through `https://api.deepseek.com`, unless `.env` overrides it.
+- Provider contract stays generic so future local or online models can slot in without changing ownership boundaries.
 - `intent_instruction` owns the structured memory for this stage: append-only transcript, rolling summary, extracted facts with provenance, incomplete draft state, clarification agenda, irrelevant-turn log, and evaluation diagnostics.
-- `/workflows/intent-runtime-validation/` is the pre-Step-9 gate for paraphrase robustness, meta-query alias handling, partial-information completion, relevance filtering, and provider failure behavior.
+- `/workflows/intent-runtime-validation/` is the live-provider validation lab for paraphrase robustness, meta-query alias handling, partial-information completion, relevance filtering, and provider failure behavior. Its provider/runtime work is reused by rule interpretation.
 
-### Planned Refinement Pipeline (Steps 9-11, A/B fork)
+### Planned Rule Explanation Pipeline (Steps 8.6-8.8)
 
-After Step 6.5 the feedback loop forks into two parallel update strategies so they can be compared experimentally. The shared upstream stages are identical:
+The active roadmap after Step 8.5 is explanation-first. The old branching update fork is removed from the active plan unless the roadmap is explicitly reopened.
 
 ```
-chatbox (strategy-agnostic intake)
-  -> intent_instruction (emits shared + Path B-only intents)
-  -> Step 8.5 live runtime validation (real provider + memory + draft completion)
-  -> structured feedback
-      -> refinement trigger chooses Path A or Path B
-      +-- Path A: metric_learning_adapter -> metric_refinement_orchestrator
-      |     (learns M; applies L = chol(M) as linear pre-transform;
-      |      reruns projection and algorithm_adapters on X · L)
-      +-- Path B: direct_feedback_adapter -> direct_refinement_orchestrator
-            (builds DirectFeedbackPlan of seed_updates, feature_scale,
-             param_overrides; reruns SSDBCODI directly with merged seeds)
-  -> /workflows/strategy-comparison/ runs both paths on the same feedback
+current data + feature matrix + SSDBCODI clusters/anomalies
+  -> rule_panel generates shallow decision-tree surrogate rules
+  -> DeepSeek interprets rule cards into categorized explanations
+  -> integrated dashboard shows scatterplot + diagnostics + rules + interpretation
 ```
 
-Intent handling rules:
-- Shared intents: `feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`.
-- Path B-only intents: `split_cluster`, `reclassify_outlier`. Path A adapters return `intent_deferred` for these with `suggested_strategy: "direct_ssdbcodi"`; Path B handles them natively through seed updates and `n_clusters` overrides.
-- Path A and Path B keep independent refinement histories and rollback stacks. Only `/workflows/strategy-comparison/` reads both.
+Rule interpretation categories:
+- `cluster_profile`
+- `anomaly_rationale`
+- `feature_threshold_analysis`
+- `boundary_contrast`
+- `exception_analysis`
+- `rule_quality_issue`
+- `rule_simplification`
+- `followup_question`
+
+The LLM must cite existing rule ids, features, thresholds, cluster/anomaly ids, and point ids. It must not invent new analysis truth or mutate selection, labeling, clustering, or SSDBCODI state.
 
 ### SSDBCODI Module (active clustering/outlier provider)
 
@@ -168,7 +167,7 @@ Intent handling rules:
 - The debug page uses the existing `selection` and `labeling` module stores: click and rectangle selection are additive, selected points use black center dots, saved selection groups work, and labels are limited to `cluster_1...cluster_n` plus `outlier`.
 - The debug page includes multiple deterministic fixtures (`demo`, `moons`, `circles`) selected by `dataset_id`; selection, labels, and SSDBCODI store state are scoped per dataset.
 - GET `/modules/ssdbcodi/` previews the current result without writing run history. `POST /modules/ssdbcodi/api/label` saves pending feedback only; `POST /modules/ssdbcodi/api/run` recomputes and stores results in `SsdbcodiStore`.
-- Per-point scores `rScore`, `lScore`, `simScore`, `tScore` are persisted in `SsdbcodiStore` for downstream metric-learning consumption.
+- Per-point scores `rScore`, `lScore`, `simScore`, `tScore` are persisted in `SsdbcodiStore` for rule-panel diagnostics and LLM evidence.
 - Output schemas (`ClusterResult`, `OutlierResult`) live in `app/shared/schemas.py` (re-exported by `algorithm_adapters/schemas.py`), so downstream modules consume SSDBCODI results without changes.
 - The debug page is at `/modules/ssdbcodi/`. See `docs/modules/ssdbcodi/design.md` for the full contract.
 
@@ -188,6 +187,8 @@ Key workflows:
 - `/workflows/chat-selection/` - Step 7 chat intake reading selection, selection groups, and labeling context through a mocked intent provider.
 - `/workflows/chat-intent/` - Step 8 chatbox wired to the real `IntentInstructionProvider`, exercising the full chat -> router -> extractor -> structured instruction loop with the deterministic backend.
 - `/workflows/intent-runtime-validation/` - Step 8.5 live-model validation gate for provider health, memory, partial drafts, and evaluation diagnostics.
+- `/workflows/rule-panel-validation/` - planned Step 8.6 workflow for scatterplot + SSDBCODI diagnostics + decision-tree rule cards.
+- `/workflows/rule-interpretation/` - planned Step 8.7 workflow for rule cards + categorized DeepSeek interpretation.
 
 ### Shared Layer (`app/shared/`)
 
@@ -206,12 +207,14 @@ Code that multiple modules or workflows need lives in `app/shared/`:
 ### Module Boundaries (never cross these)
 
 1. Scatterplot does not parse chat text and does not own selection or label truth.
-2. Chatbox does not call clustering, outlier detection, projection, or metric learning.
+2. Chatbox does not call clustering, outlier detection, projection, rule generation, or LLM interpretation.
 3. Selection state is owned by the selection module only.
 4. Labeling owns manual annotations; scatterplot sends label actions *to* labeling.
 5. Existing clustering/outlier algorithms are only accessed through `algorithm_adapters`.
-6. Modules do not import unrelated module internals - use schemas, services, APIs, or workflow pages.
-7. Modules never import from `app/workflows/` - shared code goes in `app/shared/`.
+6. Rule panel reads computed analysis results and emits read-only rules.
+7. DeepSeek receives generated rules and returns categorized interpretations; it does not own clustering, anomaly, selection, or labeling truth.
+8. Modules do not import unrelated module internals - use schemas, services, APIs, or workflow pages.
+9. Modules never import from `app/workflows/` - shared code goes in `app/shared/`.
 
 ### Definition of Done for a Module
 

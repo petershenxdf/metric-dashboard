@@ -1,0 +1,346 @@
+{% extends "base.html" %}
+
+{% block title %}Step 8.7 Rule Interpretation{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Workflow Demo</p>
+    <h1>Step 8.7 Rule Interpretation</h1>
+    <p>
+      Parses generated wine rule cards into categorized, quantitative label
+      guidance. SSDBCODI remains the source of truth and rule interpretation
+      never mutates dashboard state.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Interpretation Controls</h2>
+    <form class="debug-form" method="get">
+      <label>
+        Provider
+        <select name="provider_kind">
+          {% for option in interpreter_options %}
+            <option value="{{ option }}" {% if option == provider_kind %}selected{% endif %}>
+              {{ option }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        SSDBCODI clusters
+        <input type="number" name="n_clusters" min="1" value="{{ analysis.cluster_result.n_clusters }}">
+      </label>
+      <label>
+        Tree depth
+        <input type="number" name="max_depth" min="1" value="{{ tree_config.max_depth }}">
+      </label>
+      <label>
+        Min leaf size
+        <input type="number" name="min_samples_leaf" min="1" value="{{ tree_config.min_samples_leaf }}">
+      </label>
+      <button class="button" type="submit">Interpret Rules</button>
+    </form>
+    {% if error %}
+      <p class="error-text">{{ error }} Reverted to the default interpretation settings.</p>
+    {% endif %}
+    <dl class="details">
+      <dt>Dataset</dt>
+      <dd>{{ dataset.dataset_id }}</dd>
+      <dt>Raw features</dt>
+      <dd>{{ feature_matrix.feature_names | join(", ") }}</dd>
+      <dt>Provider label</dt>
+      <dd>{{ interpretation.provider_label }}</dd>
+      <dt>Provider fallback</dt>
+      <dd>{{ "yes" if interpretation_run.diagnostics.used_fallback else "no" }}</dd>
+      <dt>Source of truth</dt>
+      <dd>SSDBCODI cluster assignments and outlier flags</dd>
+      <dt>Decision tree role</dt>
+      <dd>explanation-only surrogate rule extractor</dd>
+      <dt>Dependency mode</dt>
+      <dd>{{ dependency_mode }}</dd>
+    </dl>
+    <div class="actions">
+      <a href="{{ url_for('rule_interpretation_workflow.state_api', provider_kind=provider_kind, focus_category=focus_category or '', n_clusters=analysis.cluster_result.n_clusters, max_depth=tree_config.max_depth, min_samples_leaf=tree_config.min_samples_leaf) }}">Workflow State API</a>
+      <a href="/modules/rule-panel/">Rule Panel Module</a>
+      <a href="/workflows/rule-panel-validation/">Step 8.6 Validation</a>
+      <a href="/workflows/wine-dashboard/">Wine Dashboard</a>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Interpretation Categories</h2>
+    <div class="category-card-grid">
+      <a
+        class="category-card {% if not focus_category %}active{% endif %}"
+        href="{{ url_for('rule_interpretation_workflow.index', provider_kind=provider_kind, n_clusters=analysis.cluster_result.n_clusters, max_depth=tree_config.max_depth, min_samples_leaf=tree_config.min_samples_leaf) }}"
+      >
+        <strong>Overview</strong>
+        <span>Choose the best-supported label guidance from all rule evidence.</span>
+      </a>
+      {% for category in category_options %}
+        <a
+          class="category-card {% if focus_category == category %}active{% endif %}"
+          href="{{ url_for('rule_interpretation_workflow.index', provider_kind=provider_kind, focus_category=category, n_clusters=analysis.cluster_result.n_clusters, max_depth=tree_config.max_depth, min_samples_leaf=tree_config.min_samples_leaf) }}"
+        >
+          <strong>{{ category | replace("_", " ") | title }}</strong>
+          <span>{{ category_descriptions[category] }}</span>
+        </a>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel interpretation-panel label-guidance-panel">
+    <div class="section-header-row">
+      <div>
+        <p class="eyebrow">Interpretation</p>
+        <h2>{% if focus_category %}{{ focus_category | replace("_", " ") | title }}{% else %}Categorized Label Guidance{% endif %}</h2>
+        <p>{{ interpretation.category_explanation }}</p>
+      </div>
+      <span class="confidence-pill">{{ "%.2f"|format(interpretation.confidence) }}</span>
+    </div>
+
+    <div class="interpretation-meta">
+      <div>
+        <span>Category</span>
+        <strong>{{ interpretation.categories | join(", ") | replace("_", " ") | title }}</strong>
+      </div>
+      <div>
+        <span>Target Rule(s)</span>
+        <strong>{{ interpretation.target_rule_ids | join(", ") or "none" }}</strong>
+      </div>
+      <div>
+        <span>Warnings</span>
+        <strong>{{ interpretation.warnings | join(", ") or "none" }}</strong>
+      </div>
+    </div>
+
+    <div class="recommendation-callout">
+      <span>Recommended Next Labeling Move</span>
+      <p>{{ interpretation.recommendation }}</p>
+    </div>
+
+    <div class="label-guidance-grid">
+      <article>
+        <h3>1. Label These Points</h3>
+        {% if interpretation.label_targets %}
+          <ul class="guidance-list">
+            {% for target in interpretation.label_targets %}
+              <li>
+                <div class="guidance-heading">
+                  <strong>{{ target.point_ids | join(", ") }}</strong>
+                  <span>{{ target.priority or "n/a" }}</span>
+                </div>
+                <p>{{ target.label_question }}</p>
+                <p class="small">{{ target.why_label_these_points }}</p>
+                <dl class="compact-dl">
+                  <dt>Rule(s)</dt>
+                  <dd>{{ target.rule_ids | join(", ") if target.rule_ids is defined else "n/a" }}</dd>
+                </dl>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="small">No label targets.</p>
+        {% endif %}
+      </article>
+
+      <article>
+        <h3>2. Why These Points Need Checking</h3>
+        {% if interpretation.suspicion_reasons %}
+          <ul class="guidance-list">
+            {% for reason in interpretation.suspicion_reasons %}
+              <li>
+                <strong>{{ reason.suspicious_signal }}</strong>
+                <p>{{ reason.rule_based_reason }}</p>
+                <p class="small">{{ reason.point_based_reason }}</p>
+                <dl class="compact-dl">
+                  <dt>Point(s)</dt>
+                  <dd>{{ reason.point_ids | join(", ") }}</dd>
+                  <dt>Rule(s)</dt>
+                  <dd>{{ reason.rule_ids | join(", ") if reason.rule_ids is defined else "n/a" }}</dd>
+                </dl>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="small">No suspicion analysis.</p>
+        {% endif %}
+      </article>
+
+      <article>
+        <h3>3. How To Label Them</h3>
+        {% if interpretation.point_label_guidance %}
+          <ul class="guidance-list">
+            {% for guidance in interpretation.point_label_guidance %}
+              <li>
+                <strong>{{ guidance.suggested_label_frame }}</strong>
+                <p>{{ guidance.how_to_label }}</p>
+                <p>{{ guidance.decision_impact }}</p>
+                <p class="small">{{ guidance.llm_analysis_note }}</p>
+                <dl class="compact-dl">
+                  <dt>Point(s)</dt>
+                  <dd>{{ guidance.point_ids | join(", ") }}</dd>
+                  <dt>Rule(s)</dt>
+                  <dd>{{ guidance.rule_ids | join(", ") if guidance.rule_ids is defined else "n/a" }}</dd>
+                </dl>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="small">No point-level label guidance.</p>
+        {% endif %}
+      </article>
+    </div>
+  </section>
+
+  <section class="panel audit-details">
+    <h2>Audit Details</h2>
+    <div class="audit-grid">
+      <article>
+        <h3>Decision Rationale</h3>
+        <p>{{ interpretation.decision_rationale }}</p>
+      </article>
+      <article>
+        <h3>Quantitative Summary</h3>
+        <p>{{ interpretation.summary }}</p>
+      </article>
+      <article>
+        <h3>Label Outcome Branches</h3>
+        {% if interpretation.label_outcomes %}
+          <ul class="outcome-list">
+            {% for outcome in interpretation.label_outcomes %}
+              <li>
+                <strong>{{ outcome.label_result }}</strong>
+                <span>{{ outcome.decision_implication }}</span>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="small">No label outcome branches.</p>
+        {% endif %}
+      </article>
+      <article>
+        <h3>Suggested Label Actions</h3>
+        {% if interpretation.suggested_label_actions %}
+          <ol class="action-list">
+            {% for action in interpretation.suggested_label_actions %}
+              <li>
+                <div class="action-header">
+                  <strong>{{ action.action_type | replace("_", " ") | title }}</strong>
+                  <span>{{ action.priority or "n/a" }}</span>
+                </div>
+                <p>{{ action.reason }}</p>
+                <p class="small">{{ action.why_this_action or "n/a" }}</p>
+              </li>
+            {% endfor %}
+          </ol>
+        {% else %}
+          <p class="small">No label actions.</p>
+        {% endif %}
+      </article>
+      <article>
+        <h3>Quantitative Findings</h3>
+        {% if interpretation.quantitative_findings %}
+          <ul class="finding-list">
+            {% for finding in interpretation.quantitative_findings %}
+              <li>
+                <div>
+                  <strong>{{ finding.metric | replace("_", " ") | title }}</strong>
+                  <span>{{ finding.rule_ids | join(", ") if finding.rule_ids is defined else finding.rule_id or "all rules" }}</span>
+                </div>
+                <b>{{ finding.value if finding.value is defined else "n/a" }}</b>
+                <p>{{ finding.interpretation or "n/a" }}</p>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="small">No quantitative findings.</p>
+        {% endif %}
+      </article>
+      <article>
+        <h3>Evidence</h3>
+        {% if interpretation.evidence %}
+          <ul class="evidence-list">
+            {% for evidence in interpretation.evidence %}
+              <li>
+                <dl class="compact-dl">
+                  <dt>Rule(s)</dt>
+                  <dd>{{ evidence.rule_ids | join(", ") if evidence.rule_ids is defined else evidence.rule_id or "n/a" }}</dd>
+                  <dt>Feature</dt>
+                  <dd>{{ evidence.feature or "n/a" }}</dd>
+                  <dt>Metric</dt>
+                  <dd>
+                    {% if evidence.jaccard_overlap is defined %}
+                      jaccard={{ "%.2f"|format(evidence.jaccard_overlap) }}
+                    {% elif evidence.threshold is defined %}
+                      {{ evidence.operator }} {{ evidence.threshold }}
+                    {% else %}
+                      n/a
+                    {% endif %}
+                  </dd>
+                </dl>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="small">No evidence entries.</p>
+        {% endif %}
+      </article>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Rule Cards</h2>
+    <div class="card-grid">
+      {% for rule in rule_set.rules %}
+        <article class="card">
+          <p class="eyebrow">{{ rule.target_kind }}</p>
+          <h3>{{ rule.target_id }}</h3>
+          <dl>
+            <dt>Rule id</dt>
+            <dd>{{ rule.rule_id }}</dd>
+            <dt>Raw feature conditions</dt>
+            <dd>
+              {% if rule.conditions %}
+                <ul class="condition-list">
+                  {% for condition in rule.conditions %}
+                    <li>
+                      <span class="condition-feature">{{ condition.feature }}</span>
+                      <span>{{ condition.operator }} {{ "%.3f"|format(condition.threshold) }}</span>
+                    </li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                all matched points
+              {% endif %}
+            </dd>
+            <dt>Support</dt>
+            <dd>{{ rule.support_count }}</dd>
+            <dt>Coverage</dt>
+            <dd>{{ "%.2f"|format(rule.coverage) }}</dd>
+            <dt>Purity</dt>
+            <dd>{{ "%.2f"|format(rule.purity) }}</dd>
+            <dt>Exceptions</dt>
+            <dd>{{ rule.exception_point_ids | join(", ") or "none" }}</dd>
+          </dl>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>Provider Diagnostics</h2>
+      <pre>{{ interpretation_run.diagnostics | tojson(indent=2) }}</pre>
+    </article>
+    <article>
+      <h2>Request Payload</h2>
+      <pre>{{ interpretation_run.request_payload | tojson(indent=2) }}</pre>
+    </article>
+  </section>
+
+  <section class="panel">
+    <h2>Interpretation JSON</h2>
+    <pre>{{ interpretation.to_dict() | tojson(indent=2) }}</pre>
+  </section>
+{% endblock %}

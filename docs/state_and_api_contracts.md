@@ -17,7 +17,6 @@ Suggested app state:
 class AppState:
     dataset = None
     feature_matrix = None
-    transformed_feature_matrix = None  # X @ L (Path A) or X @ S (Path B)
     projection = None
     cluster_result = None
     outlier_result = None
@@ -25,19 +24,12 @@ class AppState:
     selection = None
     selection_groups = []
     annotations = []
-    chat_history = []
-    structured_instruction = None      # evolving single state (not a list)
-    intent_memory = None               # Step 8.5 transcript / summary / facts / draft
-    clarification_state = None         # Step 8.5 unresolved slots and next question
+    chat_history = []                  # legacy Step 7/8 chat state
+    structured_instruction = None      # legacy Step 8 state
+    intent_memory = None               # legacy Step 8.5 transcript / summary / facts / draft
     runtime_validation_report = None   # Step 8.5 provider / evaluation diagnostics
-
-    # Path A (metric learning)
-    active_learned_metric = None       # {M, L, provider, diagnostics}
-    metric_refinement_runs = []        # Path A history for rollback
-
-    # Path B (direct SSDBCODI)
-    active_direct_feedback_plan = None # {seed_updates, feature_scale, param_overrides, ...}
-    direct_refinement_runs = []        # Path B history for rollback
+    rule_set = None                    # generated decision-tree rules for clusters/anomalies
+    rule_interpretation = None         # categorized DeepSeek interpretation of rules
 ```
 
 This can start as a simple object or dictionary attached to `app.config` or a small state module.
@@ -55,12 +47,10 @@ Each state area has one owner:
 | SSDBCODI intermediate scores (`rScore`, `lScore`, `simScore`, `tScore`) | `ssdbcodi` |
 | selected point IDs | `selection` |
 | manual cluster/outlier annotations | `labeling` |
-| chat history | `chatbox` |
-| structured instruction state, conversation memory, extracted facts, draft state, clarification agenda, provider runtime config | `intent_instruction` |
-| Path A metric constraint set and learned metric | `metric_learning_adapter` |
-| Path B direct feedback plan | `direct_feedback_adapter` |
-| Path A refinement run history and active metric pointer | `metric_refinement_orchestrator` |
-| Path B refinement run history and active plan pointer | `direct_refinement_orchestrator` |
+| chat history | `chatbox` (legacy Step 7/8 surface) |
+| structured instruction state, conversation memory, extracted facts, draft state, clarification agenda, provider runtime config | `intent_instruction` (legacy Step 8/8.5 surface, provider runtime reused for rule interpretation) |
+| generated cluster/anomaly rules (`RuleSet`) | `rule_panel` |
+| categorized DeepSeek rule interpretation (`RuleInterpretation`) | `rule_panel` |
 
 Other modules may read state through contracts, but should not mutate state they do not own.
 
@@ -91,26 +81,35 @@ The module also owns:
 
 `intent_instruction` is also responsible for allocating stable constraint IDs. The extractor emits `InstructionDelta` operations with `constraint_id: "pending"`; the service rewrites those to monotonic IDs (`c1`, `c2`, ...) inside `apply_delta` and advances the version counter on the owning `IntentInstructionStore`. Off-topic, meta-query, and ambiguous messages never mutate this state.
 
-Step 7 and Step 8 are strategy-agnostic. Path choice (`metric_learning` vs
-`direct_ssdbcodi`) belongs to the refinement trigger owned by later adapters
-and orchestrators, not to chat intake or intent compilation.
+Step 7, Step 8, and Step 8.5 are now legacy foundations. The active roadmap
+after Step 8.5 is the rule panel:
 
-Step 8.5 is also strategy-agnostic. It is a validation gate for the live model
-runtime, memory policy, SSDBCODI-grounded planning, and structured-output
-reliability. It must complete before reviewable suggestion UX and Step 9
-adapters are trusted with the resulting instruction state. In this gate, the AI
-does not own label or selection mutation; it can only suggest what the user may
-apply through manual controls.
+1. `rule_panel` reads dataset, feature matrix, SSDBCODI cluster/outlier
+   results, per-point scores, and optional labeling state.
+2. `rule_panel` trains shallow decision-tree surrogates using SSDBCODI labels
+   and anomaly flags as fixed targets, then emits a read-only `RuleSet`. These
+   trees do not own or replace clustering/outlier detection.
+3. `rule_panel` sends that `RuleSet` to the configured LLM provider and stores
+   a categorized `RuleInterpretation`.
 
-These two sources feed two parallel adapters:
+`RuleInterpretation` label/refinement categories:
 
-1. **Path A** — `metric_learning_adapter.constraint_builder` merges them into a `ConstraintSet` and passes it to the metric learner. The adapter's learned matrix `L = chol(M)` is applied as a linear pre-transform to the feature matrix so projection and algorithm adapters can be reused without modification.
-2. **Path B** — `direct_feedback_adapter.plan_builder` merges them into a `DirectFeedbackPlan` (seed updates, `feature_scale`, `param_overrides`, `excluded_clusters`, `merged_cluster_groups`) that is fed directly to SSDBCODI through `algorithm_adapters.run_default_analysis`.
+- `label_priority`
+- `boundary_review`
+- `overlap_merge_signal`
+- `split_or_new_cluster_signal`
+- `anomaly_label_review`
+- `exception_relabel_review`
+- `feature_label_strategy`
+- `rule_confidence_audit`
 
-Phase 1 intents:
+`RuleInterpretation` must include `recommendation`,
+`quantitative_findings`, and `suggested_label_actions`. The interpretation
+request includes computed `rule_guidance_metrics` so overlap and boundary
+claims are numeric and auditable.
 
-- Shared on both paths: `feature_weight`, `group_similar`, `group_dissimilar`, `merge_clusters`, `anchor_point`, `ignore_cluster`.
-- Path B-only: `split_cluster` (realized as `n_clusters += 1` plus interior seeds) and `reclassify_outlier` (realized as a labeled outlier override). Path A rejects these with `intent_deferred` and a `suggested_strategy: "direct_ssdbcodi"` hint because a learned metric cannot change KMeans's `k` and may not move a point across SSDBCODI's contamination threshold.
+Old branching update state is no longer part of the suggested app state. Do not
+add those state branches unless the roadmap is explicitly reopened.
 
 ## 4. API Response Envelope
 
@@ -148,8 +147,8 @@ Python package names should use snake_case:
 ```text
 data_workspace
 intent_instruction
-metric_learning_adapter
 labeling
+rule_panel
 ```
 
 Flask route slugs should use kebab-case:
@@ -157,8 +156,8 @@ Flask route slugs should use kebab-case:
 ```text
 data-workspace
 intent-instruction
-metric-learning-adapter
 labeling
+rule-panel
 ```
 
 The module registry should define the mapping explicitly.
@@ -239,25 +238,11 @@ Interactive modules should expose action APIs:
 /workflows/intent-runtime-validation/api/state
 /workflows/intent-runtime-validation/api/message
 /workflows/intent-runtime-validation/api/reset
-/modules/metric-learning-adapter/api/constraints
-/modules/metric-learning-adapter/api/fit
-/modules/metric-learning-adapter/api/providers
-/modules/direct-feedback-adapter/api/plan
-/modules/direct-feedback-adapter/api/preview
-/modules/metric-refinement-orchestrator/api/run
-/modules/metric-refinement-orchestrator/api/history
-/modules/metric-refinement-orchestrator/api/rollback
-/modules/metric-refinement-orchestrator/api/reset
-/modules/direct-refinement-orchestrator/api/run
-/modules/direct-refinement-orchestrator/api/history
-/modules/direct-refinement-orchestrator/api/rollback
-/modules/direct-refinement-orchestrator/api/reset
-/workflows/instruction-constraints/api/state
-/workflows/instruction-ssdbcodi/api/state
-/workflows/metric-refinement-loop/api/state
-/workflows/direct-refinement-loop/api/state
-/workflows/strategy-comparison/api/state
-/workflows/strategy-comparison/api/run
+/modules/rule-panel/api/rules
+/modules/rule-panel/api/interpret
+/modules/rule-panel/api/config
+/workflows/rule-panel-validation/api/state
+/workflows/rule-interpretation/api/state
 ```
 
 Every module-level state route should include module identity fields in the
@@ -316,7 +301,7 @@ the same selected/unselected context output shape.
 
 Selection groups are reusable named point sets owned by the selection module.
 They are useful for restoring a previous selection, but they are not semantic
-labels or metric-learning constraints.
+labels, rule targets, or clustering truth.
 
 ```json
 {
@@ -483,14 +468,16 @@ Cluster result:
 }
 ```
 
-The current default analysis order is:
+The legacy fallback analysis order is:
 
 ```text
 local_outlier_factor -> kmeans_on_non_outliers
 ```
 
-Future integrated algorithms should return the same dashboard-facing result shape,
-even if they compute clusters and outliers in one combined pass.
+The current default analysis provider is SSDBCODI through
+`algorithm_adapters`. Future integrated algorithms should return the same
+dashboard-facing result shape, even if they compute clusters and outliers in one
+combined pass.
 
 ## 7. Reset Rule
 
@@ -505,10 +492,12 @@ This is especially useful for:
 1. selection.
 2. labeling.
 3. chatbox.
-4. `metric_refinement_orchestrator` (Path A history only).
-5. `direct_refinement_orchestrator` (Path B history only).
+4. `intent_instruction` runtime validation sessions.
+5. `rule_panel` generated rule and interpretation state.
 
-Each orchestrator's reset endpoint scopes to its own history so resetting one path does not wipe the other.
+Reset endpoints must scope to their owning module state. Resetting rule
+interpretation should not wipe selection, labeling, SSDBCODI output, or the
+underlying generated rules unless the endpoint explicitly says so.
 
 ## 8. Fixture Rule
 

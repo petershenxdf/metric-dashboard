@@ -28,7 +28,7 @@ It can expose direct label controls near the plot, but label state is owned by t
 4. Owning selection truth.
 5. Owning label or annotation truth.
 6. Parsing chat messages.
-7. Running metric learning.
+7. Running rule generation or LLM interpretation.
 
 ## Target Files
 

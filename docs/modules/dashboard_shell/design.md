@@ -11,7 +11,9 @@ The dashboard shell owns the local Flask app structure.
 
 It is responsible for making every module visible in the browser and for composing modules into workflow demos and the final integrated dashboard.
 
-The shell should stay thin. It should not contain data normalization, MDS, clustering, outlier detection, selection logic, labeling logic, chat parsing, metric learning, or refinement internals.
+The shell should stay thin. It should not contain data normalization, MDS,
+clustering, outlier detection, selection logic, labeling logic, chat parsing,
+rule generation, or LLM interpretation internals.
 
 ## Responsibilities
 
@@ -30,7 +32,7 @@ The shell should stay thin. It should not contain data normalization, MDS, clust
 3. Owning selection state.
 4. Owning manual label state.
 5. Parsing chat messages.
-6. Creating metric-learning constraints.
+6. Creating rule cards or LLM interpretations.
 
 ## Target Files
 
@@ -124,8 +126,9 @@ The shell should also expose workflow pages:
 /workflows/provider-feedback/
 /workflows/chat-selection/
 /workflows/chat-intent/
-/workflows/instruction-constraints/
-/workflows/refinement-loop/
+/workflows/intent-runtime-validation/
+/workflows/rule-panel-validation/
+/workflows/rule-interpretation/
 ```
 
 These pages combine a few modules at a time, not the entire system. The
@@ -163,7 +166,7 @@ Flask route tests:
 Manual browser check:
 
 1. run `python run.py`.
-2. open `http://127.0.0.1:5000/modules/`.
+2. open `http://127.0.0.1:5001/modules/`.
 3. confirm module cards and workflow links are visible.
 
 ## Completion Criteria

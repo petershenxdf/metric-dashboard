@@ -5,9 +5,9 @@
 Step 8.5 is the first stage that actually connects a live model runtime.
 
 Step 8 already proves the chat-to-structure compiler boundary, but it still
-uses `MockLlmProvider`. That is not enough for the project goals. Before Step 9
-adapters consume chat-derived instructions, the system must prove that a real
-model can:
+uses `MockLlmProvider`. That work is now a legacy foundation. The current
+post-Step-8.5 roadmap reuses the live provider runtime for rule interpretation,
+so the system must prove that a real model can:
 
 1. understand wording variants,
 2. maintain usable cross-turn memory,
@@ -15,7 +15,7 @@ model can:
 4. convert incomplete user messages into structured draft state,
 5. ask focused follow-up questions until the instruction is usable,
 6. use SSDBCODI score diagnostics when planning or explaining suggestions,
-7. emit schema-valid structured output that later modules can trust.
+7. emit schema-valid structured output that later rule-interpretation modules can trust.
 
 This document defines that gate.
 
@@ -31,13 +31,13 @@ Step 8.5 covers:
 6. relevance filtering and partial-information handling,
 7. direct AI reply planning mode,
 8. UI and workflow requirements,
-9. evaluation packs and acceptance gates before Step 9.
+9. evaluation packs and acceptance gates before rule-panel interpretation.
 
 Step 8.5 does not:
 
-1. choose Path A vs Path B,
-2. run metric learning,
-3. run SSDBCODI refinement,
+1. choose a downstream product strategy,
+2. run rule generation,
+3. rerun SSDBCODI automatically,
 4. bypass the existing `StructuredInstruction` schema,
 5. move memory ownership into chatbox,
 6. automatically mutate labels or selections from model output.
@@ -204,7 +204,8 @@ The intended sequence is:
 Step 7 chatbox intake
   -> Step 8 deterministic compiler boundary
   -> Step 8.5 live runtime validation
-  -> Step 9A / Step 9B adapters
+  -> Step 8.6 rule panel
+  -> Step 8.7 rule interpretation
 ```
 
 Meaning:
@@ -212,7 +213,7 @@ Meaning:
 1. Step 7 proves intake.
 2. Step 8 proves the structure contract.
 3. Step 8.5 proves that a live runtime can reliably fill that same contract.
-4. Step 9 starts only after Step 8.5 passes.
+4. The provider/runtime foundation is then reused for rule interpretation.
 
 ## Upstream Module Integration
 
@@ -395,7 +396,7 @@ Current pipeline behavior:
 
 Step 8.5 intentionally does not show the old processed confirmation mode. A
 direct reply may say what the model understands or recommends, but it must not
-claim that labels, selections, or refinement state have already changed. Any
+claim that labels, selections, clustering, or anomaly state have already changed. Any
 future model-generated label or selection output must become a reviewable
 suggestion before it can mutate state.
 
@@ -471,7 +472,8 @@ Step 8:
 It may add intermediate state such as memory, facts, and drafts, but it must
 not invent a separate downstream payload just for the live runtime.
 
-That keeps Step 9 adapters stable.
+That keeps the legacy Step 8 contract stable while the new rule-panel direction
+reuses the same provider diagnostics and prompt-debugging practices.
 
 ## UI and Workflow Design
 
@@ -481,7 +483,7 @@ Step 8.5 gets its own workflow page:
 /workflows/intent-runtime-validation/
 ```
 
-The page should feel like a deliberate pre-Step-9 lab, not a one-off debug
+The page should feel like a deliberate live-runtime lab, not a one-off debug
 form. It must validate whether language is grounded in the actual visual state,
 not in a detached JSON panel alone.
 
@@ -600,7 +602,7 @@ grounding workbench, not like separate modules stitched together loosely.
 6. Draft state must be visibly distinct from committed `StructuredInstruction`.
 7. Irrelevant turns must be inspectable without cluttering the main chat flow.
 8. The page must compose naturally with earlier and later module layouts so it
-   can be used beside selection, labeling, scatterplot, and future Step 9
+   can be used beside selection, labeling, scatterplot, and future rule-panel
    workflows.
 9. A user should be able to audit any grounding error by comparing three things
    on one screen: the plot, the current context, and the model's interpreted
@@ -732,9 +734,9 @@ Minimum packs:
    - dataset switch, selection change, relabeling, or group restore between
      turns to ensure stale grounding is handled safely.
 
-## Acceptance Gates Before Step 9
+## Acceptance Gates Before Rule Interpretation
 
-Step 9 should not begin until Step 8.5 passes these gates.
+Rule interpretation should not begin until Step 8.5 passes these gates.
 
 Required gates:
 
@@ -761,7 +763,7 @@ Suggested quantitative gates:
 4. 90%+ accuracy on relevant-vs-irrelevant separation.
 5. 100% of incomplete instructions remain drafts until required slots are filled.
 6. 100% of visual-grounding evaluation cases must show the expected selected
-   points / cluster references in the audit panels before Step 9 starts.
+   points / cluster references in the audit panels before rule interpretation starts.
 
 ## Additional Design Requirements
 
@@ -804,5 +806,5 @@ should therefore include a few extra safeguards:
 Step 8.5 is where the project stops pretending a deterministic mock is enough.
 It is the gate that proves the real model can understand user language, build
 structured memory, recover from incomplete input, ignore irrelevant noise, and
-produce trustworthy structured output before the refinement adapters are asked
-to act on it.
+produce trustworthy structured output. The same provider/runtime foundation is
+then reused by the rule-panel interpretation workflow.

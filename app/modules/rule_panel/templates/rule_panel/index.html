@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}Rule Panel{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Module Debug Page</p>
+    <h1>Rule Panel</h1>
+    <p>
+      Generates decision-tree surrogate rules from current SSDBCODI clusters
+      and outlier flags. The tree extracts explanations only; SSDBCODI remains
+      the source of clustering and anomaly truth.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Rule Controls</h2>
+    <form class="debug-form" method="get">
+      <label>
+        SSDBCODI clusters
+        <input type="number" name="n_clusters" min="1" value="{{ analysis.cluster_result.n_clusters }}">
+      </label>
+      <label>
+        Tree depth
+        <input type="number" name="max_depth" min="1" value="{{ tree_config.max_depth }}">
+      </label>
+      <label>
+        Min leaf size
+        <input type="number" name="min_samples_leaf" min="1" value="{{ tree_config.min_samples_leaf }}">
+      </label>
+      <button class="button" type="submit">Generate Rules</button>
+    </form>
+
+    {% if error %}
+      <p class="error-text">{{ error }} Reverted to the default rule config.</p>
+    {% endif %}
+
+    <dl class="details">
+      <dt>Dataset</dt>
+      <dd>{{ dataset.dataset_id }}</dd>
+      <dt>Raw features</dt>
+      <dd>{{ feature_matrix.feature_names | join(", ") }}</dd>
+      <dt>Point count</dt>
+      <dd>{{ rule_set.diagnostics.source_point_count }}</dd>
+      <dt>Feature count</dt>
+      <dd>{{ rule_set.diagnostics.source_feature_count }}</dd>
+      <dt>Dependency mode</dt>
+      <dd>{{ dependency_mode }}</dd>
+      <dt>Source of truth</dt>
+      <dd>SSDBCODI cluster assignments and outlier flags</dd>
+      <dt>Decision tree role</dt>
+      <dd>explanation-only surrogate rule extractor</dd>
+      <dt>Rule count</dt>
+      <dd>{{ rule_set.rules | length }}</dd>
+    </dl>
+
+    <div class="actions">
+      <a href="{{ url_for('rule_panel.rules_api', n_clusters=analysis.cluster_result.n_clusters, max_depth=tree_config.max_depth, min_samples_leaf=tree_config.min_samples_leaf) }}">Rules API</a>
+      <a href="{{ url_for('rule_panel.interpret_api', n_clusters=analysis.cluster_result.n_clusters, max_depth=tree_config.max_depth, min_samples_leaf=tree_config.min_samples_leaf) }}">Interpret Preview API</a>
+      <a href="{{ url_for('rule_panel.config_api', n_clusters=analysis.cluster_result.n_clusters, max_depth=tree_config.max_depth, min_samples_leaf=tree_config.min_samples_leaf) }}">Config API</a>
+      <a href="/modules/ssdbcodi/">SSDBCODI Debug</a>
+    </div>
+  </section>
+
+  <section class="split">
+    <article>
+      <h2>SSDBCODI Source</h2>
+      <dl>
+        <dt>Analysis run</dt>
+        <dd>{{ analysis.analysis_run_id }}</dd>
+        <dt>Cluster counts</dt>
+        <dd>{{ cluster_counts }}</dd>
+        <dt>Outliers</dt>
+        <dd>{{ analysis.outlier_result.outlier_point_ids | join(", ") or "none" }}</dd>
+      </dl>
+    </article>
+
+    <article>
+      <h2>Interpretation Preview</h2>
+      <p class="small">
+        Deterministic local label guidance; Step 8.7 provider output is
+        available through the interpretation API and workflow.
+      </p>
+      <dl>
+        <dt>Provider</dt>
+        <dd>{{ interpretation.provider_label }}</dd>
+        <dt>Categories</dt>
+        <dd>{{ interpretation.categories | join(", ") }}</dd>
+        <dt>Confidence</dt>
+        <dd>{{ "%.2f"|format(interpretation.confidence) }}</dd>
+      </dl>
+      <h3>Recommendation</h3>
+      <p>{{ interpretation.recommendation }}</p>
+      <p>{{ interpretation.summary }}</p>
+    </article>
+  </section>
+
+  <section class="panel">
+    <h2>Rule Cards</h2>
+    <p class="small">
+      Conditions use raw wine feature names and raw-value thresholds from
+      wine.mat. SSDBCODI remains the clustering and outlier source of truth.
+    </p>
+    <div class="card-grid">
+      {% for rule in rule_set.rules %}
+        <article class="card">
+          <p class="eyebrow">{{ rule.target_kind }}</p>
+          <h3>{{ rule.target_id }}</h3>
+          <dl>
+            <dt>Raw feature conditions</dt>
+            <dd>
+              {% if rule.conditions %}
+                <ul class="condition-list">
+                  {% for condition in rule.conditions %}
+                    <li>
+                      <span class="condition-feature">{{ condition.feature }}</span>
+                      <span>{{ condition.operator }} {{ "%.3f"|format(condition.threshold) }}</span>
+                    </li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                all matched points
+              {% endif %}
+            </dd>
+            <dt>Support</dt>
+            <dd>{{ rule.support_count }}</dd>
+            <dt>Coverage</dt>
+            <dd>{{ "%.2f"|format(rule.coverage) }}</dd>
+            <dt>Purity</dt>
+            <dd>{{ "%.2f"|format(rule.purity) }}</dd>
+            <dt>Exceptions</dt>
+            <dd>{{ rule.exception_point_ids | join(", ") or "none" }}</dd>
+            <dt>Matched preview</dt>
+            <dd>{{ rule.matched_point_ids[:6] | join(", ") }}{% if rule.matched_point_ids | length > 6 %}, ...{% endif %}</dd>
+          </dl>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Feature Usage</h2>
+    <div class="chip-row">
+      {% for feature, count in rule_set.diagnostics.feature_usage.items() %}
+        <span>{{ feature }}: {{ count }}</span>
+      {% else %}
+        <span>no feature thresholds</span>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Rule Warnings</h2>
+    <div class="chip-row">
+      {% for warning, count in rule_set.diagnostics.quality_warning_counts.items() %}
+        <span>{{ warning }}: {{ count }}</span>
+      {% else %}
+        <span>none</span>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>RuleSet Payload</h2>
+    <pre>{{ rule_set.to_dict() | tojson(indent=2) }}</pre>
+  </section>
+{% endblock %}

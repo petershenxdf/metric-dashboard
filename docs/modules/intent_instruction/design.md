@@ -6,8 +6,9 @@ The intent instruction module compiles chat-derived feedback into stable
 structured instructions.
 
 It is the boundary between conversational text and deterministic downstream
-feedback objects. It should stay strategy-agnostic: Path A / Path B acceptance
-starts after this module, not inside it.
+feedback objects. It remains useful implemented history, but the active
+post-Step-8.5 product direction is rule explanation through `rule_panel`, not
+branching update strategies.
 
 Step 8 proves the compiler boundary with a deterministic backend. Step 8.5 is
 the first stage that actually connects a live model runtime and validates
@@ -27,8 +28,8 @@ memory, relevance filtering, and partial-information accumulation.
 ## Not Responsible For
 
 1. Rendering chat UI.
-2. Choosing Path A vs Path B.
-3. Running metric learning.
+2. Choosing downstream explanation strategy.
+3. Running rule generation or LLM rule interpretation.
 4. Running clustering.
 5. Running outlier detection.
 6. Rendering scatterplot points.
@@ -51,7 +52,7 @@ This step should answer one question:
 
 ```text
 Can chat feedback become versioned, replayable structured instructions
-without entangling the compiler with downstream refinement policy?
+without entangling the compiler with downstream product policy?
 ```
 
 ## Step 8.5 Runtime Validation Gate
@@ -60,7 +61,8 @@ Step 8 alone is not enough for the project goals because it still runs on
 `MockLlmProvider`.
 
 Step 8.5 is the first stage that connects a live runtime (default DeepSeek V4
-Pro unless `.env` overrides it) and validates six things before Step 9:
+Pro unless `.env` overrides it) and validates six things before rule
+interpretation:
 
 1. paraphrase robustness across different wording and structure,
 2. conversation memory that is stored in structured, auditable form,
@@ -143,11 +145,10 @@ The extractor emits an `InstructionDelta`, not a fully regenerated instruction
 state. The service layer applies the delta, allocates stable constraint IDs,
 and advances the version counter.
 
-## Supported Intent Types (Phase 1)
+## Supported Intent Types (Legacy Phase 1)
 
-The intent module emits eight structured intent types.
-
-### Shared intents
+The intent module emits eight structured intent types for the legacy
+chat-feedback path:
 
 1. `feature_weight`
 2. `group_similar`
@@ -155,15 +156,12 @@ The intent module emits eight structured intent types.
 4. `merge_clusters`
 5. `anchor_point`
 6. `ignore_cluster`
-
-### Path B-only downstream intents
-
 7. `split_cluster`
 8. `reclassify_outlier`
 
-The compiler still emits all eight intents. It does not pre-filter by path and
-does not add a strategy-specific deferral note. Path A / Path B adapters make
-the acceptance decision later.
+The compiler still emits all eight intents. They are retained for historical
+coverage and diagnostics, but they no longer imply that update adapters are
+the next modules to build.
 
 ## Structured Instruction Schema
 
@@ -331,7 +329,7 @@ The page should show:
 7. Clarification question when needed.
 8. Provider status showing whether the backend is mock or real.
 
-It should not expose a refinement-strategy selector at Step 8.
+It should not expose an update-strategy selector at Step 8.
 
 ## Testing
 
@@ -407,5 +405,5 @@ This module is complete when:
 3. Flask debug page exposes router result, delta, and current instruction state.
 4. `LlmProvider` is documented so real backends can be plugged in later without touching `service.py`.
 5. `IntentInstructionProvider` satisfies the chatbox `IntentProvider` protocol.
-6. Path B-only intents are emitted here without forcing a path decision at compile time.
-7. Step 8.5 design is documented so the first live runtime can be added without changing Step 7 ownership boundaries.
+6. All legacy Phase 1 intents are emitted here without forcing a downstream strategy decision at compile time.
+7. Step 8.5 design is documented so the first live runtime can be reused by rule interpretation without changing Step 7 ownership boundaries.

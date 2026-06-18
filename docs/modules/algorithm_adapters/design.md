@@ -19,7 +19,7 @@ The active provider is SSDBCODI. The legacy LOF-then-KMeans provider remains ava
 
 1. Redesigning clustering.
 2. Redesigning outlier detection.
-3. Running metric learning.
+3. Running rule generation or LLM interpretation.
 4. Rendering scatterplot UI.
 5. Parsing chat messages.
 
@@ -140,4 +140,3 @@ Manual browser check:
 ## Completion Criteria
 
 This module is complete when existing or mock algorithm outputs can be inspected through Flask without touching algorithm internals.
-

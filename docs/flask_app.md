@@ -17,8 +17,11 @@ python run.py
 Expected local URL:
 
 ```text
-http://127.0.0.1:5000
+http://127.0.0.1:5001
 ```
+
+The default port is `5001` to avoid the common macOS AirPlay / Control Center
+collision on `5000`. Use `PORT=5002 python run.py` to choose another port.
 
 No deployment, Docker, cloud setup, auth system, or production database is required at this stage.
 
@@ -88,11 +91,8 @@ Workflow routes:
 /workflows/chat-selection/
 /workflows/chat-intent/
 /workflows/intent-runtime-validation/
-/workflows/instruction-constraints/       Path A constraint preview
-/workflows/instruction-ssdbcodi/           Path B plan preview
-/workflows/metric-refinement-loop/         Path A end-to-end
-/workflows/direct-refinement-loop/         Path B end-to-end
-/workflows/strategy-comparison/            Path A vs Path B side-by-side
+/workflows/rule-panel-validation/          Step 8.6 rule-card validation
+/workflows/rule-interpretation/            Step 8.7 categorized LLM interpretation
 ```
 
 `/workflows/` groups these routes by debug purpose:
@@ -102,7 +102,7 @@ Workflow routes:
 3. visual integration tests,
 4. provider diagnostics,
 5. feedback pipeline and runtime validation,
-6. future workflows.
+6. future rule workflows.
 
 See `docs/workflows.md` for the detailed workflow map and route stability rule.
 
@@ -129,6 +129,8 @@ For example:
 8. `chatbox` shows a chat UI with read-only selection and labeling context, full suggestion chips, and the `MockIntentProvider` instruction snapshot.
 9. `intent-instruction` shows the two-stage router + extractor debug view: the active LLM provider label, example messages grouped by intent, a try-a-message form, and the resulting router category, `InstructionDelta`, and current `StructuredInstruction` state.
 10. `/workflows/intent-runtime-validation/` is a composite visual lab: it embeds the real scatterplot plus real selection and labeling context, then adds provider controls, memory state, incomplete draft state, and evaluation diagnostics for the first live-model gate.
+11. `rule-panel` should show decision-tree rule cards for current clusters and anomalies, including conditions, support, coverage, purity, matched points, and exceptions.
+12. `/workflows/rule-interpretation/` should show generated rules beside categorized DeepSeek explanations.
 
 ## 7. Testing Layers
 

@@ -6,15 +6,15 @@ The SSDBCODI module implements *Semi-Supervised Density-Based Clustering with
 Outlier Detection Integrated* ([arXiv:2208.05561](https://arxiv.org/abs/2208.05561))
 as a first-class module in the dashboard. SSDBCODI now backs the default
 `algorithm_adapters` provider boundary in place of the legacy
-`SequentialLofThenKMeansProvider` for the human-in-the-loop refinement loop.
+`SequentialLofThenKMeansProvider`.
 
 It produces:
 
 1. cluster assignments compatible with `algorithm_adapters.ClusterResult`,
 2. outlier flags compatible with `algorithm_adapters.OutlierResult`,
 3. four per-point intermediate scores (`rScore`, `lScore`, `simScore`,
-   `tScore`) that are persisted in a module-owned store for downstream
-   metric-learning steps.
+   `tScore`) that are persisted in a module-owned store for rule-panel
+   diagnostics and LLM evidence.
 
 ## Responsibilities
 
@@ -59,8 +59,7 @@ It produces:
 
 1. Owning manual annotations - those remain in the `labeling` module store.
 2. Owning selection state - those remain in the `selection` module store.
-3. Performing metric learning (the `metric_learning_adapter` module covers
-   that step).
+3. Performing rule interpretation.
 4. Replacing the existing `algorithm_adapters` blueprint; SSDBCODI keeps its
    own debug page while the adapter blueprint remains the compatibility entry.
 
@@ -259,7 +258,7 @@ All API responses use the dashboard envelope:
 | `selection` | owns active selected/unselected state and saved selection groups for the debug page | reads + delegates writes |
 | `labeling` | owns manual annotations; SSDBCODI reads `LabelingState` and sends label actions through `apply_labeling_action` | reads + delegates writes |
 | `scatterplot` | renders SSDBCODI-backed `ClusterResult` and `OutlierResult` through the adapter boundary | downstream consumer |
-| `metric_learning_adapter` (future) | will consume the persisted `r_score`/`l_score`/`sim_score`/`t_score` to weight constraints | downstream consumer |
+| `rule_panel` (planned) | consumes clusters, anomalies, and persisted `r_score`/`l_score`/`sim_score`/`t_score` as evidence for rule cards and interpretation payloads | downstream consumer |
 | `provider-feedback workflow` | verifies the promoted adapter boundary and standalone score contract together | downstream consumer |
 
 ## Testing

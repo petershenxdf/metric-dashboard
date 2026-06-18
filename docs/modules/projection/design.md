@@ -22,7 +22,7 @@ The initial method is MDS.
 3. Marking outliers.
 4. Managing selection.
 5. Parsing chat messages.
-6. Running metric learning.
+6. Running rule generation or LLM interpretation.
 
 ## Target Files
 

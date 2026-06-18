@@ -15,7 +15,8 @@ This module is the direct UI path for feedback. Chat-based feedback can later pr
 3. Create manual annotations for cluster/class labels.
 4. Create manual annotations for outlier and not-outlier labels.
 5. Keep an annotation history for local debugging.
-6. Output structured feedback instructions for downstream metric learning.
+6. Output manual annotation state that SSDBCODI and explanation workflows can
+   read through explicit contracts.
 7. Expose labeling state and actions through Flask.
 
 ## Not Responsible For
@@ -24,7 +25,7 @@ This module is the direct UI path for feedback. Chat-based feedback can later pr
 2. Rendering scatterplot geometry.
 3. Parsing natural language.
 4. Running clustering or outlier detection.
-5. Running metric learning.
+5. Running rule generation or LLM interpretation.
 6. Deciding final algorithm output.
 
 ## Target Files
@@ -224,4 +225,6 @@ Manual browser check:
 
 ## Completion Criteria
 
-This module is complete when manual labels can be created from selected points, inspected in Flask, and converted into structured feedback without depending on chatbox or metric learning.
+This module is complete when manual labels can be created from selected points,
+inspected in Flask, and exposed to SSDBCODI and explanation workflows without
+depending on chatbox or LLM interpretation.
