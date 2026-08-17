@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Blueprint, abort, current_app, jsonify, render_template
+from flask import Blueprint, abort, current_app, jsonify, redirect, render_template, url_for
 
 from .module_registry import get_module, get_workflow, list_modules, list_workflows
 from .shared.flask_helpers import api_error, api_success
@@ -10,11 +10,7 @@ core = Blueprint("core", __name__)
 
 @core.get("/")
 def home():
-    return render_template(
-        "home.html",
-        modules=_enabled_modules(),
-        workflows=_enabled_workflows(),
-    )
+    return _product_entry_redirect()
 
 
 @core.get("/health")
@@ -68,18 +64,13 @@ def module_state(module_slug: str):
 
 @core.get("/workflows/")
 def workflows_index():
-    workflows = _enabled_workflows()
-    return render_template(
-        "workflows_index.html",
-        workflows=workflows,
-        workflow_groups=_workflow_groups(workflows),
-    )
+    return _product_entry_redirect()
 
 
 @core.get("/workflows/<workflow_slug>/")
 def workflow_placeholder(workflow_slug: str):
-    workflow = _get_enabled_workflow_or_404(workflow_slug)
-    return render_template("workflow_placeholder.html", workflow=workflow)
+    _get_enabled_workflow_or_404(workflow_slug)
+    return redirect(url_for("active_learning_dashboard_workflow.index"))
 
 
 @core.errorhandler(404)
@@ -91,21 +82,15 @@ def _enabled_modules():
     return list_modules(current_app.config.get("ENABLED_MODULES"))
 
 
+def _product_entry_redirect():
+    endpoint = "active_learning_dashboard_workflow.index"
+    if endpoint in current_app.view_functions:
+        return redirect(url_for(endpoint))
+    return redirect(url_for("core.modules_index"))
+
+
 def _enabled_workflows():
     return list_workflows(current_app.config.get("ENABLED_MODULES"))
-
-
-def _workflow_groups(workflows):
-    groups = []
-    by_name = {}
-    for workflow in workflows:
-        group = by_name.get(workflow.group)
-        if group is None:
-            group = {"title": workflow.group, "workflows": []}
-            by_name[workflow.group] = group
-            groups.append(group)
-        group["workflows"].append(workflow)
-    return groups
 
 
 def _get_enabled_module_or_404(module_slug: str):

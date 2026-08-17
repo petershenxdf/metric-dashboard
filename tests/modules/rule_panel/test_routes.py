@@ -48,43 +48,6 @@ class RulePanelRouteTests(unittest.TestCase):
         self.assertNotIn("x", condition_features)
         self.assertNotIn("y", condition_features)
 
-    def test_interpret_api_returns_preview_schema(self):
-        response = self.client.get("/modules/rule-panel/api/interpret")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json["ok"])
-        data = response.json["data"]
-        self.assertEqual(data["provider_label"], "mock_rule_interpreter")
-        self.assertIn("categories", data)
-        self.assertEqual(response.json["diagnostics"]["provider_kind"], "mock")
-
-    def test_interpretation_api_returns_auditable_step_8_7_payload(self):
-        response = self.client.get("/modules/rule-panel/api/interpretation?provider_kind=mock")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json["ok"])
-        data = response.json["data"]
-        self.assertEqual(data["interpretation"]["provider_label"], "mock_rule_interpreter")
-        self.assertEqual(data["request_payload"]["dataset_id"], "wine_mat")
-        self.assertIn("known_rule_ids", data["request_payload"])
-        self.assertIn("label_candidate_point_profiles", data["request_payload"])
-        self.assertIn("label_targets", data["interpretation"])
-        self.assertIn("point_label_guidance", data["interpretation"])
-        self.assertEqual(data["diagnostics"]["validation"], "grounded_label_guidance")
-
-    def test_interpretation_api_accepts_focus_category(self):
-        response = self.client.get(
-            "/modules/rule-panel/api/interpretation?provider_kind=mock&focus_category=anomaly_label_review"
-        )
-
-        self.assertEqual(response.status_code, 200)
-        data = response.json["data"]
-        self.assertEqual(data["interpretation"]["categories"], ["anomaly_label_review"])
-        self.assertIn("recommendation", data["interpretation"])
-        self.assertGreater(len(data["interpretation"]["suggested_label_actions"]), 0)
-        self.assertEqual(data["request_payload"]["focus_category"], "anomaly_label_review")
-        self.assertEqual(data["diagnostics"]["focus_category"], "anomaly_label_review")
-
     def test_invalid_tree_depth_returns_error_envelope(self):
         response = self.client.get("/modules/rule-panel/api/rules?max_depth=0")
 

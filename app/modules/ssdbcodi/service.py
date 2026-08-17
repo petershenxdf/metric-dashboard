@@ -6,7 +6,6 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
-from app.modules.algorithm_adapters.clustering import kmeans
 from app.modules.labeling.schemas import LabelingState
 from app.shared.schemas import (
     AnalysisResult,
@@ -23,6 +22,7 @@ from .algorithm import (
     pairwise_euclidean,
     run_ssdbcodi_core,
 )
+from .bootstrap import kmeans
 from .schemas import PointScores, SeedRecord, SsdbcodiResult
 
 DEFAULT_BOOTSTRAP_K = 3
@@ -121,6 +121,70 @@ def merge_seeds(
     return merged
 
 
+def align_semantic_seeds_to_bootstrap(
+    values: Sequence[Sequence[float]],
+    manual_seeds: Mapping[int, str],
+    bootstrap_seeds: Mapping[int, str],
+) -> Tuple[Dict[int, str], Dict[str, str]]:
+    """Compile human types into stable, distinct bootstrap seed labels.
+
+    Points with the same human type keep one shared seed label. Different
+    human types use different existing bootstrap labels when possible, so a
+    semantic label does not accidentally create an extra group.
+    """
+
+    matrix = np.asarray(values, dtype=float)
+    aligned = dict(manual_seeds)
+    semantic_groups: Dict[str, list[int]] = {}
+    for index, label in manual_seeds.items():
+        if str(label).startswith("class:"):
+            semantic_groups.setdefault(str(label), []).append(index)
+    if not semantic_groups or not bootstrap_seeds:
+        return aligned, {}
+
+    bootstrap_by_label = {
+        label: index for index, label in bootstrap_seeds.items()
+    }
+    labels_already_locked = {
+        str(label)
+        for label in manual_seeds.values()
+        if not str(label).startswith("class:")
+    }
+    available_labels = set(bootstrap_by_label) - labels_already_locked
+    mapping: Dict[str, str] = {}
+    for semantic_label in sorted(semantic_groups):
+        indices = semantic_groups[semantic_label]
+        if available_labels:
+            chosen = sorted(
+                available_labels,
+                key=lambda bootstrap_label: (
+                    float(
+                        np.mean(
+                            [
+                                np.linalg.norm(
+                                    matrix[index]
+                                    - matrix[
+                                        bootstrap_by_label[
+                                            bootstrap_label
+                                        ]
+                                    ]
+                                )
+                                for index in indices
+                            ]
+                        )
+                    ),
+                    bootstrap_label,
+                ),
+            )[0]
+            available_labels.remove(chosen)
+        else:
+            chosen = semantic_label
+        mapping[semantic_label] = chosen
+        for index in indices:
+            aligned[index] = chosen
+    return aligned, mapping
+
+
 def run_ssdbcodi(
     feature_matrix: FeatureMatrix,
     labeling_state: Optional[LabelingState] = None,
@@ -158,6 +222,11 @@ def run_ssdbcodi(
         }
         used_bootstrap = True
 
+    manual_seeds, semantic_seed_mapping = align_semantic_seeds_to_bootstrap(
+        feature_matrix.values,
+        manual_seeds,
+        bootstrap_seeds,
+    )
     combined_seeds = merge_seeds(bootstrap_seeds, manual_seeds)
     if not combined_seeds:
         raise ValueError(
@@ -211,6 +280,8 @@ def run_ssdbcodi(
         "bootstrap_used": used_bootstrap,
         "labeled_outlier_count": len(labeled_outlier_indices),
         "manual_cluster_lock_count": len(manual_seeds),
+        "semantic_constraint_count": len(semantic_seed_mapping),
+        "semantic_seed_mapping": dict(semantic_seed_mapping),
     }
 
     cluster_run_id = _stable_run_id(
@@ -258,6 +329,8 @@ def run_ssdbcodi(
             "bootstrap_used": used_bootstrap,
             "rscore_weight": rscore_weight,
             "manual_cluster_lock_count": len(manual_seeds),
+            "semantic_constraint_count": len(semantic_seed_mapping),
+            "semantic_seed_mapping": dict(semantic_seed_mapping),
         },
     )
 
@@ -333,6 +406,8 @@ def run_ssdbcodi(
             "labeled_outlier_count": len(labeled_outlier_indices),
             "rscore_weight": rscore_weight,
             "manual_cluster_lock_count": len(manual_seeds),
+            "semantic_constraint_count": len(semantic_seed_mapping),
+            "semantic_seed_mapping": dict(semantic_seed_mapping),
             "execution_order": (
                 "kmeans_bootstrap_then_weighted_distance_assignment"
                 if used_bootstrap
@@ -373,9 +448,8 @@ class SsdbcodiProvider:
         outlier_n_neighbors: int = _PROTOCOL_DEFAULT_OUTLIER_N_NEIGHBORS,
         outlier_contamination: float = DEFAULT_CONTAMINATION,
     ) -> AnalysisResult:
-        # `outlier_n_neighbors` is the AnalysisProvider knob shared with LOF.
-        # SSDBCODI maps it onto `min_pts`. Callers that leave it at the LOF
-        # protocol default fall back to the provider's configured min_pts.
+        # The shared adapter names this compatibility knob outlier_n_neighbors;
+        # SSDBCODI maps it to min_pts.
         effective_min_pts = (
             self._min_pts
             if outlier_n_neighbors == _PROTOCOL_DEFAULT_OUTLIER_N_NEIGHBORS
@@ -398,7 +472,6 @@ class SsdbcodiProvider:
                 "provider": self.name,
                 "adapter_boundary": "algorithm_adapters",
                 "execution_order": ["kmeans_bootstrap", "ssdbcodi_integrated"],
-                "legacy_provider": "sequential_lof_then_kmeans",
                 "score_fields": ("r_score", "l_score", "sim_score", "t_score"),
                 "rscore_weight": self._rscore_weight,
             }

@@ -1,8 +1,7 @@
 """Shared request helpers for workflow and module Flask routes.
 
-Kept under `app/shared/` so that scatterplot (a module) and the Step 1-6
-workflow pages can all share the same small parsing helpers without creating
-a module -> workflows layering dependency.
+Kept under `app/shared/` so module labs and the product workflow can share the
+same parsing helpers without creating a module -> workflows dependency.
 """
 
 from __future__ import annotations

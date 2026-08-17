@@ -204,6 +204,95 @@ class SsdbcodiServiceTests(unittest.TestCase):
         self.assertFalse(relabeled.is_outlier)
         self.assertEqual(result.diagnostics["manual_cluster_lock_count"], 1)
 
+    def test_semantic_class_is_compiled_to_an_existing_bootstrap_group(self):
+        labeling_state = LabelingState(
+            dataset_id=ssdbcodi_dataset_id(),
+            annotations=(
+                ManualAnnotation(
+                    annotation_id="semantic-a1",
+                    dataset_id=ssdbcodi_dataset_id(),
+                    source="active_learning",
+                    scope="point",
+                    point_ids=("ring_a_01",),
+                    label_type="class",
+                    label_value="type_alpha",
+                ),
+                ManualAnnotation(
+                    annotation_id="semantic-a2",
+                    dataset_id=ssdbcodi_dataset_id(),
+                    source="active_learning",
+                    scope="point",
+                    point_ids=("ring_a_02",),
+                    label_type="class",
+                    label_value="type_alpha",
+                ),
+            ),
+        )
+
+        result = run_ssdbcodi(
+            self.matrix,
+            labeling_state=labeling_state,
+            n_clusters=3,
+        )
+
+        assigned = {
+            score.point_id: score.cluster_id
+            for score in result.point_scores
+            if score.point_id in {"ring_a_01", "ring_a_02"}
+        }
+        self.assertEqual(assigned["ring_a_01"], assigned["ring_a_02"])
+        self.assertIn(assigned["ring_a_01"], {"cluster_1", "cluster_2", "cluster_3"})
+        self.assertFalse(
+            any(
+                assignment.cluster_id.startswith("class:")
+                for assignment in result.cluster_result.assignments
+            )
+        )
+        self.assertEqual(result.diagnostics["semantic_constraint_count"], 1)
+        self.assertEqual(
+            result.cluster_result.diagnostics["semantic_seed_mapping"],
+            result.parameters["semantic_seed_mapping"],
+        )
+
+    def test_different_semantic_classes_use_distinct_bootstrap_groups(self):
+        labeling_state = LabelingState(
+            dataset_id=ssdbcodi_dataset_id(),
+            annotations=(
+                ManualAnnotation(
+                    annotation_id="semantic-a",
+                    dataset_id=ssdbcodi_dataset_id(),
+                    source="active_learning",
+                    scope="point",
+                    point_ids=("ring_a_01",),
+                    label_type="class",
+                    label_value="type_alpha",
+                ),
+                ManualAnnotation(
+                    annotation_id="semantic-b",
+                    dataset_id=ssdbcodi_dataset_id(),
+                    source="active_learning",
+                    scope="point",
+                    point_ids=("ring_b_01",),
+                    label_type="class",
+                    label_value="type_beta",
+                ),
+            ),
+        )
+
+        result = run_ssdbcodi(
+            self.matrix,
+            labeling_state=labeling_state,
+            n_clusters=3,
+        )
+
+        assigned = {
+            score.point_id: score.cluster_id
+            for score in result.point_scores
+            if score.point_id in {"ring_a_01", "ring_b_01"}
+        }
+        self.assertNotEqual(assigned["ring_a_01"], assigned["ring_b_01"])
+        self.assertEqual(result.diagnostics["semantic_constraint_count"], 2)
+
     def test_run_ssdbcodi_persists_intermediate_scores(self):
         result = run_ssdbcodi(self.matrix, n_clusters=3)
 

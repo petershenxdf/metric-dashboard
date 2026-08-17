@@ -2,7 +2,7 @@ import unittest
 
 from app.modules.algorithm_adapters.service import run_default_analysis
 from app.modules.rule_panel.schemas import TreeConfig
-from app.modules.rule_panel.service import generate_rule_set, interpret_rule_set_preview
+from app.modules.rule_panel.service import generate_rule_set
 from app.shared.wine_dataset import (
     WINE_DATASET_ID,
     WINE_FEATURE_NAMES,
@@ -75,21 +75,6 @@ class RulePanelServiceTests(unittest.TestCase):
         second = generate_rule_set(self.matrix, self.analysis, dataset_id=self.dataset.dataset_id)
 
         self.assertEqual(first.to_dict(), second.to_dict())
-
-    def test_interpretation_preview_uses_allowed_categories(self):
-        rule_set = generate_rule_set(self.matrix, self.analysis, dataset_id=self.dataset.dataset_id)
-        interpretation = interpret_rule_set_preview(rule_set)
-
-        self.assertIn("label_priority", interpretation.categories)
-        self.assertIn("feature_label_strategy", interpretation.categories)
-        self.assertIn("recommendation", interpretation.to_dict())
-        self.assertGreater(len(interpretation.label_targets), 0)
-        self.assertGreater(len(interpretation.suspicion_reasons), 0)
-        self.assertGreater(len(interpretation.point_label_guidance), 0)
-        self.assertGreater(len(interpretation.quantitative_findings), 0)
-        self.assertGreater(len(interpretation.suggested_label_actions), 0)
-        self.assertGreater(len(interpretation.target_rule_ids), 0)
-
 
 if __name__ == "__main__":
     unittest.main()

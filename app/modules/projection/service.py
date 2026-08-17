@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from functools import lru_cache
 from typing import Dict, Mapping, Tuple
 
 from app.shared.schemas import FeatureMatrix, ProjectionCoordinate, ProjectionResult
@@ -12,8 +13,16 @@ MDS_METHOD = "mds"
 SVG_WIDTH = 860
 SVG_HEIGHT = 520
 SVG_PADDING = 56
-GROUP_COLORS = ["#2f6fed", "#188038", "#d93025", "#f9ab00", "#9334e6", "#00897b"]
-DEFAULT_COLOR = "#2f6fed"
+GROUP_COLORS = [
+    "#0072b2",
+    "#009e73",
+    "#d55e00",
+    "#e69f00",
+    "#cc79a7",
+    "#56b4e9",
+    "#000000",
+]
+DEFAULT_COLOR = "#0072b2"
 
 
 def project_feature_matrix(
@@ -23,20 +32,27 @@ def project_feature_matrix(
     if not isinstance(feature_matrix, FeatureMatrix):
         raise ValueError("feature_matrix must be a FeatureMatrix")
 
+    projection_coordinates = _cached_projection_coordinates(feature_matrix)
+
+    return ProjectionResult(
+        projection_id=projection_id or _projection_id(feature_matrix),
+        method=MDS_METHOD,
+        coordinates=projection_coordinates,
+    )
+
+
+@lru_cache(maxsize=4)
+def _cached_projection_coordinates(
+    feature_matrix: FeatureMatrix,
+) -> Tuple[ProjectionCoordinate, ...]:
     coordinates = classical_mds(feature_matrix.values, n_components=2)
-    projection_coordinates = tuple(
+    return tuple(
         ProjectionCoordinate(
             point_id=point_id,
             x=float(coordinates[index, 0]),
             y=float(coordinates[index, 1]),
         )
         for index, point_id in enumerate(feature_matrix.point_ids)
-    )
-
-    return ProjectionResult(
-        projection_id=projection_id or _projection_id(feature_matrix),
-        method=MDS_METHOD,
-        coordinates=projection_coordinates,
     )
 
 

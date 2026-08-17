@@ -1,78 +1,39 @@
-# Module Debug Page Checklist
+# Module Debug Checklist
 
-Use this checklist for every module page under `/modules/<module_name>/`.
-For multi-module workflow pages, use `docs/workflows.md` alongside this
-module-level checklist.
+Use module pages to verify a component in isolation. The final product remains the active-learning dashboard.
 
-## Required Page Content
+## For Every Retained Module
 
-1. Module name.
-2. Module status: missing, stubbed, working, or integrated.
-3. What data is real and what data is mocked.
-4. Main visible output.
-5. JSON/state preview.
-6. Links to relevant API endpoints.
-7. Links to related workflow pages.
+- Blueprint is registered through app/module_registry.py.
+- /modules/<slug>/ loads.
+- /modules/<slug>/health returns the shared envelope.
+- /modules/<slug>/api/state returns an ownership-focused summary.
+- Pure service tests pass.
+- Route tests pass.
+- Fixtures are deterministic and clearly marked as debug data.
+- The module does not import app/workflows.
+- Links point to the active-learning product, not deleted workflows.
+- User-facing terminology matches the final dashboard.
 
-## Required API Content
+## Boundary Checks
 
-Each module should have:
+- data_workspace: validates Dataset and FeatureMatrix contracts.
+- projection: owns coordinates, not labels or clusters.
+- algorithm_adapters: exposes AnalysisResult and delegates to SSDBCODI.
+- selection: owns selected IDs only.
+- labeling: owns annotations only.
+- scatterplot: renders supplied state and delegates actions.
+- ssdbcodi: owns clustering/outlier computation and scores.
+- rule_panel: owns explanation rules and deterministic plan construction.
 
-```text
-/modules/<module_name>/health
-```
+## Final Workflow Check
 
-Each module should also have at least one state or primary data API. The exact route can match the module purpose, for example:
+After a module change, create an active-learning session and verify that import, analysis, rules, recommendation, plot linking, label commit, and the next round still work.
 
-```text
-/modules/data-workspace/api/dataset
-/modules/projection/api/projection
-/modules/selection/api/state
-/modules/labeling/api/state
-```
+## Completion
 
-If the module performs actions, add action APIs:
-
-```text
-/modules/<module_name>/api/<action>
-```
-
-Examples:
-
-```text
-/modules/selection/api/select
-/modules/labeling/api/apply
-/modules/chatbox/api/messages
-/modules/intent-instruction/api/compile
-```
-
-## Required Tests
-
-Each module should have:
-
-1. service tests.
-2. route smoke tests.
-3. API response shape tests.
-4. at least one documented manual browser check.
-
-## Manual Browser Check
-
-After starting Flask:
-
-```powershell
-python run.py
-```
-
-Open:
-
-```text
-http://127.0.0.1:5001/modules/<module_name>/
-```
-
-Confirm:
-
-1. page loads.
-2. fixture data appears.
-3. main output is visible.
-4. JSON/state panel matches expected state.
-5. interactions work if the module is interactive.
+~~~bash
+python -m unittest discover -s tests
+python -m compileall app tests
+git diff --check
+~~~

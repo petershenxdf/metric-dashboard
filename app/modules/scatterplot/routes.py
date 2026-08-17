@@ -32,7 +32,7 @@ def create_blueprint() -> Blueprint:
     def index():
         return render_template(
             "scatterplot/index.html",
-            dependency_mode="real Step 1-5 fixture state",
+            dependency_mode="integrated module fixture state",
             **scatterplot_fixture_state(_n_clusters_from_request()),
         )
 
@@ -41,7 +41,7 @@ def create_blueprint() -> Blueprint:
         return jsonify(
             api_success(
                 {"module": "scatterplot", "status": "working"},
-                diagnostics={"dependency_mode": "real Step 1-5 fixture state"},
+                diagnostics={"dependency_mode": "integrated module fixture state"},
             )
         )
 
@@ -51,7 +51,7 @@ def create_blueprint() -> Blueprint:
         return jsonify(
             api_success(
                 state["render_payload"].to_dict(),
-                diagnostics={"dependency_mode": "real Step 1-5 fixture state"},
+                diagnostics={"dependency_mode": "integrated module fixture state"},
             )
         )
 
@@ -70,7 +70,7 @@ def create_blueprint() -> Blueprint:
                     "annotation_count": len(state["labeling_state"].annotations),
                     "render_id": render_payload.render_id,
                 },
-                diagnostics={"dependency_mode": "real Step 1-5 fixture state"},
+                diagnostics={"dependency_mode": "integrated module fixture state"},
             )
         )
 
@@ -92,7 +92,7 @@ def create_blueprint() -> Blueprint:
         return jsonify(
             api_success(
                 {"groups": groups, "group_count": len(groups)},
-                diagnostics={"dependency_mode": "real Step 1-5 fixture state"},
+                diagnostics={"dependency_mode": "integrated module fixture state"},
             )
         )
 
@@ -113,7 +113,7 @@ def create_blueprint() -> Blueprint:
         return jsonify(
             api_success(
                 {"group": group.to_dict(), "groups": selection_groups_payload(scatterplot_fixture_state(_n_clusters_from_request())["selection_store"])},
-                diagnostics={"dependency_mode": "real Step 1-5 fixture state"},
+                diagnostics={"dependency_mode": "integrated module fixture state"},
             )
         )
 
@@ -127,7 +127,7 @@ def create_blueprint() -> Blueprint:
         return jsonify(
             api_success(
                 {"selection": result.to_dict(), "groups": selection_groups_payload(scatterplot_fixture_state(_n_clusters_from_request())["selection_store"])},
-                diagnostics={"dependency_mode": "real Step 1-5 fixture state"},
+                diagnostics={"dependency_mode": "integrated module fixture state"},
             )
         )
 
@@ -141,7 +141,7 @@ def create_blueprint() -> Blueprint:
         return jsonify(
             api_success(
                 {"deleted_group": group.to_dict(), "groups": selection_groups_payload(scatterplot_fixture_state(_n_clusters_from_request())["selection_store"])},
-                diagnostics={"dependency_mode": "real Step 1-5 fixture state"},
+                diagnostics={"dependency_mode": "integrated module fixture state"},
             )
         )
 
@@ -168,7 +168,7 @@ def _selection_action_response(action_name: str):
                 "selection_context": get_selection_context(refreshed["selection_store"]).to_dict(),
                 "render_payload": refreshed["render_payload"].to_dict(),
             },
-            diagnostics={"dependency_mode": "real Step 1-5 fixture state"},
+            diagnostics={"dependency_mode": "integrated module fixture state"},
         )
     )
 

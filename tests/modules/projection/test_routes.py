@@ -46,16 +46,5 @@ class ProjectionRouteTests(unittest.TestCase):
         self.assertEqual(response.json["data"]["method"], "mds")
         self.assertEqual(response.json["data"]["coordinate_count"], 15)
 
-    def test_data_projection_workflow_loads(self):
-        response = self.client.get("/workflows/data-projection/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Data and Projection", response.data)
-        self.assertIn(b"Projection Plot", response.data)
-        self.assertIn(b"15 rows by 4 columns", response.data)
-        self.assertIn(b"FeatureMatrix Payload", response.data)
-        self.assertIn(b"ProjectionResult Payload", response.data)
-
-
 if __name__ == "__main__":
     unittest.main()

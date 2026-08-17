@@ -20,7 +20,6 @@ def _install_blueprint_method_shortcuts() -> None:
 
 _install_blueprint_method_shortcuts()
 
-from .mockups import mockups
 from .module_registry import register_modules, register_workflows
 from .routes import core
 
@@ -31,6 +30,5 @@ def create_app(enabled_modules: list[str] | None = None) -> Flask:
 
     register_modules(app, enabled_modules)
     register_workflows(app, enabled_modules)
-    app.register_blueprint(mockups)
     app.register_blueprint(core)
     return app

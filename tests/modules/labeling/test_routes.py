@@ -81,13 +81,5 @@ class LabelingRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["data"]["annotation_count"], 0)
 
-    def test_selection_labeling_workflow_loads(self):
-        response = self.client.get("/workflows/selection-labeling/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Selection and Labeling", response.data)
-        self.assertIn(b"Structured Feedback", response.data)
-
-
 if __name__ == "__main__":
     unittest.main()

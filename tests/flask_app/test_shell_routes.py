@@ -22,16 +22,17 @@ class FlaskShellRouteTests(unittest.TestCase):
     def test_home_route(self):
         response = self.client.get("/")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Metric Dashboard", response.data)
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response.headers["Location"].endswith(
+                "/workflows/active-learning-dashboard/"
+            )
+        )
 
-    def test_final_dashboard_mockup_route(self):
+    def test_removed_mockup_route_returns_404(self):
         response = self.client.get("/mockups/final-dashboard/")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Final Dashboard Mockup", response.data)
-        self.assertIn(b"Scatterplot", response.data)
-        self.assertIn(b"Structured Instruction", response.data)
+        self.assertEqual(response.status_code, 404)
 
     def test_modules_index_lists_planned_modules(self):
         response = self.client.get("/modules/")
@@ -66,23 +67,22 @@ class FlaskShellRouteTests(unittest.TestCase):
                 self.assertTrue(response.json["ok"])
                 self.assertEqual(response.json["data"]["module"], module.slug)
 
-    def test_workflows_index_lists_workflows(self):
+    def test_workflows_index_redirects_to_product_entry(self):
         response = self.client.get("/workflows/")
 
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response.headers["Location"].endswith(
+                "/workflows/active-learning-dashboard/"
+            )
+        )
+
+    def test_active_learning_workflow_entry_loads(self):
+        self.assertEqual(len(WORKFLOWS), 1)
+        response = self.client.get("/workflows/active-learning-dashboard/")
+
         self.assertEqual(response.status_code, 200)
-        for workflow in WORKFLOWS:
-            self.assertIn(workflow.title.encode("utf-8"), response.data)
-
-    def test_each_workflow_placeholder_page_loads(self):
-        for workflow in WORKFLOWS:
-            with self.subTest(workflow=workflow.slug):
-                response = self.client.get(f"/workflows/{workflow.slug}/")
-
-                self.assertEqual(response.status_code, 200)
-                if workflow.slug == "intent-runtime-validation":
-                    self.assertIn(b"Live Intent Runtime Validation", response.data)
-                else:
-                    self.assertIn(workflow.title.encode("utf-8"), response.data)
+        self.assertIn(b"Active Learning Dashboard", response.data)
 
     def test_unknown_module_returns_404_envelope(self):
         response = self.client.get("/modules/not-real/")
@@ -92,14 +92,14 @@ class FlaskShellRouteTests(unittest.TestCase):
         self.assertEqual(response.json["error"]["code"], "not_found")
 
     def test_enabled_module_filter(self):
-        modules = list_modules(["chatbox", "intent-instruction"])
+        modules = list_modules(["selection", "rule-panel"])
 
-        self.assertEqual([module.slug for module in modules], ["chatbox", "intent-instruction"])
+        self.assertEqual([module.slug for module in modules], ["selection", "rule-panel"])
 
     def test_enabled_workflow_filter(self):
         workflows = list_workflows(["data-workspace", "projection"])
 
-        self.assertEqual([workflow.slug for workflow in workflows], ["data-projection"])
+        self.assertEqual(workflows, ())
 
     def test_app_factory_mounts_only_enabled_module_pages(self):
         app = create_app(enabled_modules=["data-workspace"])
@@ -112,19 +112,19 @@ class FlaskShellRouteTests(unittest.TestCase):
         self.assertEqual(projection_response.status_code, 404)
 
     def test_app_factory_mounts_workflow_when_required_modules_are_enabled(self):
-        app = create_app(enabled_modules=["data-workspace", "projection"])
+        app = create_app(enabled_modules=[module.slug for module in MODULES])
         client = app.test_client()
 
-        response = client.get("/workflows/data-projection/")
+        response = client.get("/workflows/active-learning-dashboard/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Data and Projection", response.data)
+        self.assertIn(b"Active Learning Dashboard", response.data)
 
     def test_app_factory_hides_workflow_when_required_modules_are_disabled(self):
         app = create_app(enabled_modules=["projection"])
         client = app.test_client()
 
-        response = client.get("/workflows/data-projection/")
+        response = client.get("/workflows/active-learning-dashboard/")
 
         self.assertEqual(response.status_code, 404)
 

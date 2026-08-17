@@ -52,8 +52,6 @@
       <dd>{{ analysis.diagnostics.provider if analysis else "ssdbcodi" }}</dd>
       <dt>Execution order</dt>
       <dd>{{ analysis.diagnostics.execution_order | join(" -> ") if analysis else "kmeans_bootstrap -> ssdbcodi_integrated" }}</dd>
-      <dt>Legacy provider</dt>
-      <dd>sequential_lof_then_kmeans</dd>
     </dl>
 
     <div class="actions">

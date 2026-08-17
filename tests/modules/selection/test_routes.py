@@ -156,13 +156,5 @@ class SelectionRouteTests(unittest.TestCase):
         self.assertFalse(response.json["ok"])
         self.assertEqual(response.json["error"]["code"], "invalid_selection_group")
 
-    def test_selection_context_workflow_loads(self):
-        response = self.client.get("/workflows/selection-context/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Selection Context", response.data)
-        self.assertIn(b"Selection Context Payload", response.data)
-
-
 if __name__ == "__main__":
     unittest.main()

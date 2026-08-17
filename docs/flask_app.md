@@ -1,178 +1,57 @@
-# Local Flask App Design
+# Flask Application
 
-## 1. Purpose
+## App Factory
 
-This project should run as one simple local Flask app.
+app.create_app(enabled_modules=None) creates the Flask app, registers retained module blueprints, registers the active-learning workflow when all dependencies are enabled, and then registers core routes.
 
-The Flask app is not only the final product shell. It is also the main visual testing environment for each module.
+The optional enabled_modules argument supports isolated module tests. Navigation therefore targets core proxy routes that remain valid when the product workflow is not mounted.
 
-## 2. Local Run Command
+## Core Routes
 
-Primary command:
+| Route | Behavior |
+| --- | --- |
+| / | Redirect to the active-learning product |
+| /health | Application health envelope |
+| /modules/ | Retained module-lab index |
+| /modules/<slug>/ | Module debug page |
+| /modules/<slug>/health | Module health |
+| /modules/<slug>/api/state | Module state summary |
+| /workflows/ | Redirect to the active-learning product |
 
-```powershell
-python run.py
-```
+Unknown module and workflow slugs return the shared 404 envelope.
 
-Expected local URL:
+## Product Routes
 
-```text
-http://127.0.0.1:5001
-```
+| Route | Behavior |
+| --- | --- |
+| /workflows/active-learning-dashboard/ | Import, fixture, dataset, and session index |
+| /workflows/active-learning-dashboard/import | Browser upload and session creation |
+| /workflows/active-learning-dashboard/wine-fixture | Generic Wine fixture session |
+| /workflows/active-learning-dashboard/<session_id>/ | Final session dashboard |
 
-The default port is `5001` to avoid the common macOS AirPlay / Control Center
-collision on `5000`. Use `PORT=5002 python run.py` to choose another port.
+The JSON API is documented in state_and_api_contracts.md.
 
-No deployment, Docker, cloud setup, auth system, or production database is required at this stage.
+## Registry
 
-## 3. App Factory
+app/module_registry.py lazily imports blueprints. A module entry contains slug, package name, title, purpose, status, and blueprint factory.
 
-The app should use a small app factory:
+The single WorkflowInfo entry depends on every retained module. When create_app enables only a subset, the workflow is intentionally absent while module labs remain testable.
 
-```python
-def create_app(enabled_modules=None):
-    app = Flask(__name__)
-    register_core_routes(app)
-    register_modules(app, enabled_modules)
-    register_workflows(app, enabled_modules)
-    return app
-```
+## Response Envelope
 
-The app factory should make it easy to enable a single module, a group of modules, or the full dashboard.
+Successful APIs return:
 
-## 4. Module Registry
+~~~json
+{
+  "ok": true,
+  "data": {},
+  "error": null,
+  "diagnostics": {}
+}
+~~~
 
-Use a central module registry:
+Errors return ok=false and an error object with a stable code and message. Conflict responses use HTTP 409; validation errors use HTTP 400; unknown resources use HTTP 404.
 
-```python
-ModuleInfo(
-    slug="data-workspace",
-    package_name="data_workspace",
-    title="Data Workspace",
-    purpose="Dataset loading, point IDs, metadata, and feature matrix.",
-    status="working",
-    blueprint_factory=data_workspace.create_blueprint,
-)
-```
+## Runtime
 
-The dashboard shell should register modules through this registry. Modules should not import the dashboard shell.
-
-## 5. Required Routes
-
-App routes:
-
-```text
-/                         integrated dashboard home
-/health                   app health
-/modules/                 module lab index
-/workflows/               workflow demo index
-```
-
-Module routes:
-
-```text
-/modules/<module>/        visible module debug page
-/modules/<module>/health  module health
-/modules/<module>/api/... module state/action APIs
-```
-
-Workflow routes:
-
-```text
-/workflows/data-projection/
-/workflows/default-analysis/
-/workflows/selection-context/
-/workflows/selection-labeling/
-/workflows/analysis-selection/
-/workflows/analysis-labeling/
-/workflows/scatter-selection/
-/workflows/scatter-labeling/
-/workflows/provider-feedback/
-/workflows/chat-selection/
-/workflows/chat-intent/
-/workflows/intent-runtime-validation/
-/workflows/rule-panel-validation/          Step 8.6 rule-card validation
-/workflows/rule-interpretation/            Step 8.7 categorized LLM interpretation
-```
-
-`/workflows/` groups these routes by debug purpose:
-
-1. core pipeline smoke tests,
-2. state boundary probes,
-3. visual integration tests,
-4. provider diagnostics,
-5. feedback pipeline and runtime validation,
-6. future rule workflows.
-
-See `docs/workflows.md` for the detailed workflow map and route stability rule.
-
-## 6. Module Debug Page Standard
-
-Every module debug page should include:
-
-1. Module name and status.
-2. Input fixture controls or example inputs.
-3. Main visible output.
-4. JSON/state preview.
-5. Links to related APIs.
-6. Clear notes about what is real and what is mocked.
-
-For example:
-
-1. `data_workspace` shows a dataset table and feature matrix preview.
-2. `projection` shows an SVG MDS plot and coordinate table.
-3. `selection` shows clickable points and selected/unselected JSON.
-4. `labeling` shows selected points converted into cluster/outlier annotations.
-5. `analysis-labeling` shows Steps 1-5 together on one visual debug page.
-6. `scatterplot` shows the Step 1-6 render payload with click/rectangle selection, saved groups, adjustable clusters, and labeling workflows.
-7. `provider-feedback` shows the Step 6.5 provider contract between `algorithm_adapters` and SSDBCODI score diagnostics.
-8. `chatbox` shows a chat UI with read-only selection and labeling context, full suggestion chips, and the `MockIntentProvider` instruction snapshot.
-9. `intent-instruction` shows the two-stage router + extractor debug view: the active LLM provider label, example messages grouped by intent, a try-a-message form, and the resulting router category, `InstructionDelta`, and current `StructuredInstruction` state.
-10. `/workflows/intent-runtime-validation/` is a composite visual lab: it embeds the real scatterplot plus real selection and labeling context, then adds provider controls, memory state, incomplete draft state, and evaluation diagnostics for the first live-model gate.
-11. `rule-panel` should show decision-tree rule cards for current clusters and anomalies, including conditions, support, coverage, purity, matched points, and exceptions.
-12. `/workflows/rule-interpretation/` should show generated rules beside categorized DeepSeek explanations.
-
-## 7. Testing Layers
-
-Each module should have three testing layers:
-
-1. Unit tests
-   - Pure Python tests for schemas and services.
-
-2. Flask tests
-   - Flask test client verifies routes and APIs.
-
-3. Browser/manual checks
-   - Developer opens the module page and inspects the visual state.
-
-Unit tests are necessary, but they are not enough.
-
-## 8. Local State
-
-For early development, use simple local state:
-
-1. in-memory state for current dataset, selection, and manual annotations.
-2. fixtures for repeatable module demos.
-3. no production database.
-
-If persistence becomes useful later, prefer a small local JSON or SQLite layer, but do not add it early unless needed.
-
-## 9. Frontend Simplicity
-
-Use:
-
-1. Flask templates.
-2. simple CSS.
-3. vanilla JavaScript for interactions.
-4. SVG or canvas for visualization.
-
-Avoid a heavy frontend framework unless the project clearly needs it later.
-
-## 10. Completion Rule
-
-A module is not complete until:
-
-1. its service tests pass.
-2. its Flask route tests pass.
-3. its module debug page can be opened locally.
-4. its debug page makes the module behavior visible.
+run.py loads the local .env file, creates the app, and listens on port 5001 by default. Persistent active-learning data is resolved from METRIC_DASHBOARD_ACTIVE_LEARNING_DB_PATH relative to the repository root unless an absolute path is supplied.

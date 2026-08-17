@@ -8,7 +8,7 @@ from app.modules.algorithm_adapters.service import (
 from app.shared.wine_dataset import WINE_DATASET_ID, load_wine_dataset, load_wine_feature_matrix
 
 from .schemas import TreeConfig
-from .service import generate_rule_set, interpret_rule_set_preview
+from .service import generate_rule_set
 
 
 RULE_PANEL_DATASET_ID = WINE_DATASET_ID
@@ -30,8 +30,6 @@ def rule_panel_fixture_state(
         dataset_id=dataset.dataset_id,
         config=config,
     )
-    interpretation = interpret_rule_set_preview(rule_set)
-
     return {
         "dataset": dataset,
         "feature_matrix": feature_matrix,
@@ -39,5 +37,4 @@ def rule_panel_fixture_state(
         "cluster_counts": cluster_counts(analysis.cluster_result),
         "tree_config": config,
         "rule_set": rule_set,
-        "interpretation": interpretation,
     }

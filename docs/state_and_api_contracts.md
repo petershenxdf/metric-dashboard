@@ -1,520 +1,181 @@
-# Local State and API Contracts
+# State And API Contracts
 
-## 1. Purpose
-
-This document defines how modules should share state and shape API responses in the local Flask app.
-
-The goal is simple local development, not production infrastructure.
-
-## 2. Local State Rule
-
-Use in-memory state during early development.
-
-Do not add a production database early.
-
-Suggested app state:
-```python
-class AppState:
-    dataset = None
-    feature_matrix = None
-    projection = None
-    cluster_result = None
-    outlier_result = None
-    ssdbcodi_result = None               # SsdbcodiResult with per-point scores
-    selection = None
-    selection_groups = []
-    annotations = []
-    chat_history = []                  # legacy Step 7/8 chat state
-    structured_instruction = None      # legacy Step 8 state
-    intent_memory = None               # legacy Step 8.5 transcript / summary / facts / draft
-    runtime_validation_report = None   # Step 8.5 provider / evaluation diagnostics
-    rule_set = None                    # generated decision-tree rules for clusters/anomalies
-    rule_interpretation = None         # categorized DeepSeek interpretation of rules
-```
-
-This can start as a simple object or dictionary attached to `app.config` or a small state module.
-
-## 3. State Ownership
-
-Each state area has one owner:
+## Ownership
 
 | State | Owner |
 | --- | --- |
-| dataset and feature matrix | `data_workspace` |
-| projection coordinates | `projection` |
-| cluster assignments | `algorithm_adapters` backed by SSDBCODI; `ssdbcodi` debug store for standalone runs |
-| outlier scores | `algorithm_adapters` backed by SSDBCODI `tScore`; `ssdbcodi` debug store for standalone runs |
-| SSDBCODI intermediate scores (`rScore`, `lScore`, `simScore`, `tScore`) | `ssdbcodi` |
-| selected point IDs | `selection` |
-| manual cluster/outlier annotations | `labeling` |
-| chat history | `chatbox` (legacy Step 7/8 surface) |
-| structured instruction state, conversation memory, extracted facts, draft state, clarification agenda, provider runtime config | `intent_instruction` (legacy Step 8/8.5 surface, provider runtime reused for rule interpretation) |
-| generated cluster/anomaly rules (`RuleSet`) | `rule_panel` |
-| categorized DeepSeek rule interpretation (`RuleInterpretation`) | `rule_panel` |
-
-Other modules may read state through contracts, but should not mutate state they do not own.
-
-SSDBCODI follows the same ownership split on its debug page and when used
-through `algorithm_adapters`: selection remains owned by `selection`, manual
-labels remain owned by `labeling`, and `ssdbcodi` owns only its computed
-result/history/scores. `POST
-/modules/ssdbcodi/api/label` records pending labeling feedback; `POST
-/modules/ssdbcodi/api/run` is the explicit boundary that recomputes and stores
-SSDBCODI output. These states are scoped by `dataset_id` for the module's
-debug fixtures.
-
-Structured feedback can originate from two modules:
-
-1. `labeling` for direct UI actions such as assigning selected points to a cluster or marking outliers.
-2. `intent_instruction` for chat-derived feedback. This module owns a single evolving `StructuredInstruction` state, updated turn by turn through deltas rather than regenerated from scratch. The narrow `InstructionSnapshot` view (version, constraints, last_delta) consumed by chatbox is promoted to `app/shared/schemas.py` so `intent_instruction` and `chatbox` can share the shape without one importing the other.
-
-Step 8.5 extends `intent_instruction` ownership beyond final instruction state.
-The module also owns:
-
-1. an append-only transcript log,
-2. a rolling summary that can be passed to the live model,
-3. extracted facts with provenance, confidence, and confirmation state,
-4. an `InstructionDraft` for relevant-but-incomplete feedback,
-5. an irrelevant-turn log so off-topic chatter is auditable but does not pollute the draft,
-6. provider/runtime health and evaluation status,
-7. direct AI reply traces for the Step 8.5 interaction lab.
-
-`intent_instruction` is also responsible for allocating stable constraint IDs. The extractor emits `InstructionDelta` operations with `constraint_id: "pending"`; the service rewrites those to monotonic IDs (`c1`, `c2`, ...) inside `apply_delta` and advances the version counter on the owning `IntentInstructionStore`. Off-topic, meta-query, and ambiguous messages never mutate this state.
-
-Step 7, Step 8, and Step 8.5 are now legacy foundations. The active roadmap
-after Step 8.5 is the rule panel:
-
-1. `rule_panel` reads dataset, feature matrix, SSDBCODI cluster/outlier
-   results, per-point scores, and optional labeling state.
-2. `rule_panel` trains shallow decision-tree surrogates using SSDBCODI labels
-   and anomaly flags as fixed targets, then emits a read-only `RuleSet`. These
-   trees do not own or replace clustering/outlier detection.
-3. `rule_panel` sends that `RuleSet` to the configured LLM provider and stores
-   a categorized `RuleInterpretation`.
-
-`RuleInterpretation` label/refinement categories:
-
-- `label_priority`
-- `boundary_review`
-- `overlap_merge_signal`
-- `split_or_new_cluster_signal`
-- `anomaly_label_review`
-- `exception_relabel_review`
-- `feature_label_strategy`
-- `rule_confidence_audit`
-
-`RuleInterpretation` must include `recommendation`,
-`quantitative_findings`, and `suggested_label_actions`. The interpretation
-request includes computed `rule_guidance_metrics` so overlap and boundary
-claims are numeric and auditable.
-
-Old branching update state is no longer part of the suggested app state. Do not
-add those state branches unless the roadmap is explicitly reopened.
-
-## 4. API Response Envelope
-
-Use a consistent JSON response shape for debug APIs:
-
-```json
-{
-  "ok": true,
-  "data": {},
-  "error": null,
-  "diagnostics": {}
-}
-```
-
-For errors:
-
-```json
-{
-  "ok": false,
-  "data": null,
-  "error": {
-    "code": "invalid_input",
-    "message": "selected point id is unknown"
-  },
-  "diagnostics": {}
-}
-```
-
-This makes module pages and workflow pages easier to debug.
-
-## 5. Route Naming Convention
-
-Python package names should use snake_case:
-
-```text
-data_workspace
-intent_instruction
-labeling
-rule_panel
-```
-
-Flask route slugs should use kebab-case:
-
-```text
-data-workspace
-intent-instruction
-labeling
-rule-panel
-```
-
-The module registry should define the mapping explicitly.
-
-## 6. Required Module APIs
-
-Each module should expose:
-
-```text
-/modules/<module>/health
-```
-
-Each module should expose at least one state or primary data API, such as:
-
-```text
-/modules/data-workspace/api/dataset
-/modules/projection/api/projection
-/modules/algorithm-adapters/api/outliers
-/modules/algorithm-adapters/api/clusters
-/modules/algorithm-adapters/api/analysis
-/modules/ssdbcodi/api/state
-/modules/ssdbcodi/api/scores
-/modules/ssdbcodi/api/result
-/modules/selection/api/state
-/modules/selection/api/context
-/modules/selection/api/groups
-/modules/labeling/api/state
-/modules/chatbox/api/context
-```
-
-Interactive modules should expose action APIs:
-
-```text
-/modules/selection/api/select
-/modules/selection/api/deselect
-/modules/selection/api/replace
-/modules/selection/api/toggle
-/modules/selection/api/clear
-/modules/selection/api/groups
-/modules/selection/api/groups/<id>/select
-/modules/labeling/api/apply
-/modules/ssdbcodi/api/run
-/modules/ssdbcodi/api/select
-/modules/ssdbcodi/api/groups
-/modules/ssdbcodi/api/label
-/modules/ssdbcodi/api/clear-labels
-/workflows/analysis-labeling/api/select
-/workflows/analysis-labeling/api/label
-/workflows/analysis-labeling/api/clear-labels
-/modules/scatterplot/api/render-payload
-/modules/scatterplot/api/select
-/modules/scatterplot/api/toggle
-/modules/scatterplot/api/groups
-/workflows/scatter-selection/api/state
-/workflows/scatter-selection/api/select
-/workflows/scatter-selection/api/groups
-/workflows/scatter-labeling/api/state
-/workflows/scatter-labeling/api/select
-/workflows/scatter-labeling/api/label
-/workflows/scatter-labeling/api/groups
-/workflows/provider-feedback/api/state
-/modules/chatbox/api/messages
-/modules/chatbox/api/history
-/modules/chatbox/api/reset
-/modules/chatbox/api/clear
-/modules/intent-instruction/api/route
-/modules/intent-instruction/api/compile
-/modules/intent-instruction/api/state
-/modules/intent-instruction/api/reset
-/modules/intent-instruction/api/examples
-/modules/intent-instruction/api/provider
-/modules/intent-instruction/api/memory
-/modules/intent-instruction/api/draft
-/modules/intent-instruction/api/evaluate
-/workflows/chat-intent/api/messages
-/workflows/chat-intent/api/reset
-/workflows/chat-intent/api/clear
-/workflows/intent-runtime-validation/api/state
-/workflows/intent-runtime-validation/api/message
-/workflows/intent-runtime-validation/api/reset
-/modules/rule-panel/api/rules
-/modules/rule-panel/api/interpret
-/modules/rule-panel/api/config
-/workflows/rule-panel-validation/api/state
-/workflows/rule-interpretation/api/state
-```
-
-Every module-level state route should include module identity fields in the
-standard JSON envelope:
-
-```json
-{
-  "ok": true,
-  "data": {
-    "module": "selection",
-    "status": "working"
-  }
-}
-```
-
-Module-specific state fields should live beside `module` and `status`, not in a
-separate nested object, unless that module already documents a nested contract.
-
-Selection action payloads should be action-route based and extensible:
-
-```json
-{
-  "point_ids": ["setosa_001", "versicolor_001"],
-  "source": "lasso",
-  "mode": "replace",
-  "metadata": {
-    "gesture_id": "lasso_001"
-  }
-}
-```
-
-Supported selection actions:
-
-```text
-select
-deselect
-replace
-toggle
-clear
-```
-
-Supported selection sources should start with:
-
-```text
-api
-point_click
-lasso
-rectangle
-manual_list
-workflow_fixture
-selection_group
-```
-
-Future selection gestures should add new source or mode values while preserving
-the same selected/unselected context output shape.
-
-Selection groups are reusable named point sets owned by the selection module.
-They are useful for restoring a previous selection, but they are not semantic
-labels, rule targets, or clustering truth.
-
-```json
-{
-  "group_id": "group_001",
-  "group_name": "interesting pair",
-  "dataset_id": "selection_iris_debug",
-  "point_ids": ["setosa_001", "versicolor_001"],
-  "point_count": 2,
-  "metadata": {}
-}
-```
-
-Group routes:
-
-```text
-GET    /modules/selection/api/groups
-POST   /modules/selection/api/groups
-POST   /modules/selection/api/groups/<id>/select
-DELETE /modules/selection/api/groups/<id>
-```
-
-Creating a group without `point_ids` saves the current active selection.
-Selecting a group applies `replace` selection with `source: "selection_group"`.
-
-Labeling action payloads should use selected point IDs and produce structured feedback:
-
-```json
-{
-  "action": "assign_cluster",
-  "scope": "selected_points",
-  "point_ids": ["p1", "p7", "p9"],
-  "target_label": "cluster_2"
-}
-```
-
-Current labeling apply payload:
-
-```json
-{
-  "action": "assign_cluster",
-  "label_value": "cluster_2",
-  "point_ids": ["p1", "p7"]
-}
-```
-
-If `point_ids` is omitted, labeling applies to all current selected points.
-Explicit `point_ids` must be selected in the current selection context.
-
-Supported labeling actions:
-
-```text
-assign_cluster
-assign_new_class
-mark_outlier
-mark_not_outlier
-```
-
-The Step 1-5 workflow exposes a combined state payload at:
-
-```text
-/workflows/analysis-labeling/api/state
-```
-
-That payload includes dataset, feature matrix, projection, outliers, clusters,
-selection state, selection context, selection groups, and labeling state.
-
-For `/workflows/analysis-labeling/`, `clusters` and `outliers` are the final
-display state after manual labels are passed into SSDBCODI and explicit label
-overrides are applied for UI consistency. Baseline provider outputs remain
-available as `raw_clusters` and `raw_outliers`; label-aware provider outputs
-remain available as `provider_clusters` and `provider_outliers`.
-
-Allowed labels in this workflow are:
-
-```text
-cluster_1
-cluster_2
-cluster_3
-...
-outlier
-```
-
-The available cluster labels are determined by the current `n_clusters` value.
-`cluster_N` makes the target points non-outliers in effective state. `outlier`
-removes the target points from effective cluster assignments.
-
-The Step 1-6 scatterplot workflows expose render state at:
-
-```text
-/modules/scatterplot/api/render-payload
-/workflows/scatter-selection/api/state
-/workflows/scatter-labeling/api/state
-```
-
-The render payload is derived state, not new ownership. Dataset, projection,
-cluster, outlier, selection, and label truth remain owned by their original
-modules. Scatterplot points include:
-
-```json
-{
-  "point_id": "p1",
-  "x": 0.2,
-  "y": -0.7,
-  "screen_x": 240.0,
-  "screen_y": 300.0,
-  "cluster_id": "cluster_1",
-  "is_outlier": false,
-  "selected": true,
-  "manual_labels": [],
-  "metadata": {},
-  "color": "#2f6fed"
-}
-```
-
-The Step 6.5 provider diagnostics workflow exposes:
-
-```text
-/workflows/provider-feedback/api/state
-```
-
-That payload includes the adapter-facing `AnalysisResult`, standalone
-`SsdbcodiResult`, cluster counts for both views, and the active provider name.
-
-Scatterplot selection actions must preserve the same selection action contract
-as the selection module, including `source: "point_click"` and
-`source: "rectangle"`. Saved selection groups in scatterplot workflows are the
-same selection-module groups; they are not labels or constraints.
-
-Algorithm adapter APIs should expose point-ID-based outputs.
-
-Outlier result:
-
-```json
-{
-  "outlier_run_id": "outlier_001",
-  "algorithm": "local_outlier_factor_numpy",
-  "scores": [
-    {
-      "point_id": "p1",
-      "score": 1.42,
-      "is_outlier": true
-    }
-  ],
-  "outlier_point_ids": ["p1"],
-  "diagnostics": {}
-}
-```
-
-Cluster result:
-
-```json
-{
-  "cluster_run_id": "cluster_001",
-  "algorithm": "kmeans_numpy_deterministic",
-  "n_clusters": 3,
-  "assignments": [
-    {
-      "point_id": "p2",
-      "cluster_id": "cluster_1"
-    }
-  ],
-  "excluded_outlier_point_ids": ["p1"],
-  "diagnostics": {}
-}
-```
-
-The legacy fallback analysis order is:
-
-```text
-local_outlier_factor -> kmeans_on_non_outliers
-```
-
-The current default analysis provider is SSDBCODI through
-`algorithm_adapters`. Future integrated algorithms should return the same
-dashboard-facing result shape, even if they compute clusters and outliers in one
-combined pass.
-
-## 7. Reset Rule
-
-For local debugging, stateful modules should support a reset path when useful:
-
-```text
-/modules/<module>/api/reset
-```
-
-This is especially useful for:
-
-1. selection.
-2. labeling.
-3. chatbox.
-4. `intent_instruction` runtime validation sessions.
-5. `rule_panel` generated rule and interpretation state.
-
-Reset endpoints must scope to their owning module state. Resetting rule
-interpretation should not wipe selection, labeling, SSDBCODI output, or the
-underlying generated rules unless the endpoint explicitly says so.
-
-## 8. Fixture Rule
-
-Every module should have fixtures that make the module page useful without the full app.
-
-A fixture should specify:
-
-1. what is real.
-2. what is mocked.
-3. what previous module output it imitates.
-
-Example:
-
-```json
-{
-  "fixture_name": "default_analysis_outlier_debug",
-  "real_inputs": ["data_workspace", "projection", "algorithm_adapters"],
-  "mocked_inputs": []
-}
-```
+| Imported schema, raw artifacts, model matrix | active_learning data layer |
+| Session, round, label, history | active_learning service and store |
+| Projection coordinates | projection service, snapshotted per round |
+| Cluster and outlier analysis | SSDBCODI through algorithm_adapters |
+| Explanation rules | rule_panel |
+| Candidate ranking and point selection | deterministic recommendation engine |
+| Category evidence facts and statuses | active_learning evidence service |
+| Human-readable explanation | active_learning translation |
+| Transient module-lab selection | selection |
+| Visual rendering | scatterplot and final workflow template |
+
+## DatasetVersion
+
+DatasetVersion is immutable and contains dataset_version_id, dataset_id, source format, entity name, content/version fingerprints, schema roles, preprocessing version/config, feature transformation map, artifact references, and row/feature counts.
+
+Ground-truth columns may be stored in isolated raw artifacts for evaluation. They must not appear in FeatureMatrix, plot payloads, recommendation evidence, or TranslationPacket.
+
+## ActiveLearningSession
+
+A session binds one DatasetVersion to SessionConfig, label vocabulary, label budget, current round, current label revision, and lifecycle status.
+
+SessionConfig includes analysis and tree parameters, candidate/batch sizes, preprocessing assumptions, and provider capability limits.
+
+## ActiveLearningRound
+
+A round is an immutable analysis snapshot with:
+
+- round_id, index, and optional parent;
+- label revision;
+- analysis, projection, RuleSet, and display RuleSet;
+- RecommendationPlanV2 values for all categories;
+- RoundDelta from the parent;
+- lifecycle status and stop suggestion;
+- timestamps and diagnostics.
+
+Round 0 is the unlabeled baseline. A valid label commit marks the current round labels_committed and creates the next round.
+
+## LabelEvent
+
+Label dimensions are semantic_class, outlier_status, and uncertain.
+
+An event records stable point ID, dimension, value, source round, resulting
+child round, plan/category provenance, recommendation membership, supersedes
+relation, status, and timestamp. A correction supersedes the prior active
+event rather than deleting history. The resulting round disambiguates branches
+created from the same source round.
+
+Uncertain events are recorded but do not become SSDBCODI seeds.
+
+## RecommendationPlanV2
+
+The canonical plan includes:
+
+- plan/session/round/dataset/preprocessing/label revisions;
+- focus category and target rules;
+- complete candidate_pool_point_ids and candidate_rankings;
+- ordered recommended_point_ids and highlighted_point_ids;
+- candidate and canonical recommended point profiles;
+- excluded/deferred points and recheck reasons;
+- score components, selection reasons, and cross-category coverage;
+- history context and previous-plan diff;
+- category explanation, evidence-policy version, and ordered evidence cards;
+- immutable fields, stop reason, and diagnostics.
+
+Recommended and highlighted IDs must preserve order and be subsets of the candidate pool. The LLM cannot change this contract.
+
+`history_context.recommendation_history` stores separate computed, shown,
+selected, and labeled counts. Only shown history contributes a repetition
+penalty.
+
+## CategoryEvidenceCard
+
+`CategoryEvidenceCard` is the canonical explanation evidence for one
+recommended point. It contains:
+
+- `point_id`, category, delegated evidence category, and policy version;
+- all category-specific `evidence_bullets` in fixed order;
+- comparison targets and fields to compare;
+- round context.
+
+Each `EvidenceBullet` contains a stable dimension ID and question, one of
+`yes`, `partly`, `no`, or `insufficient`, deterministic headline, plain fact,
+point connection, labeling value, evidence fact IDs, and folded technical
+details. `point_connection` states why the finding applies to this record;
+`labeling_value` states exactly what a human label would support, challenge, or
+make possible in a later round.
+
+Facts come from deterministic analysis in the complete model feature space.
+The 2D projection may only be used for an agreement check. Ground truth is
+never evidence.
+
+## TranslationPacket And PointGuidance
+
+TranslationPacket is a whitelist-filtered view of one plan. It includes only
+relevant rules, recommended profiles, CategoryEvidenceCards without technical
+details, allowed labels, prior label context, and round change facts.
+
+PointGuidance provides one entry per recommended point:
+
+- category explanation;
+- ordered evidence bullets with immutable questions, statuses, and fact IDs;
+- one direct answer, one supporting observation, and one `why_this_point`
+  statement for every evidence dimension;
+- exact comparison target IDs;
+- how-to-label guidance;
+- at most two conditional outcomes.
+
+Provider output must preserve plan ID, category, target rules, recommended
+IDs/order, dimension IDs/order, dimension statuses, fact IDs, and comparison
+target IDs. Invalid prose for one bullet is replaced only for that bullet.
+Changed immutable fields or provider failure uses the complete deterministic
+fallback.
+
+## APIs
+
+### Datasets
+
+~~~text
+GET  /api/datasets
+POST /api/datasets
+~~~
+
+POST accepts multipart CSV/JSON/MAT input or a JSON records payload. It returns DatasetVersion metadata, never the complete raw dataset.
+
+### Sessions
+
+~~~text
+POST /api/active-learning/sessions
+GET  /api/active-learning/sessions/<session_id>/state
+GET  /api/active-learning/sessions/<session_id>/history
+~~~
+
+Session creation computes Round 0. State returns the current round, selected
+category plan and evidence cards, deterministic guidance, plot payload,
+labels, and diagnostics.
+
+### Labels
+
+~~~text
+POST /api/active-learning/sessions/<session_id>/rounds/<round_id>/labels
+~~~
+
+Required concurrency fields are expected_round_id, expected_label_revision, and plan_id. A stale submission returns HTTP 409 with error code stale_round.
+
+Each label item identifies point_id, dimension, and value. Labels may target recommended points or explicit user selection, but provenance records the difference.
+
+### Revert
+
+~~~text
+POST /api/active-learning/sessions/<session_id>/rounds/<round_id>/revert
+~~~
+
+Revert retracts later effective events and restores the selected round as the session head without deleting history.
+
+Effective events are reconstructed from parent ancestry and each event's
+resulting round, never from round index alone.
+
+### Explain
+
+~~~text
+POST /api/active-learning/sessions/<session_id>/rounds/<round_id>/categories/<category>/interpret
+~~~
+
+provider_kind may be deepseek or mock. A category without a typical case skips
+the provider. Only this POST endpoint may make a provider call. Diagnostics
+disclose requested/returned model, usage, finish reason, system fingerprint,
+prompt/evidence versions, partial fallback fields, cache status, and fallback
+reason.
+
+## Error Semantics
+
+- 400: invalid dataset, session config, labels, round action, or interpretation request.
+- 404: unknown session or resource.
+- 409: stale round/revision/plan submission.
+- Provider errors do not invalidate the round; they return fallback guidance with explicit diagnostics.

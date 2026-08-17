@@ -56,50 +56,28 @@
 
     <div class="actions">
       <a href="{{ url_for('rule_panel.rules_api', n_clusters=analysis.cluster_result.n_clusters, max_depth=tree_config.max_depth, min_samples_leaf=tree_config.min_samples_leaf) }}">Rules API</a>
-      <a href="{{ url_for('rule_panel.interpret_api', n_clusters=analysis.cluster_result.n_clusters, max_depth=tree_config.max_depth, min_samples_leaf=tree_config.min_samples_leaf) }}">Interpret Preview API</a>
       <a href="{{ url_for('rule_panel.config_api', n_clusters=analysis.cluster_result.n_clusters, max_depth=tree_config.max_depth, min_samples_leaf=tree_config.min_samples_leaf) }}">Config API</a>
       <a href="/modules/ssdbcodi/">SSDBCODI Debug</a>
     </div>
   </section>
 
-  <section class="split">
-    <article>
-      <h2>SSDBCODI Source</h2>
-      <dl>
-        <dt>Analysis run</dt>
-        <dd>{{ analysis.analysis_run_id }}</dd>
-        <dt>Cluster counts</dt>
-        <dd>{{ cluster_counts }}</dd>
-        <dt>Outliers</dt>
-        <dd>{{ analysis.outlier_result.outlier_point_ids | join(", ") or "none" }}</dd>
-      </dl>
-    </article>
-
-    <article>
-      <h2>Interpretation Preview</h2>
-      <p class="small">
-        Deterministic local label guidance; Step 8.7 provider output is
-        available through the interpretation API and workflow.
-      </p>
-      <dl>
-        <dt>Provider</dt>
-        <dd>{{ interpretation.provider_label }}</dd>
-        <dt>Categories</dt>
-        <dd>{{ interpretation.categories | join(", ") }}</dd>
-        <dt>Confidence</dt>
-        <dd>{{ "%.2f"|format(interpretation.confidence) }}</dd>
-      </dl>
-      <h3>Recommendation</h3>
-      <p>{{ interpretation.recommendation }}</p>
-      <p>{{ interpretation.summary }}</p>
-    </article>
+  <section class="panel">
+    <h2>SSDBCODI Source</h2>
+    <dl class="details">
+      <dt>Analysis run</dt>
+      <dd>{{ analysis.analysis_run_id }}</dd>
+      <dt>Cluster counts</dt>
+      <dd>{{ cluster_counts }}</dd>
+      <dt>Outliers</dt>
+      <dd>{{ analysis.outlier_result.outlier_point_ids | join(", ") or "none" }}</dd>
+    </dl>
   </section>
 
   <section class="panel">
     <h2>Rule Cards</h2>
     <p class="small">
-      Conditions use raw wine feature names and raw-value thresholds from
-      wine.mat. SSDBCODI remains the clustering and outlier source of truth.
+      Conditions use original feature names and values. SSDBCODI remains the
+      clustering and outlier source of truth.
     </p>
     <div class="card-grid">
       {% for rule in rule_set.rules %}

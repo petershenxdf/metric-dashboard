@@ -1,0 +1,715 @@
+{% extends "base.html" %}
+
+{% block title %}Active Learning Session{% endblock %}
+
+{% block content %}
+  {% set session = state.session %}
+  {% set round = state.round %}
+  {% set plan = state.recommendation_plan %}
+  {% set dataset = state.dataset_version %}
+
+  <section class="intro">
+    <p class="eyebrow">Active Learning Session</p>
+    <h1>{{ dataset.dataset_id }}</h1>
+    <p>
+      Each round uses all saved human labels to refresh the groups and prepare
+      the next small set of records to check.
+    </p>
+  </section>
+
+  <section class="panel active-learning-status">
+    <div class="metric-strip">
+      <span>Round <strong>{{ round.round_index }}</strong></span>
+      <span>Records <strong>{{ dataset.point_count }}</strong></span>
+      <span>Labeled <strong>{{ state.active_labels | length }}</strong></span>
+      <span>Recommended <strong>{{ plan.recommended_point_count }}</strong></span>
+    </div>
+    <div class="compact-status-row">
+      <span class="status-pill ok">{{ round.status | replace("_", " ") }}</span>
+      {% if interpretation %}
+        {% if interpretation.diagnostics.deepseek_skipped %}
+          <span class="status-pill neutral">skipped: no typical case</span>
+        {% elif interpretation.diagnostics.used_fallback %}
+          <span class="status-pill warn">DeepSeek fallback</span>
+        {% elif interpretation.diagnostics.using_deepseek_v4_pro %}
+          <span class="status-pill ok">deepseek-v4-pro generated</span>
+        {% else %}
+          <span class="status-pill neutral">built-in explanation</span>
+        {% endif %}
+        {% if interpretation.cache_hit %}
+          <span class="status-pill neutral">cache hit</span>
+        {% endif %}
+      {% endif %}
+    </div>
+    {% if round.delta.stop_advice.message %}
+      <p class="small">{{ round.delta.stop_advice.message }}</p>
+    {% endif %}
+  </section>
+
+  <section class="dashboard-grid">
+    <article class="panel dashboard-plot-panel">
+      <div class="section-header-row">
+        <div>
+          <p class="eyebrow">Selection</p>
+          <h2>{{ dataset.entity_name | title }} Projection</h2>
+        </div>
+        <p class="small">Click points to build the next label submission.</p>
+      </div>
+      <div class="plot-legend" aria-label="Plot legend">
+        {% for item in state.plot_legend %}
+          <span>
+            <i class="legend-circle" style="background: {{ item.color }}"></i>
+            {{ item.group_id | replace("_", " ") }}
+          </span>
+        {% endfor %}
+        <span><i class="legend-diamond"></i>unusual</span>
+        <span><i class="legend-ring"></i>recommended</span>
+      </div>
+      <svg
+        class="debug-plot workflow-selection-plot active-learning-plot"
+        viewBox="0 0 {{ state.plot_width }} {{ state.plot_height }}"
+        role="img"
+        aria-label="Active-learning projection"
+        data-active-learning-plot
+      >
+        <line x1="56" y1="260" x2="804" y2="260" stroke="#dadce0"></line>
+        <line x1="430" y1="56" x2="430" y2="464" stroke="#dadce0"></line>
+        {% for point in state.plot_points %}
+          <g
+            class="workflow-point{% if point.recommended %} guidance-recommended{% endif %}"
+            data-point-id="{{ point.point_id }}"
+            data-is-outlier="{{ 'true' if point.is_outlier else 'false' }}"
+            tabindex="0"
+          >
+            {% if point.recommended %}
+              {% set badge = state.guidance_point_badges.get(point.point_id) %}
+              {% if badge %}
+                <line
+                  class="guidance-callout-line"
+                  x1="{{ '%.2f'|format(point.screen_x) }}"
+                  y1="{{ '%.2f'|format(point.screen_y) }}"
+                  x2="{{ '%.2f'|format(badge.label_x) }}"
+                  y2="{{ '%.2f'|format(badge.label_y) }}"
+                  pointer-events="none"
+                ></line>
+              {% endif %}
+              <circle
+                class="guidance-ring"
+                cx="{{ '%.2f'|format(point.screen_x) }}"
+                cy="{{ '%.2f'|format(point.screen_y) }}"
+                r="13"
+                fill="none"
+                pointer-events="none"
+              ></circle>
+            {% endif %}
+            <title>
+              {{ point.point_id }} / {{ point.cluster_id }}
+              {% if point.is_outlier %}/ marked unusual{% endif %}
+            </title>
+            {% if point.is_outlier %}
+              <path
+                class="point-mark"
+                d="M {{ '%.2f'|format(point.screen_x) }} {{ '%.2f'|format(point.screen_y - 9) }}
+                   L {{ '%.2f'|format(point.screen_x + 9) }} {{ '%.2f'|format(point.screen_y) }}
+                   L {{ '%.2f'|format(point.screen_x) }} {{ '%.2f'|format(point.screen_y + 9) }}
+                   L {{ '%.2f'|format(point.screen_x - 9) }} {{ '%.2f'|format(point.screen_y) }} Z"
+                fill="#cc79a7"
+                stroke="#202124"
+                stroke-width="1.8"
+              ></path>
+            {% else %}
+              <circle
+                class="point-mark"
+                cx="{{ '%.2f'|format(point.screen_x) }}"
+                cy="{{ '%.2f'|format(point.screen_y) }}"
+                r="6"
+                fill="{{ point.color }}"
+                stroke="#202124"
+                stroke-width="1"
+              ></circle>
+            {% endif %}
+            <text
+              class="selected-indicator"
+              data-selected-label
+              x="{{ '%.2f'|format(point.screen_x + 9) }}"
+              y="{{ '%.2f'|format(point.screen_y - 7) }}"
+              visibility="hidden"
+            >{{ point.point_id }}</text>
+            {% if point.recommended %}
+              {% set badge = state.guidance_point_badges.get(point.point_id) %}
+              {% if badge %}
+                <g class="guidance-badge" pointer-events="none">
+                  <circle
+                    cx="{{ '%.2f'|format(badge.label_x) }}"
+                    cy="{{ '%.2f'|format(badge.label_y) }}"
+                    r="9"
+                  ></circle>
+                  <text
+                    x="{{ '%.2f'|format(badge.label_x) }}"
+                    y="{{ '%.2f'|format(badge.label_y + 0.5) }}"
+                  >{{ badge.label }}</text>
+                </g>
+              {% endif %}
+            {% endif %}
+          </g>
+        {% endfor %}
+      </svg>
+    </article>
+
+    <aside class="panel active-learning-label-panel">
+      <p class="eyebrow">Human Labels</p>
+      <h2>Commit The Next Batch</h2>
+      <p class="small">
+        Selected: <strong data-selected-count>0</strong>
+        <span data-selected-list>none</span>
+      </p>
+      <div class="actions">
+        <button type="button" data-select-recommended>Select Recommended</button>
+        <button type="button" data-clear-selected>Clear</button>
+      </div>
+      <form class="debug-form" data-active-label-form>
+        <label>
+          What do you know?
+          <select name="label_dimension" data-label-dimension>
+            <option value="semantic_class">Real-world type</option>
+            <option value="outlier_status">Unusual or normal</option>
+            <option value="uncertain">Not enough evidence yet</option>
+          </select>
+        </label>
+        <label data-semantic-label>
+          Type name
+          <input name="semantic_label" list="semantic-label-options" placeholder="name a type">
+          <datalist id="semantic-label-options">
+            {% for label_id, display_name in session.label_vocabulary.items() %}
+              <option value="{{ display_name }}">{{ label_id }}</option>
+            {% endfor %}
+          </datalist>
+        </label>
+        <label data-outlier-label hidden>
+          Record status
+          <select name="outlier_value">
+            <option value="true">Genuinely unusual</option>
+            <option value="false">Normal record</option>
+          </select>
+        </label>
+        <button
+          class="button"
+          type="submit"
+          {% if session.status != "active" %}disabled{% endif %}
+        >Commit Labels And Run Next Round</button>
+      </form>
+      {% if session.status != "active" %}
+        <p class="small">This session is stopped; use the history to review or revert a round.</p>
+      {% endif %}
+      <p class="small" data-label-message></p>
+    </aside>
+  </section>
+
+  <section class="panel">
+    <div class="section-header-row">
+      <div>
+        <p class="eyebrow">Next Labeling Step</p>
+        <h2>Choose A Labeling Question</h2>
+      </div>
+    </div>
+    <div class="category-button-grid">
+      {% for card in state.category_cards %}
+        <a
+          class="category-button{% if card.is_active %} active{% endif %}{% if not card.has_typical_case %} unavailable{% endif %}"
+          href="{{ url_for('active_learning_dashboard_workflow.dashboard', session_id=session.session_id, focus_category=card.category, provider_kind=provider_kind) }}"
+        >
+          <strong>{{ card.label }}</strong>
+          <span>{{ card.description }}</span>
+          {% if card.has_typical_case %}
+            <small>Candidate pool: {{ card.candidate_pool_count }}</small>
+            <small>Recommended now: {{ card.recommended_point_count }}</small>
+          {% else %}
+            <small>{{ card.stop_reason | replace("_", " ") or "No typical case now" }}</small>
+          {% endif %}
+        </a>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="split active-learning-guidance">
+    <article>
+      <div class="section-header-row">
+        <div>
+          <p class="eyebrow">Recommendation</p>
+          <h2>{{ guidance.category | replace("_", " ") | title }}</h2>
+        </div>
+        <button
+          class="button"
+          type="button"
+          data-generate-explanation
+          {% if not guidance.recommended_point_ids %}disabled{% endif %}
+        >Explain With DeepSeek V4 Pro</button>
+      </div>
+      <h3>Why this category</h3>
+      <p>{{ guidance.category_explanation }}</p>
+      <p>{{ guidance.summary }}</p>
+      <p class="small" data-interpretation-message></p>
+      {% if guidance.recommended_point_ids %}
+        <div class="point-link-panel">
+          <div class="point-chip-row">
+            {% for point_id in guidance.recommended_point_ids %}
+              {% set badge = state.guidance_point_badges.get(point_id) %}
+              <button type="button" class="point-chip" data-guide-point-id="{{ point_id }}">
+                {% if badge %}<span class="point-chip-index">{{ badge.label }}</span>{% endif %}
+                {{ point_id }}
+              </button>
+            {% endfor %}
+            <button type="button" class="point-chip secondary" data-clear-guidance-focus>
+              Show all
+            </button>
+          </div>
+        </div>
+      {% else %}
+        <div class="empty-guidance">
+          <h3>No Eligible Case</h3>
+          <p>{{ plan.stop_reason | replace("_", " ") }}</p>
+        </div>
+      {% endif %}
+    </article>
+
+    <article>
+      <p class="eyebrow">Round Delta</p>
+      <h2>What Changed This Round</h2>
+      <p>{{ round.delta.summary }}</p>
+      <dl>
+        <dt>Records that moved group</dt>
+        <dd>{{ round.delta.changed_cluster_point_ids | length }}</dd>
+        <dt>Newly marked unusual</dt>
+        <dd>{{ round.delta.outlier_added_point_ids | length }}</dd>
+        <dt>No longer marked unusual</dt>
+        <dd>{{ round.delta.outlier_removed_point_ids | length }}</dd>
+        <dt>Open labeling questions</dt>
+        <dd>{{ round.delta.remaining_categories | length }}</dd>
+      </dl>
+    </article>
+  </section>
+
+  {% if guidance.point_guidance %}
+    <section class="panel">
+      <h2>Labeling Guidance</h2>
+      <div class="active-guidance-card-grid">
+        {% for item in guidance.point_guidance %}
+          <details class="evidence-point-card" {% if loop.first %}open{% endif %}>
+            <summary>
+              <span>
+                <strong>{{ item.point_id }}</strong>
+                <small>{{ item.evidence_bullets | length }} checks</small>
+              </span>
+              <span class="evidence-card-summary">{{ item.why_selected }}</span>
+            </summary>
+            <div class="evidence-point-card-body">
+              <h3>Why this category</h3>
+              <p>{{ guidance.category_explanation }}</p>
+
+              {% set covered_categories = state.point_category_coverage.get(item.point_id, []) %}
+              {% if covered_categories %}
+                <p class="small">
+                  One label also informs:
+                  {{ covered_categories | join(", ") | replace("_", " ") }}.
+                </p>
+              {% endif %}
+
+              <h3>Why this record was recommended</h3>
+              <ul class="evidence-bullet-list">
+                {% for bullet in item.evidence_bullets %}
+                  <li class="evidence-bullet status-{{ bullet.status }}">
+                    <div class="evidence-question">
+                      <span aria-hidden="true">{{ loop.index }}</span>
+                      <strong>{{ bullet.question }}</strong>
+                    </div>
+                    <div class="evidence-bullet-heading">
+                      <span class="evidence-status" aria-label="{{ bullet.status }}">
+                        <b aria-hidden="true">
+                          {% if bullet.status == "yes" %}+
+                          {% elif bullet.status == "partly" %}~
+                          {% elif bullet.status == "no" %}-
+                          {% else %}?
+                          {% endif %}
+                        </b>
+                        {% if bullet.status == "yes" %}Clear pattern
+                        {% elif bullet.status == "partly" %}Mixed pattern
+                        {% elif bullet.status == "no" %}Different pattern
+                        {% else %}Not enough yet
+                        {% endif %}
+                      </span>
+                      <strong>{{ bullet.headline }}</strong>
+                    </div>
+                    <p class="evidence-observation">
+                      <strong>What we see:</strong>
+                      {{ bullet.explanation }}
+                    </p>
+                    <p class="evidence-labeling-value">
+                      <strong>Why label this record:</strong>
+                      {{ bullet.why_this_point }}
+                    </p>
+                    {% if bullet.technical_details %}
+                      <details class="technical-evidence">
+                        <summary>Technical details</summary>
+                        <dl>
+                          {% for key, value in bullet.technical_details.items() %}
+                            <dt>{{ key | replace("_", " ") }}</dt>
+                            <dd>{{ value }}</dd>
+                          {% endfor %}
+                        </dl>
+                      </details>
+                    {% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+
+              {% if item.comparison_targets %}
+                <h3>Compare with</h3>
+                <div class="comparison-target-list">
+                  {% for target in item.comparison_targets %}
+                    <div class="comparison-target">
+                      <button
+                        type="button"
+                        class="comparison-point-button"
+                        data-comparison-source-id="{{ item.point_id }}"
+                        data-comparison-point-id="{{ target.point_id }}"
+                      >
+                        <strong>{{ target.point_id }}</strong>
+                        <span>{{ target.relation }}</span>
+                        {% if target.source == "model_example" %}
+                          <small>System example, not yet human-confirmed</small>
+                        {% elif target.human_label %}
+                          <small>Human type: {{ target.human_label }}</small>
+                        {% endif %}
+                      </button>
+                      {% if target.features_to_compare %}
+                        <small>
+                          Compare
+                          {% for feature_name in target.features_to_compare %}
+                            <button
+                              type="button"
+                              class="feature-link"
+                              data-feature-name="{{ feature_name }}"
+                            >{{ feature_name | replace("_", " ") }}</button>{% if not loop.last %}, {% endif %}
+                          {% endfor %}
+                        </small>
+                      {% endif %}
+                    </div>
+                  {% endfor %}
+                </div>
+              {% endif %}
+
+              {% if not round.delta.baseline %}
+                <h3>Since the previous round</h3>
+                <p>{{ item.what_changed_since_last_round }}</p>
+              {% endif %}
+
+              <h3>How to label it</h3>
+              <p>{{ item.how_to_label }}</p>
+
+              <h3>What your answer would tell us</h3>
+              <ul>
+                {% for outcome in item.possible_outcomes %}
+                  <li>{{ outcome }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          </details>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  <section class="panel">
+    <div class="section-header-row">
+      <div>
+        <p class="eyebrow">Decision Tree Surrogate</p>
+        <h2>Rule Cards</h2>
+      </div>
+      <p class="small">These rules explain the current groups; they do not create them.</p>
+    </div>
+    <div class="card-grid">
+      {% for rule in state.rule_set.rules %}
+        <article class="card rule-card" data-rule-id="{{ rule.rule_id }}">
+          <p class="eyebrow">{{ rule.target_kind }}</p>
+          <h3>{{ rule.target_id }}</h3>
+          {% if rule.conditions %}
+            <ul class="condition-list">
+              {% for condition in rule.conditions %}
+                <li data-rule-feature="{{ condition.source_feature }}">
+                  {{ condition.display_text }}
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p>All matched records</p>
+          {% endif %}
+          <dl>
+            <dt>Support</dt>
+            <dd>{{ rule.support_count }}</dd>
+            <dt>Coverage</dt>
+            <dd>{{ "%.2f"|format(rule.coverage) }}</dd>
+            <dt>Purity</dt>
+            <dd>{{ "%.2f"|format(rule.purity) }}</dd>
+            <dt>Exceptions</dt>
+            <dd>{{ rule.exception_point_ids | length }}</dd>
+          </dl>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-header-row">
+      <div>
+        <p class="eyebrow">Session History</p>
+        <h2>Learning Rounds</h2>
+      </div>
+      <a href="{{ url_for('active_learning_dashboard_workflow.index') }}">All Sessions</a>
+    </div>
+    <div class="active-learning-timeline">
+      {% for item in state.history | reverse %}
+        <article class="active-learning-round{% if item.is_current %} current{% endif %}">
+          <div>
+            <strong>Round {{ item.round_index }}</strong>
+            <span>{{ item.status | replace("_", " ") }}</span>
+          </div>
+          <p>{{ item.delta.summary }}</p>
+          {% if not item.is_current %}
+            <button type="button" data-revert-round="{{ item.round_id }}">Revert Here</button>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <script>
+    const sessionId = {{ session.session_id | tojson }};
+    const roundId = {{ round.round_id | tojson }};
+    const labelRevision = {{ round.label_revision | tojson }};
+    const planId = {{ plan.plan_id | tojson }};
+    const focusCategory = {{ state.focus_category | tojson }};
+    const recommendedPointIds = {{ plan.recommended_point_ids | tojson }};
+    const selectedPointIds = new Set();
+
+    const updateSelection = () => {
+      document.querySelector("[data-selected-count]").textContent = selectedPointIds.size;
+      document.querySelector("[data-selected-list]").textContent =
+        selectedPointIds.size ? [...selectedPointIds].join(", ") : "none";
+      document.querySelectorAll("[data-point-id]").forEach((node) => {
+        const selected = selectedPointIds.has(node.dataset.pointId);
+        node.classList.toggle("selected", selected);
+        node.querySelector(".point-mark")?.setAttribute("stroke-width", selected ? "3" : "1");
+        node.querySelector("[data-selected-label]")?.setAttribute(
+          "visibility",
+          selected ? "visible" : "hidden"
+        );
+      });
+    };
+
+    document.querySelectorAll("[data-point-id]").forEach((node) => {
+      node.addEventListener("click", () => {
+        const pointId = node.dataset.pointId;
+        if (selectedPointIds.has(pointId)) {
+          selectedPointIds.delete(pointId);
+        } else {
+          selectedPointIds.add(pointId);
+        }
+        updateSelection();
+      });
+    });
+
+    document.querySelector("[data-select-recommended]")?.addEventListener("click", () => {
+      recommendedPointIds.forEach((pointId) => selectedPointIds.add(pointId));
+      updateSelection();
+    });
+    document.querySelector("[data-clear-selected]")?.addEventListener("click", () => {
+      selectedPointIds.clear();
+      updateSelection();
+    });
+
+    let lockedGuidancePointIds = [];
+    const applyGuidanceFocus = (pointIds) => {
+      const focusedIds = new Set(pointIds || []);
+      document.querySelectorAll("[data-guide-point-id]").forEach((chip) => {
+        chip.classList.toggle("active", focusedIds.has(chip.dataset.guidePointId));
+      });
+      document.querySelectorAll("[data-point-id]").forEach((point) => {
+        point.classList.toggle("guidance-focus", focusedIds.has(point.dataset.pointId));
+        point.classList.toggle(
+          "guidance-dimmed",
+          focusedIds.size > 0 && !focusedIds.has(point.dataset.pointId)
+        );
+      });
+    };
+
+    document.querySelectorAll("[data-guide-point-id]").forEach((chip) => {
+      chip.addEventListener("mouseenter", () => {
+        applyGuidanceFocus([chip.dataset.guidePointId]);
+      });
+      chip.addEventListener("mouseleave", () => {
+        applyGuidanceFocus(lockedGuidancePointIds);
+      });
+      chip.addEventListener("click", () => {
+        const pointId = chip.dataset.guidePointId;
+        lockedGuidancePointIds =
+          lockedGuidancePointIds.length === 1 && lockedGuidancePointIds[0] === pointId
+            ? []
+            : [pointId];
+        applyGuidanceFocus(lockedGuidancePointIds);
+        document.querySelector(".dashboard-plot-panel")?.scrollIntoView({
+          behavior: "smooth",
+          block: "center"
+        });
+      });
+    });
+    document.querySelector("[data-clear-guidance-focus]")?.addEventListener("click", () => {
+      lockedGuidancePointIds = [];
+      applyGuidanceFocus([]);
+    });
+
+    document.querySelectorAll("[data-comparison-point-id]").forEach((button) => {
+      const comparisonIds = [
+        button.dataset.comparisonSourceId,
+        button.dataset.comparisonPointId
+      ].filter(Boolean);
+      button.addEventListener("mouseenter", () => {
+        applyGuidanceFocus(comparisonIds);
+      });
+      button.addEventListener("mouseleave", () => {
+        applyGuidanceFocus(lockedGuidancePointIds);
+      });
+      button.addEventListener("click", () => {
+        lockedGuidancePointIds =
+          lockedGuidancePointIds.join("|") === comparisonIds.join("|")
+            ? []
+            : comparisonIds;
+        applyGuidanceFocus(lockedGuidancePointIds);
+        document.querySelector(".dashboard-plot-panel")?.scrollIntoView({
+          behavior: "smooth",
+          block: "center"
+        });
+      });
+    });
+
+    document.querySelectorAll(".evidence-point-card").forEach((card) => {
+      card.addEventListener("toggle", () => {
+        if (!card.open) return;
+        document.querySelectorAll(".evidence-point-card[open]").forEach((other) => {
+          if (other !== card) other.open = false;
+        });
+      });
+    });
+
+    const focusFeature = (featureName) => {
+      let firstMatch = null;
+      document.querySelectorAll("[data-rule-feature]").forEach((condition) => {
+        const matches = condition.dataset.ruleFeature === featureName;
+        condition.classList.toggle("feature-focus", matches);
+        if (matches && !firstMatch) firstMatch = condition;
+      });
+      firstMatch?.scrollIntoView({behavior: "smooth", block: "center"});
+    };
+    document.querySelectorAll("[data-feature-name]").forEach((feature) => {
+      const activate = (event) => {
+        event.stopPropagation();
+        focusFeature(feature.dataset.featureName);
+      };
+      feature.addEventListener("click", activate);
+    });
+
+    document.querySelector("[data-generate-explanation]")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      const message = document.querySelector("[data-interpretation-message]");
+      button.disabled = true;
+      button.textContent = "Generating explanation...";
+      message.textContent = "DeepSeek V4 Pro is translating the fixed evidence checklist.";
+      const response = await fetch(
+        `/api/active-learning/sessions/${sessionId}/rounds/${roundId}/categories/${focusCategory}/interpret`,
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({provider_kind: "deepseek"})
+        }
+      );
+      const payload = await response.json();
+      if (!response.ok) {
+        button.disabled = false;
+        button.textContent = "Explain With DeepSeek V4 Pro";
+        message.textContent =
+          payload.error?.message || "The explanation request failed.";
+        return;
+      }
+      const target = new URL(window.location.href);
+      target.searchParams.set("focus_category", focusCategory);
+      target.searchParams.set("provider_kind", "deepseek");
+      target.searchParams.set("show_interpretation", "1");
+      target.searchParams.delete("generate");
+      window.location.assign(target.toString());
+    });
+
+    const dimensionSelect = document.querySelector("[data-label-dimension]");
+    const syncLabelInputs = () => {
+      document.querySelector("[data-semantic-label]").hidden =
+        dimensionSelect.value !== "semantic_class";
+      document.querySelector("[data-outlier-label]").hidden =
+        dimensionSelect.value !== "outlier_status";
+    };
+    dimensionSelect?.addEventListener("change", syncLabelInputs);
+    syncLabelInputs();
+
+    document.querySelector("[data-active-label-form]")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!selectedPointIds.size) {
+        document.querySelector("[data-label-message]").textContent =
+          "Select at least one point first.";
+        return;
+      }
+      const form = new FormData(event.currentTarget);
+      const dimension = form.get("label_dimension");
+      let labelValue = true;
+      if (dimension === "semantic_class") {
+        labelValue = form.get("semantic_label");
+      } else if (dimension === "outlier_status") {
+        labelValue = form.get("outlier_value") === "true";
+      }
+      const response = await fetch(
+        `/api/active-learning/sessions/${sessionId}/rounds/${roundId}/labels`,
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            expected_round_id: roundId,
+            expected_label_revision: labelRevision,
+            plan_id: planId,
+            category: focusCategory,
+            labels: [...selectedPointIds].map((pointId) => ({
+              point_id: pointId,
+              label_dimension: dimension,
+              label_value: labelValue
+            }))
+          })
+        }
+      );
+      const payload = await response.json();
+      if (!response.ok) {
+        document.querySelector("[data-label-message]").textContent =
+          payload.error?.message || "Label submission failed.";
+        return;
+      }
+      window.location.reload();
+    });
+
+    document.querySelectorAll("[data-revert-round]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const targetRoundId = button.dataset.revertRound;
+        const response = await fetch(
+          `/api/active-learning/sessions/${sessionId}/rounds/${targetRoundId}/revert`,
+          {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"}
+        );
+        if (response.ok) {
+          window.location.reload();
+        }
+      });
+    });
+  </script>
+{% endblock %}

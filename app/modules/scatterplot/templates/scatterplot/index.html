@@ -38,8 +38,7 @@
     <div class="actions">
       <a href="{{ url_for('scatterplot.render_payload_api', n_clusters=n_clusters) }}">Render Payload API</a>
       <a href="{{ url_for('scatterplot.state_api', n_clusters=n_clusters) }}">State API</a>
-      <a href="/workflows/scatter-selection/">Scatter Selection Workflow</a>
-      <a href="/workflows/scatter-labeling/">Scatter Labeling Workflow</a>
+      <a href="{{ url_for('core.workflows_index') }}">Active Learning Dashboard</a>
       <button type="button" data-scatter-action="clear">Clear Selection</button>
     </div>
   </section>

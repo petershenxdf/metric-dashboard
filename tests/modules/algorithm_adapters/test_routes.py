@@ -54,7 +54,6 @@ class AlgorithmAdapterRouteTests(unittest.TestCase):
         self.assertTrue(response.json["ok"])
         diagnostics = response.json["data"]["diagnostics"]
         self.assertEqual(diagnostics["provider"], "ssdbcodi")
-        self.assertEqual(diagnostics["legacy_provider"], "sequential_lof_then_kmeans")
         self.assertEqual(diagnostics["execution_order"], ["kmeans_bootstrap", "ssdbcodi_integrated"])
 
     def test_invalid_cluster_count_returns_error_envelope(self):
@@ -63,15 +62,6 @@ class AlgorithmAdapterRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(response.json["ok"])
         self.assertEqual(response.json["error"]["code"], "invalid_parameters")
-
-    def test_default_analysis_workflow_loads(self):
-        response = self.client.get("/workflows/default-analysis/?n_clusters=2")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Default Analysis", response.data)
-        self.assertIn(b"SSDBCODI", response.data)
-        self.assertIn(b"default_analysis_outlier_debug", response.data)
-
 
 if __name__ == "__main__":
     unittest.main()

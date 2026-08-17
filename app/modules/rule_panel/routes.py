@@ -6,9 +6,6 @@ from app.modules.algorithm_adapters.service import DEFAULT_N_CLUSTERS
 from app.shared.flask_helpers import api_error, api_success
 
 from .fixtures import RULE_PANEL_DATASET_ID, rule_panel_fixture_state
-from .interpretation import create_rule_interpreter
-
-
 def create_blueprint() -> Blueprint:
     blueprint = Blueprint(
         "rule_panel",
@@ -72,45 +69,7 @@ def create_blueprint() -> Blueprint:
             )
         )
 
-    @blueprint.get("/api/interpret")
-    def interpret_api():
-        state, error = _state_from_request()
-        if error is not None:
-            return jsonify(api_error("invalid_parameters", error)), 400
-        run, provider_error = _interpretation_run_from_state(state)
-        if provider_error is not None:
-            return jsonify(api_error("invalid_provider", provider_error)), 400
-        return jsonify(
-            api_success(
-                run.interpretation.to_dict(),
-                diagnostics=run.diagnostics,
-            )
-        )
-
-    @blueprint.get("/api/interpretation")
-    def interpretation_api():
-        state, error = _state_from_request()
-        if error is not None:
-            return jsonify(api_error("invalid_parameters", error)), 400
-        run, provider_error = _interpretation_run_from_state(state)
-        if provider_error is not None:
-            return jsonify(api_error("invalid_provider", provider_error)), 400
-        return jsonify(api_success(run.to_dict(), diagnostics=run.diagnostics))
-
     return blueprint
-
-
-def _interpretation_run_from_state(state):
-    try:
-        provider = create_rule_interpreter(request.args.get("provider_kind", "mock"))
-        return provider.interpret(
-            state["rule_set"],
-            analysis_result=state["analysis"],
-            feature_matrix=state["feature_matrix"],
-            focus_category=request.args.get("focus_category"),
-        ), None
-    except ValueError as exc:
-        return None, str(exc)
 
 
 def _state_from_request():

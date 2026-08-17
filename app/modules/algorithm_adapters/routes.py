@@ -55,7 +55,6 @@ def create_blueprint() -> Blueprint:
                 diagnostics={
                     "dependency_mode": "real data-workspace fixture",
                     "provider": "ssdbcodi",
-                    "legacy_provider": "sequential_lof_then_kmeans",
                 },
             )
         )

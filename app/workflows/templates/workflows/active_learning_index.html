@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}Generic Active Learning Dashboard{% endblock %}
+
+{% block content %}
+  <section class="intro">
+    <p class="eyebrow">Integrated Dashboard</p>
+    <h1>Generic Active Learning Dashboard</h1>
+    <p>
+      Import a structured dataset, inspect the SSDBCODI result, label a small
+      deterministic batch, and continue through reproducible learning rounds.
+    </p>
+  </section>
+
+  {% if error %}
+    <section class="panel">
+      <p class="error-text">{{ error }}</p>
+    </section>
+  {% endif %}
+
+  <section class="dashboard-grid">
+    <article class="panel">
+      <p class="eyebrow">New Dataset</p>
+      <h2>Import Tabular Data</h2>
+      <form
+        class="debug-form active-learning-import-form"
+        method="post"
+        enctype="multipart/form-data"
+        action="{{ url_for('active_learning_dashboard_workflow.import_and_create') }}"
+      >
+        <label>
+          Dataset file
+          <input name="dataset_file" type="file" accept=".csv,.json,.mat" required>
+        </label>
+        <label>
+          Dataset ID
+          <input name="dataset_id" placeholder="optional stable name">
+        </label>
+        <label>
+          Entity name
+          <input name="entity_name" value="record">
+        </label>
+        <label>
+          Point ID column
+          <input name="point_id_column" placeholder="generated when empty">
+        </label>
+        <label>
+          Feature columns
+          <input name="feature_columns" placeholder="comma-separated; inferred when empty">
+        </label>
+        <label>
+          Metadata columns
+          <input name="metadata_columns" placeholder="comma-separated">
+        </label>
+        <label>
+          Ground-truth columns
+          <input name="ground_truth_columns" placeholder="evaluation only">
+        </label>
+        <label>
+          Initial group count
+          <input name="n_clusters" type="number" min="1" value="3">
+        </label>
+        <label>
+          Recommendation batch
+          <input name="batch_size" type="number" min="1" value="4">
+        </label>
+        <label>
+          Label budget
+          <input name="label_budget" type="number" min="1" placeholder="optional">
+        </label>
+        <button class="button" type="submit">Import And Start</button>
+      </form>
+    </article>
+
+    <aside class="panel">
+      <p class="eyebrow">Regression Fixture</p>
+      <h2>Start With Wine</h2>
+      <p>
+        The wine dataset is a test fixture for the same generic dataset and
+        active-learning contracts used by uploaded data.
+      </p>
+      <form
+        class="debug-form"
+        method="post"
+        action="{{ url_for('active_learning_dashboard_workflow.create_wine_fixture') }}"
+      >
+        <label>
+          Initial group count
+          <input name="n_clusters" type="number" min="1" value="3">
+        </label>
+        <label>
+          Recommendation batch
+          <input name="batch_size" type="number" min="1" value="4">
+        </label>
+        <label>
+          Label budget
+          <input name="label_budget" type="number" min="1" placeholder="optional">
+        </label>
+        <button class="button" type="submit">Create Wine Test Session</button>
+      </form>
+    </aside>
+  </section>
+
+  <section class="panel">
+    <div class="section-header-row">
+      <div>
+        <p class="eyebrow">Persistent Work</p>
+        <h2>Active Sessions</h2>
+      </div>
+      <p class="small">{{ sessions | length }} saved session(s)</p>
+    </div>
+    {% if sessions %}
+      <div class="card-grid">
+        {% for session in sessions %}
+          <article class="card">
+            <h3>Session {{ session.session_id }}</h3>
+            <dl>
+              <dt>Dataset version</dt>
+              <dd>{{ session.dataset_version_id }}</dd>
+              <dt>Status</dt>
+              <dd>{{ session.status }}</dd>
+              <dt>Current round</dt>
+              <dd>{{ session.current_round_id or "none" }}</dd>
+              <dt>Semantic labels</dt>
+              <dd>{{ session.label_vocabulary | length }}</dd>
+            </dl>
+            <a
+              class="button"
+              href="{{ url_for('active_learning_dashboard_workflow.dashboard', session_id=session.session_id) }}"
+            >Resume Session</a>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="small">No active-learning sessions have been created yet.</p>
+    {% endif %}
+  </section>
+
+  {% if datasets %}
+    <section class="panel">
+      <h2>Imported Dataset Versions</h2>
+      <div class="metric-strip">
+        {% for dataset in datasets %}
+          <span>
+            <strong>{{ dataset.dataset_id }}</strong>
+            {{ dataset.point_count }} records / {{ dataset.feature_count }} raw features
+          </span>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

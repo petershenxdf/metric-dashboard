@@ -4,10 +4,6 @@ import os
 from pathlib import Path
 
 
-_TRUE_VALUES = {"1", "true", "yes", "on"}
-_FALSE_VALUES = {"0", "false", "no", "off"}
-
-
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -54,20 +50,3 @@ def env_int(name: str, default: int) -> int:
         return int(raw_value)
     except ValueError:
         return default
-
-
-def env_float(name: str, default: float) -> float:
-    raw_value = env_text(name, str(default)).strip()
-    try:
-        return float(raw_value)
-    except ValueError:
-        return default
-
-
-def env_bool(name: str, default: bool) -> bool:
-    raw_value = env_text(name, "true" if default else "false").strip().lower()
-    if raw_value in _TRUE_VALUES:
-        return True
-    if raw_value in _FALSE_VALUES:
-        return False
-    return default
