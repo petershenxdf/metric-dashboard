@@ -1,0 +1,760 @@
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{ReportBlue}{HTML}{2457A7}
+\definecolor{ReportGreen}{HTML}{237A45}
+\definecolor{ReportGray}{HTML}{5E6673}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=ReportBlue,
+  citecolor=ReportBlue,
+  urlcolor=ReportBlue
+}
+
+\newcommand{\systemname}{\textsc{Metric Dashboard}}
+\newcommand{\ssdbcodi}{\textsc{SSDBCODI}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\indicator}{\mathbf{1}}
+\newcommand{\status}[1]{\texttt{#1}}
+
+\title{Atomic Category Scores for Deterministic Label Acquisition\\
+in Interactive Rule-Guided Active Learning}
+\author{Metric Dashboard Research Project}
+\date{Technical Research Report, Version 2.0}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This report defines a deterministic scoring specification for selecting records
+to label in an interactive active-learning dashboard. The system combines
+semi-supervised clustering and outlier detection from \ssdbcodi, shallow
+decision-tree rules used only as explanations, and a large language model used
+only to translate fixed evidence into ordinary language. Earlier designs used
+weighted mixtures of boundary uncertainty, representativeness, label coverage,
+local density, and rule evidence. Although such mixtures can rank records, their
+meaning depends on arbitrary project-level weights and is difficult to explain
+to users.
+
+The revised design replaces those mixtures with six atomic acquisition
+categories: \emph{Between Groups}, \emph{Far From Known Groups}, \emph{Sparse
+Neighborhood}, \emph{Similar to Known Outliers}, \emph{Near a Rule Cutoff}, and
+\emph{Rule Mismatch}. Each category answers one labeling question and uses one
+score with a single interpretation. Three scores are direct transformations of
+the reachability, local-density, and similarity scores introduced by
+\ssdbcodi. Two scores connect recommended records to explanatory rules, and
+one score measures local disagreement between current cluster assignments.
+Every record receives a deterministic score record, including an explicit
+availability status when the required labels, groups, or rules do not yet
+exist. The published aggregate \ssdbcodi outlier score remains model context;
+it does not become another acquisition category. This separation makes the
+selection process reproducible, auditable, and concise enough for a visual
+interface intended for non-expert users.
+\end{abstract}
+
+\noindent\textbf{Keywords:} active learning, semi-supervised clustering,
+acquisition score, outlier detection, rule-based explanation, visual analytics,
+human-in-the-loop machine learning
+
+\section{Motivation}
+
+Active learning aims to obtain useful supervision while minimizing labeling
+effort \cite{settles2009survey,tong2001svm}. In an interactive clustering and
+outlier-analysis system, however, a record can be useful for several
+fundamentally different reasons. It may lie among records assigned to different
+groups, be weakly connected to all currently known groups, occupy a sparse
+neighborhood, resemble a confirmed outlier, sit close to a rule cutoff, or
+contradict a simple rule. These observations do not have the same semantics and
+should not be hidden inside one weighted total.
+
+The previous category design combined several such observations using fixed
+percentages. For example, a boundary score mixed cluster-border distance,
+neighbor composition, representativeness, and rule proximity. This created
+three problems:
+
+\begin{enumerate}[leftmargin=*,itemsep=0.25em]
+  \item A displayed score no longer answered one precise question.
+  \item The recommendation order depended on weights that were neither learned
+  nor established as optimal by the cited literature.
+  \item A user could not tell which observation actually caused a record to be
+  recommended.
+\end{enumerate}
+
+The revised principle is therefore:
+
+\begin{quote}
+\textbf{One category, one labeling question, one score, and one direction of
+interpretation.}
+\end{quote}
+
+Eligibility rules, labeling history, batch construction, and interface wording
+remain important, but they are kept outside the mathematical definition of the
+category score.
+
+\subsection{Responsibility boundaries}
+
+The scoring design preserves the system's existing ownership boundaries:
+
+\begin{itemize}[leftmargin=*,itemsep=0.25em]
+  \item \ssdbcodi owns cluster assignments, outlier status, and its published
+  detector scores \cite{deng2022ssdbcodi}.
+  \item Decision trees are read-only surrogate explanations. They describe
+  current \ssdbcodi outputs but do not perform clustering or outlier detection.
+  \item Deterministic code computes scores, availability, ranks, and recommended
+  record identifiers.
+  \item DeepSeek V4 Pro may rewrite supplied facts into concise user-facing
+  language, but it cannot calculate a score, change a category, add a reason,
+  or alter the recommendation order.
+\end{itemize}
+
+\section{Notation and Shared Computation}
+
+Let a dataset contain $N$ records. After deterministic preprocessing, record
+$q$ is represented by a model-space vector $\mathbf{z}_q\in\R^d$. Numeric
+features are imputed and scaled; categorical features are encoded according to
+the dataset adapter. Original values and a feature-transformation map are
+retained so that the interface can use the original field names and units.
+
+Let
+\begin{equation}
+  d(p,q)=\lVert\mathbf{z}_p-\mathbf{z}_q\rVert_2
+  \label{eq:euclidean}
+\end{equation}
+denote model-space Euclidean distance. Let $cDist(q)$ be the distance from $q$
+to its $MinPts$-th nearest neighbor. Following \ssdbcodi, the pairwise
+reachability distance is
+\begin{equation}
+  rDist(p,q)=\max\{cDist(p),cDist(q),d(p,q)\}.
+  \label{eq:reachability-distance}
+\end{equation}
+
+Let $c(q)$ denote the current normal-cluster assignment of $q$. Outlier status
+is stored separately and is not treated as an ordinary semantic cluster. Let
+$D_N$ be the set of labeled normal references and $D_O$ the set of
+human-confirmed outliers. When the current session has no human labels, a
+provider may use bootstrap references, but their provenance must be displayed
+as \emph{bootstrap} rather than \emph{human-confirmed}.
+
+All geometric scores use the complete model feature space. Two-dimensional
+scatterplot coordinates are excluded from score computation because projection
+can distort high-dimensional proximity.
+
+\subsection{Score range and availability}
+
+Every category returns a record with a numeric score in $[0,1]$ and one of the
+following statuses:
+
+\begin{description}[leftmargin=3.2cm,style=nextline,itemsep=0.2em]
+  \item[\status{available}] The required groups, references, or rules exist and
+  the score has its stated meaning.
+  \item[\status{insufficient\_reference}] The formula requires a type of human
+  reference that has not yet been supplied.
+  \item[\status{not\_applicable}] The current analysis has no meaningful object
+  for the category, such as a second cluster or a non-trivial rule.
+\end{description}
+
+Unavailable scores receive numeric value zero to preserve a total point-by-score
+matrix, but zero must not be shown as negative evidence. The status controls the
+interface message. The display score is
+\begin{equation}
+  S^{display}(q)=\operatorname{round}(100S(q)).
+  \label{eq:display-score}
+\end{equation}
+It is a category-specific index, not a probability or confidence estimate.
+Scores may be compared among records within the same category, dataset version,
+preprocessing version, and active-learning round. They must not be interpreted
+as commensurate across categories or datasets.
+
+\section{Atomic Acquisition Categories}
+
+Table~\ref{tab:categories} summarizes the six categories. Each score is defined
+for every record, subject to the availability semantics described above.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \caption{Atomic categories and their single user-facing interpretations.}
+  \label{tab:categories}
+  \begin{tabularx}{\textwidth}{
+    >{\raggedright\arraybackslash}p{0.22\textwidth}
+    >{\raggedright\arraybackslash}p{0.25\textwidth}
+    X}
+    \toprule
+    Category & Score name & Meaning of a high score \\
+    \midrule
+    Between Groups & Neighbor Disagreement & Similar nearby records are assigned
+    to other groups. \\
+    Far From Known Groups & Reachability Gap & The record is weakly
+    density-reachable from every known normal group. \\
+    Sparse Neighborhood & Local Sparsity & The record has few densely connected
+    neighbors. \\
+    Similar to Known Outliers & Known-Outlier Similarity & The record is close
+    to an outlier previously confirmed by the user. \\
+    Near a Rule Cutoff & Rule Cutoff Proximity & A small change in one numeric
+    field could move the record across a rule cutoff. \\
+    Rule Mismatch & Rule Disagreement & The record's current result is uncommon
+    within its simple rule-defined region. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Between Groups: Neighbor Disagreement Score}
+
+\paragraph{Labeling question.}
+Do nearby, similar records support this record's current group assignment?
+
+Let $D_C$ be the records currently assigned to normal clusters. For a clustered
+record $q$, let
+\begin{equation}
+  k_q=\min(MinPts,|D_C|-1)
+\end{equation}
+and let $\mathcal{N}^{r}_{k_q}(q)$ contain the $k_q$ nearest records to $q$ in
+$D_C\setminus\{q\}$ under $rDist$. The score is
+\begin{equation}
+  \boxed{
+  S_{between}(q)=
+  \frac{1}{k_q}
+  \sum_{p\in\mathcal{N}^{r}_{k_q}(q)}
+  \indicator[c(p)\neq c(q)].}
+  \label{eq:between}
+\end{equation}
+
+A score of zero means that all selected neighbors have the same current group
+assignment as $q$. A score of one means that every selected neighbor is assigned
+elsewhere. Intermediate values directly state the share of nearby records that
+disagree with the current assignment.
+
+Uncertainty and margin-based active learning prioritize records for which the
+current decision is least settled \cite{tong2001svm,bressan2024margin}. Equation
+\eqref{eq:between} is a project-defined, density-aware operationalization of
+that principle for clustering. It uses \ssdbcodi reachability neighborhoods
+rather than a classifier probability or a two-dimensional projection. No
+representativeness term, rule term, or affected-region weight is added.
+
+The score has status \status{not\_applicable} when fewer than two normal groups
+exist, when $q$ is currently treated as an outlier, or when no neighbor can be
+formed.
+
+\subsection{Far From Known Groups: Reachability Gap Score}
+
+\paragraph{Labeling question.}
+Is this record difficult to connect to every currently known normal group?
+
+For a normal reference $s\in D_N$, let $E_{max}(q,s)$ denote the largest
+reachability edge along the density-expansion path from $q$ to $s$. Define
+\begin{equation}
+  p_{min}=\arg\min_{s\in D_N}E_{max}(q,s).
+  \label{eq:closest-normal-reference}
+\end{equation}
+The \ssdbcodi paper defines
+\begin{equation}
+  rScore(q)=e^{-E_{max}(q,p_{min})}.
+  \label{eq:rscore}
+\end{equation}
+The acquisition score reverses its direction:
+\begin{equation}
+  \boxed{S_{far}(q)=1-rScore(q).}
+  \label{eq:far}
+\end{equation}
+
+This score is directly grounded in the Reachability Assumption of \ssdbcodi:
+outliers and records outside known normal structure tend to be less
+density-reachable from labeled normal records \cite{deng2022ssdbcodi}. A high
+score asks whether the record belongs to an existing type, represents an
+uncovered type, or should be considered unusual. It does not assert any of
+those outcomes automatically.
+
+When $D_N$ is empty, the score has status
+\status{insufficient\_reference}. If bootstrap seeds are used, the score may be
+computed, but its source must be marked as bootstrap evidence.
+
+\paragraph{Implementation consistency note.}
+The paper's Equations~\eqref{eq:closest-normal-reference}--\eqref{eq:rscore} use
+pathwise $E_{max}$. The current NumPy provider in \systemname computes
+$\exp(-\min_{s\in D_N}rDist(q,s))$, using the minimum direct pairwise
+reachability distance. This is a deterministic approximation, not the exact
+paper definition. Any experiment or interface using the current provider must
+identify its semantics as \status{direct\_rdist\_approximation}; it must not
+claim \status{paper\_exact} until the expansion-path computation is aligned.
+
+\subsection{Sparse Neighborhood: Local Sparsity Score}
+
+\paragraph{Labeling question.}
+Does this record occupy a locally sparse part of the data?
+
+Let $nearest_i(q)$ be the $i$-th nearest neighbor of $q$ under $rDist$. The
+\ssdbcodi local-distance quantity is
+\begin{equation}
+  LD(q)=\frac{1}{MinPts}
+  \sum_{i=1}^{MinPts}rDist(nearest_i(q),q),
+  \label{eq:local-distance}
+\end{equation}
+and the paper defines
+\begin{equation}
+  lScore(q)=e^{-LD(q)}.
+  \label{eq:lscore}
+\end{equation}
+The category score is
+\begin{equation}
+  \boxed{S_{sparse}(q)=1-lScore(q).}
+  \label{eq:sparse}
+\end{equation}
+
+A high value has one precise interpretation: the reachability distances to the
+local neighbors are large. This is consistent with density-based anomaly
+research, in which unusual records often occur in locally sparse regions
+\cite{breunig2000lof,deng2022ssdbcodi}. The score does not incorporate distance
+to a normal seed, similarity to known outliers, data-quality warnings, or rule
+evidence. Those are separate observations.
+
+The score is available whenever a valid reachability neighborhood can be
+constructed. Sparse does not mean incorrect: a high-scoring record may be a
+valid rare case, a coherent but small type, a true outlier, or a data problem.
+The user's label determines which interpretation is appropriate.
+
+\subsection{Similar to Known Outliers: Known-Outlier Similarity Score}
+
+\paragraph{Labeling question.}
+Does this record resemble an outlier that a person has already confirmed?
+
+For $D_O\neq\varnothing$, define
+\begin{equation}
+  o_{min}=\arg\min_{o\in D_O}d(q,o).
+  \label{eq:nearest-outlier}
+\end{equation}
+The \ssdbcodi similarity score is used without additional terms:
+\begin{equation}
+  \boxed{
+  S_{known\text{-}outlier}(q)=simScore(q)=e^{-d(q,o_{min})}.}
+  \label{eq:known-outlier}
+\end{equation}
+
+This score implements the \ssdbcodi Similarity Assumption: some outliers occur
+in related patterns rather than as isolated singletons
+\cite{deng2022ssdbcodi}. Human feedback is essential because proximity to a
+known outlier does not prove that the new record has the same real-world
+meaning. Active anomaly discovery similarly uses analyst feedback to adapt the
+system's concept of a relevant anomaly \cite{das2016aad}.
+
+If $D_O$ is empty, every numeric value is zero and the status is
+\status{insufficient\_reference}. The interface must say that no confirmed
+outlier reference exists; it must not describe the records as dissimilar.
+
+\subsection{Near a Rule Cutoff: Rule Cutoff Proximity Score}
+
+\paragraph{Labeling question.}
+Would a small change in one field place this record on the other side of a
+simple explanatory rule?
+
+Let $\mathcal{T}$ contain the non-trivial surrogate trees explaining current
+cluster and outlier outputs. For tree $t$, let $\mathcal{P}_t(q)$ be the split
+nodes traversed by $q$. Only numeric split nodes are eligible for cutoff
+proximity. Each eligible node $b$ uses model feature $f_b$ and transformed
+threshold $\tau_b$. Define
+\begin{equation}
+  \delta(q,b)=|z_{qf_b}-\tau_b|,
+  \label{eq:rule-margin}
+\end{equation}
+and let $b^*(q)$ be the eligible traversed split with minimum $\delta(q,b)$
+across all $t\in\mathcal{T}$. The score is
+\begin{equation}
+  \boxed{S_{cutoff}(q)=e^{-\delta(q,b^*(q))}.}
+  \label{eq:rule-cutoff}
+\end{equation}
+
+Because numeric model features are scaled deterministically, the margin is not
+dominated by the original unit of measurement. The technical record must retain
+the winning tree, rule, source feature, transformed threshold, raw threshold,
+point value, and transformation version. The interface displays the original
+feature name and raw units.
+
+Near-boundary querying follows the general active-learning principle that
+labels close to a decision cutoff are useful for testing the current division
+\cite{tong2001svm}. Here the boundary belongs to a surrogate explanation, not
+to \ssdbcodi itself. Consequently, a high score means only that the rule cutoff
+is easy to test. It does not mean that the underlying cluster assignment is
+uncertain.
+
+Categorical one-hot splits are excluded because every category indicator is a
+fixed distance from a threshold such as $0.5$; that distance does not represent
+meaningful semantic closeness. If no numeric split is traversed, the score is
+zero with status \status{not\_applicable}.
+
+\subsection{Rule Mismatch: Rule Disagreement Score}
+
+\paragraph{Labeling question.}
+Does the record contradict the simple description of its current analysis
+region?
+
+For a non-trivial surrogate tree $t$, let $\ell_t(q)$ denote the terminal leaf
+reached by $q$, and let $y_t(q)$ denote the source analysis target for $q$:
+cluster assignment for a cluster surrogate or outlier status for an anomaly
+surrogate. Let $n_{\ell}$ be the number of records in leaf $\ell$, and let
+$n_{\ell,y}$ be the number with target $y$. Define the disagreement witnessed
+by tree $t$ as
+\begin{equation}
+  S_{mismatch,t}(q)=
+  1-\frac{n_{\ell_t(q),y_t(q)}}{n_{\ell_t(q)}}.
+  \label{eq:tree-mismatch}
+\end{equation}
+The point-level category score is
+\begin{equation}
+  \boxed{
+  S_{mismatch}(q)=
+  \max_{t\in\mathcal{T}}S_{mismatch,t}(q).}
+  \label{eq:rule-mismatch}
+\end{equation}
+
+The maximum does not blend evidence from multiple trees. It selects the single
+strongest witnessed mismatch, whose tree, leaf, target, and rule identifier are
+stored as provenance. A high score means that most records sharing this leaf's
+simple description have a different current target. The record may be a genuine
+exception, or the surrogate rule may be too simple. Human labeling helps
+distinguish these explanations.
+
+Rule-based visual analytics can make anomaly and group descriptions accessible
+for interactive review \cite{deng2021rissad}. Equation
+\eqref{eq:rule-mismatch} is a transparent project-defined fidelity test; it is
+not claimed as an established rule-learning objective. The surrogate remains
+explanation-only and cannot automatically relabel, merge, split, or reassign a
+record. If no non-trivial surrogate exists, the status is
+\status{not\_applicable}.
+
+\section{Role of the Published Aggregate Outlier Score}
+
+The \ssdbcodi paper combines three detector signals as
+\begin{equation}
+  tScore(q)=
+  \alpha(1-rScore(q))+
+  \beta(1-lScore(q))+
+  (1-\alpha-\beta)simScore(q),
+  \label{eq:tscore}
+\end{equation}
+where $\alpha,\beta\in[0,1]$ and $\alpha+\beta\leq1$
+\cite{deng2022ssdbcodi}. This is the published aggregate used by the detector;
+it is not an arbitrary dashboard formula.
+
+Nevertheless, $tScore$ is not an acquisition category in the revised design.
+The dashboard may show it in technical details to explain current \ssdbcodi
+outlier status, but it must not use it to rank a category. The acquisition
+interface instead exposes the three constituent questions separately:
+
+\begin{itemize}[leftmargin=*,itemsep=0.2em]
+  \item Is the record far from every known normal group?
+  \item Is its local neighborhood sparse?
+  \item Does it resemble a confirmed outlier?
+\end{itemize}
+
+This choice preserves the original detector while allowing the user to know
+which kind of evidence motivates a labeling request.
+
+\section{Why the Previous Composite Categories Are Removed}
+
+Several previous category names described useful analytical hypotheses but did
+not correspond to one measurable property.
+
+\paragraph{Coverage Gaps.}
+A meaningful coverage gap requires both distance from existing human labels and
+evidence that the region represents more than one isolated record. Those are
+two different constructs. The revised dashboard may describe such a hypothesis
+when both observations are available, but it does not manufacture a weighted
+Coverage Gap Score.
+
+\paragraph{Emerging Groups.}
+A possible new group must be separated from existing groups, internally
+coherent, and semantically supported by human labels. No single pointwise
+number establishes all three. The system may surface a transparent conjunction
+of atomic facts, but it must not state that a high scalar score proves a new
+cluster.
+
+\paragraph{Label Priority.}
+Scores from different categories have different meanings and are not calibrated
+as a common utility. A cross-category weighted meta-ranker would recreate the
+same interpretability problem. The interface therefore presents categories as
+separate labeling questions rather than claiming that, for example, a sparse
+score of $80$ is more important than a rule-cutoff score of $75$.
+
+\paragraph{Rule Checks.}
+Proximity to a rule cutoff and disagreement with a rule are distinct. The first
+tests where a rule divides records; the second tests whether the rule describes
+its region consistently. They are now separate categories rather than subtypes
+hidden behind a maximum of weighted formulas.
+
+\section{Normative Score Contract}
+
+Each computed score is represented by the following conceptual record:
+
+\begin{verbatim}
+AtomicCategoryScore
+  point_id
+  category_id
+  score_id
+  raw_score              # deterministic value in [0, 1]
+  display_score          # round(100 * raw_score)
+  availability           # available | insufficient_reference |
+                         # not_applicable
+  category_rank
+  score_policy_version
+  dataset_version_id
+  preprocessing_version
+  analysis_run_id
+  label_revision
+  source_fact_ids
+  source_rule_id         # optional
+  source_reference_ids   # optional
+  technical_details
+\end{verbatim}
+
+The following invariants apply:
+
+\begin{enumerate}[leftmargin=*,itemsep=0.25em]
+  \item Every dataset record has exactly one score record for every category.
+  \item The same immutable dataset, preprocessing, analysis, labels, parameters,
+  and score-policy version produce the same value and rank.
+  \item A category rank is computed only among records with
+  \status{available} status.
+  \item Ties are resolved by stable point identifier.
+  \item Every score retains sufficient provenance to reconstruct its value.
+  \item Ground-truth columns reserved for offline evaluation are never used.
+\end{enumerate}
+
+\section{Scoring Versus Recommendation Policy}
+
+The atomic score answers why a point is relevant to one category. It does not
+encode whether the point is currently eligible for recommendation. The
+selection pipeline is explicitly separated:
+
+\begin{equation}
+  \text{score all points}
+  \rightarrow
+  \text{filter eligibility}
+  \rightarrow
+  \text{sort within category}
+  \rightarrow
+  \text{construct the batch}.
+\end{equation}
+
+Eligibility may exclude a point that already has an active label, belongs to an
+obsolete round, lacks the required score status, or is still under a repeat-
+recommendation cooldown. A labeled point may re-enter only with a recorded
+reason such as a changed cluster assignment, changed outlier status, or new
+rule conflict.
+
+History penalties, affected-region size, and batch diversity must not be added
+to the displayed category score. If batch construction omits a higher-scoring
+eligible point to avoid an exact duplicate or to satisfy a declared batch
+constraint, the plan records that reason separately. This guarantees that the
+score shown to the user is the score that established category relevance.
+
+\section{User-Facing Representation and LLM Contract}
+
+The default visual representation for a recommended record is compact:
+
+\begin{quote}
+\textbf{record\_114 \hfill Between Groups: 67/100}
+
+Most of this record's closest neighbors are currently placed in another group.
+Labeling it can help check whether its present group assignment makes sense.
+
+\emph{Compared with:} record\_031, record\_087
+\end{quote}
+
+The card contains one score bar, one plain-language observation, one sentence
+explaining why the observation matters, and optional comparison records. Exact
+distances, thresholds, neighbors, rules, and transformations remain in a
+collapsed \emph{Technical details} section.
+
+DeepSeek V4 Pro receives only the fixed category, score direction, deterministic
+facts, comparison targets, allowed labels, and relevant rule text. It may:
+
+\begin{itemize}[leftmargin=*,itemsep=0.2em]
+  \item replace technical terms with ordinary language;
+  \item explain what records or original fields the user should compare; and
+  \item describe at most two conditional outcomes of the user's label.
+\end{itemize}
+
+It may not change a score, availability status, category, point order, source
+record, source rule, or recommended identifier. It may not infer similarity
+from scatterplot distance, recommend an automatic merge or split, or present a
+score as probability. Schema failure replaces only the affected wording with
+deterministic text; it never changes the recommendation plan.
+
+\section{Evaluation Plan}
+
+The revised framework eliminates weight tuning. Evaluation therefore focuses
+on whether each atomic score measures its stated construct and improves
+labeling utility.
+
+\subsection{Determinism and range tests}
+
+For each supported dataset adapter and active-learning round, verify that:
+
+\begin{itemize}[leftmargin=*,itemsep=0.2em]
+  \item every point has six score records;
+  \item all raw values are finite and lie in $[0,1]$;
+  \item repeated computation produces identical values and ranks;
+  \item unavailable categories return zero with the correct non-available
+  status; and
+  \item score provenance references only the current round ancestry.
+\end{itemize}
+
+\subsection{Construct and monotonicity tests}
+
+Synthetic datasets should isolate each intended property:
+
+\begin{itemize}[leftmargin=*,itemsep=0.2em]
+  \item replacing same-group neighbors with other-group neighbors must increase
+  $S_{between}$;
+  \item increasing $E_{max}$ to every normal reference must increase $S_{far}$;
+  \item increasing mean local reachability distance must increase $S_{sparse}$;
+  \item moving a point toward a confirmed outlier must increase
+  $S_{known\text{-}outlier}$;
+  \item moving a numeric value toward a traversed rule threshold must increase
+  $S_{cutoff}$; and
+  \item reducing the share of matching targets in a rule leaf must increase
+  $S_{mismatch}$.
+\end{itemize}
+
+Each test changes one construct while holding the others fixed where possible.
+This directly tests semantic meaning rather than the behavior of an arbitrary
+weighted total.
+
+\subsection{Active-learning evaluation}
+
+Across wine and additional numeric, mixed-type, missing-value, CSV, JSON, and
+MAT fixtures, compare each category-specific policy against random sampling and
+the previous composite policy. Measurements should include:
+
+\begin{itemize}[leftmargin=*,itemsep=0.2em]
+  \item clustering quality over rounds using ARI or NMI when ground truth is
+  reserved for offline evaluation;
+  \item anomaly-detection AUC or average precision over rounds;
+  \item number of labels required to resolve known boundary, sparse-region, and
+  rule-fidelity fixtures;
+  \item recommendation stability for identical session states; and
+  \item overlap among categories, reported as a finding rather than suppressed
+  by hidden diversity weights.
+\end{itemize}
+
+\subsection{Human-centered evaluation}
+
+A user study should test whether participants can correctly answer three
+questions after viewing a recommendation:
+
+\begin{enumerate}[leftmargin=*,itemsep=0.2em]
+  \item Why was this record recommended?
+  \item What should it be compared with?
+  \item What would different labels tell the system?
+\end{enumerate}
+
+Compare the atomic score card with the previous multi-question evidence matrix
+using completion time, explanation accuracy, perceived workload, and trust
+calibration. The objective is not to maximize stated trust, but to help users
+distinguish strong evidence, missing evidence, and model limitations.
+
+\section{Limitations}
+
+The six scores are intentionally narrow. They do not estimate the total future
+improvement caused by a label, and they do not provide a universal ordering
+across different labeling questions. Distance-based values depend on the
+preprocessing and feature weighting chosen for the dataset. High-dimensional
+or high-cardinality categorical data may require additional validation of the
+model-space metric.
+
+Neighbor disagreement can identify a boundary, a local assignment error, or a
+sparse point lying between groups; the separate sparsity score helps users
+distinguish those cases but does not combine them automatically. Similarity to
+a known outlier is unavailable before a user confirms one. Rule scores inherit
+the limitations of the shallow surrogate and must never be described as direct
+properties of the source clustering model.
+
+Finally, the current direct-$rDist$ approximation to the paper's pathwise
+$E_{max}$ requires explicit provenance and empirical comparison before the
+system can claim exact SSDBCODI reachability semantics.
+
+\section{Conclusion}
+
+This report replaces weighted acquisition mixtures with six atomic category
+scores. Each score has one formula, one labeling question, one direction of
+interpretation, and reconstructable evidence. Three scores expose the original
+\ssdbcodi reachability, local-density, and known-outlier similarity mechanisms;
+two audit the explanatory rule layer; and one measures local disagreement among
+current group assignments. The published aggregate outlier score remains part
+of \ssdbcodi but not part of category ranking.
+
+This architecture makes the deterministic recommendation contract easier to
+study and the visual explanation easier to understand. It also gives the LLM a
+better-defined role: translating established facts into clear language without
+participating in scoring or selection.
+
+\begin{thebibliography}{99}
+
+\bibitem{basu2004active}
+S. Basu, A. Banerjee, and R. J. Mooney,
+``Active Semi-Supervision for Pairwise Constrained Clustering,''
+in \emph{Proceedings of the SIAM International Conference on Data Mining},
+pp. 333--344, 2004.
+\url{https://doi.org/10.1137/1.9781611972740.31}
+
+\bibitem{breunig2000lof}
+M. M. Breunig, H.-P. Kriegel, R. T. Ng, and J. Sander,
+``LOF: Identifying Density-Based Local Outliers,''
+in \emph{Proceedings of the ACM SIGMOD International Conference on Management
+of Data}, pp. 93--104, 2000.
+\url{https://doi.org/10.1145/342009.335388}
+
+\bibitem{bressan2024margin}
+M. Bressan, N. Cesa-Bianchi, S. Lattanzi, and A. Paudice,
+``Margin-Based Active Learning of Classifiers,''
+\emph{Journal of Machine Learning Research}, vol. 25, no. 127, pp. 1--45,
+2024.
+\url{https://www.jmlr.org/papers/v25/22-1127.html}
+
+\bibitem{das2016aad}
+S. Das, W.-K. Wong, T. G. Dietterich, A. Fern, and A. Emmott,
+``Incorporating Expert Feedback into Active Anomaly Discovery,''
+in \emph{Proceedings of the IEEE International Conference on Data Mining},
+pp. 853--858, 2016.
+\url{https://doi.org/10.1109/ICDM.2016.0102}
+
+\bibitem{deng2021rissad}
+J. Deng and E. T. Brown,
+``RISSAD: Rule-Based Interactive Semi-Supervised Anomaly Detection,''
+in \emph{EuroVis 2021: Short Papers}, The Eurographics Association, 2021.
+\url{https://doi.org/10.2312/evs.20211050}
+
+\bibitem{deng2022ssdbcodi}
+J. Deng and E. T. Brown,
+``SSDBCODI: Semi-Supervised Density-Based Clustering with Outliers Detection
+Integrated,'' arXiv:2208.05561, 2022.
+\url{https://arxiv.org/abs/2208.05561}
+
+\bibitem{settles2009survey}
+B. Settles,
+``Active Learning Literature Survey,'' Computer Sciences Technical Report
+1648, University of Wisconsin--Madison, 2009.
+\url{https://research.cs.wisc.edu/techreports/2009/TR1648.pdf}
+
+\bibitem{tong2001svm}
+S. Tong and D. Koller,
+``Support Vector Machine Active Learning with Applications to Text
+Classification,'' \emph{Journal of Machine Learning Research}, vol. 2,
+pp. 45--66, 2001.
+\url{https://www.jmlr.org/papers/v2/tong01a.html}
+
+\end{thebibliography}
+
+\end{document}
