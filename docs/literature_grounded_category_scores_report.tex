@@ -76,13 +76,25 @@ text when no ambiguity is possible.
     deterministic recheck reason, such as a changed assignment or a label
     conflict, has been recorded.
 
-    \item[$D_L^{(t)}\subseteq D$]
-    Records with at least one active, decisive human-provided label. A record
-    marked only as \emph{uncertain} is excluded because it does not yet provide
-    a semantic, normal, or outlier reference for coverage calculations.
+    \item[$D_{L,\mathrm{sem}}^{(t)}\subseteq D$]
+    Records with an active human-provided \texttt{semantic\_class} label.
+    These records provide semantic coverage references.
+
+    \item[$D_{L,\mathrm{status}}^{(t)}\subseteq D$]
+    Records with an active, decisive \texttt{outlier\_status} label. A record
+    marked only as \texttt{uncertain} is excluded from every reference set.
+
+    \item[$D_L^{(t)}$]
+    The union $D_{L,\mathrm{sem}}^{(t)}\cup
+    D_{L,\mathrm{status}}^{(t)}$. This shorthand means ``has some decisive
+    human supervision''; category formulas use the dimension-specific sets
+    whenever the distinction matters.
 
     \item[$D_N^{(t)}\subseteq D_L^{(t)}$]
-    Records that a human has confirmed as normal reference records.
+    Human-confirmed normal references. This includes records with
+    \texttt{outlier\_status=normal} and semantic-class records that are not
+    simultaneously marked as outliers. An active outlier-status label takes
+    precedence if dimensions conflict.
 
     \item[$D_O^{(t)}\subseteq D_L^{(t)}$]
     Records that a human has confirmed as outliers.
@@ -90,13 +102,6 @@ text when no ambiguity is possible.
     \item[$D_C^{(t)}\subseteq D$]
     Records currently assigned by SSDBCODI to a normal cluster. Records whose
     current model state is outlier or unassigned are not members of this set.
-
-    \item[$C_{\mathrm{core}}^{(t)}\subseteq D_C^{(t)}$]
-    The deterministic reliable-normal set emitted by the current SSDBCODI
-    provider. In V1, this consists of records that the provider explicitly
-    designates as core, reliably clustered normal records. If the provider does
-    not expose this set, the Label Coverage Gap score is unavailable rather
-    than reconstructed using an undocumented heuristic.
 
     \item[$c_t(q)$]
     The current normal-cluster identifier assigned to record $q$. It is defined
@@ -112,14 +117,70 @@ Throughout the document, $|X|$ denotes the number of elements in set $X$,
 $\varnothing$ denotes the empty set, and $\mathbf{1}[B]$ is $1$ when condition
 $B$ is true and $0$ otherwise.
 
+For any set $X$ and candidate $q$, define
+\begin{equation}
+    X_{-q}=X\setminus\{q\}.
+\end{equation}
+Every reference-based score uses $X_{-q}$. This matters because $U_t$ may
+contain a previously labeled record that has returned for a deterministic
+recheck. Without self-exclusion, that record would have a trivial distance of
+zero to its own label.
+
+\subsection{Label Requested by Each Category}
+
+Each category has one primary feedback dimension. The dashboard may allow an
+optional secondary answer, but it must not silently treat one label dimension
+as evidence for another.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{p{0.29\textwidth} p{0.24\textwidth} X}
+\toprule
+Category & Primary feedback & Interpretation of the answer \\
+\midrule
+Cluster Assignment Conflict & \texttt{semantic\_class} or a pairwise
+same/different-type judgment & Tests whether the current local assignment
+matches human meaning. \\
+
+Label Coverage Gap & \texttt{semantic\_class} & Adds a semantic reference to a
+region with little semantic supervision. \\
+
+Weak Group Reachability & \texttt{semantic\_class}, followed by
+\texttt{outlier\_status} when needed & Distinguishes a new or underrepresented
+normal type from a genuinely unusual record. \\
+
+Local Sparsity & \texttt{outlier\_status} & Distinguishes a true outlier from a
+rare but valid record. \\
+
+Known-Outlier Similarity & \texttt{outlier\_status} & Tests whether a confirmed
+anomaly pattern repeats. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
 \subsection{Distance and Reachability}
 
-Let $d_M(x,y)\geq 0$ denote the distance between records $x$ and $y$ in the
-fixed model-feature space of the current dataset and preprocessing version.
-For numeric data this may be Euclidean distance after the declared scaling
-pipeline. For mixed tabular data, the preprocessing and distance definition
-must be stored with the dataset version. Raw and transformed feature spaces
-must not be mixed within one round.
+Let $T_v$ be the immutable preprocessing transformation stored with dataset
+version $v$, and let
+\begin{equation}
+    z_v(x)=T_v(x)
+\end{equation}
+be the model-space representation of record $x$. The V1 distance is
+\begin{equation}
+    d_M(x,y)=\|z_v(x)-z_v(y)\|_2.
+\end{equation}
+Numeric fields use the declared imputation and robust-scaling parameters fitted
+for version $v$. A categorical field uses an explicit missing category and a
+one-hot block scaled by $1/\sqrt{2}$, so changing between two levels contributes
+one unit before any declared feature weight is applied. The transformation,
+feature weights, and resulting column map are part of the preprocessing version.
+Changing any of them creates a new version and invalidates cached scores.
+
+The original SSDBCODI formulas use Euclidean distance. Applying them to this
+versioned mixed-tabular representation is a declared system generalization.
+Raw feature values are retained for explanations but are never mixed with
+transformed values inside one distance calculation.
 
 Let $\MinPts\geq 1$ be the neighborhood-size parameter used by SSDBCODI. The
 core distance of $q$ is
@@ -143,24 +204,62 @@ identifier. The pairwise reachability distance is
 These definitions require $|D|-1\geq\MinPts$. If this condition fails, every
 category that depends on reachability is unavailable.
 
-\subsection{Availability and Interpretation}
+\subsection{Availability, Raw Signal, and Priority Score}
 
 For category $j$ and candidate $q\in U_t$, the system returns
 \begin{equation}
-    \left(A_j^{(t)}(q),S_j^{(t)}(q),R_j^{(t)}(q)\right),
+    \left(
+        A_j^{(t)}(q),
+        G_j^{(t)}(q),
+        S_j^{(t)}(q),
+        T_j^{(t)}(q),
+        R_j^{(t)}(q)
+    \right),
 \end{equation}
 where
 \begin{itemize}[leftmargin=*]
     \item $A_j^{(t)}(q)\in\{0,1\}$ indicates whether the score can be computed;
-    \item $S_j^{(t)}(q)\in[0,1]\cup\{\NA\}$ is the numeric score; and
+    \item $G_j^{(t)}(q)\in\mathbb{R}\cup\{\NA\}$ is the category's raw,
+    literature-linked signal in the direction ``larger means higher priority'';
+    \item $S_j^{(t)}(q)\in[0,1]\cup\{\NA\}$ is the common within-category
+    priority percentile used for ranking and display;
+    \item $T_j^{(t)}(q)\in\{0,1\}$ indicates whether $q$ is a typical,
+    actionable case for category $j$ in this round; and
     \item $R_j^{(t)}(q)$ is a deterministic explanation of availability or
     unavailability.
 \end{itemize}
 
-When a required reference set is empty, the output is $(0,\NA,R)$ rather than
-an invented numeric value. Thus every eligible record receives a complete
-category result even though every category is not necessarily numerically
-available in every round.
+When a required reference set is empty, the output is
+$(0,\NA,\NA,0,R)$ rather than an invented numeric value. Thus every eligible
+record receives a complete category result even though every category is not
+necessarily numerically available in every round.
+
+Define the numeric domain of category $j$ as
+\begin{equation}
+    E_j^{(t)}
+    =
+    \{q\in U_t:A_j^{(t)}(q)=1\}.
+\end{equation}
+For $q\in E_j^{(t)}$, convert the raw signal to a deterministic mid-rank
+percentile:
+\begin{equation}
+    \boxed{
+    S_j^{(t)}(q)
+    =
+    \frac{
+        \sum_{u\in E_j^{(t)}}
+        \mathbf{1}[G_j^{(t)}(u)<G_j^{(t)}(q)]
+        +
+        \frac{1}{2}
+        \sum_{u\in E_j^{(t)}}
+        \mathbf{1}[G_j^{(t)}(u)=G_j^{(t)}(q)]
+    }{|E_j^{(t)}|}
+    }.
+\end{equation}
+The mid-rank form gives tied records the same percentile. If all raw signals are
+equal, every point receives $0.5$ rather than being incorrectly presented as a
+top-priority case. Stable point ID is used only when a deterministic order among
+tied records is required.
 
 A score is a deterministic ranking measure, not a calibrated probability. For
 example, $S(q)=0.8$ does not mean that $q$ has an 80\% probability of being
@@ -173,6 +272,66 @@ history penalties, and ``do not repeat in consecutive rounds'' constraints are
 applied after the atomic category score has been computed. They do not change
 the definition of the score itself. Ground-truth columns used for offline
 evaluation must never enter any score calculation.
+
+\subsection{Typical-Case Contract}
+
+Availability only means that a formula can be evaluated. It does not mean that
+the current round contains a meaningful example of the category. The typical
+case flag prevents the dashboard from forcing an ordinary point into every
+category.
+
+The V1 defaults are
+\begin{align}
+T_{\mathrm{conflict}}^{(t)}(q)
+&=
+A_{\mathrm{conflict}}^{(t)}(q)
+\mathbf{1}[G_{\mathrm{conflict}}^{(t)}(q)>0],\\
+T_{\mathrm{coverage}}^{(t)}(q)
+&=
+A_{\mathrm{coverage}}^{(t)}(q)
+\mathbf{1}[S_{\mathrm{coverage}}^{(t)}(q)\geq\tau_P],\\
+T_{\mathrm{far}}^{(t)}(q)
+&=
+A_{\mathrm{far}}^{(t)}(q)
+\mathbf{1}[G_{\mathrm{far}}^{(t)}(q)>0]
+\mathbf{1}[S_{\mathrm{far}}^{(t)}(q)\geq\tau_P],\\
+T_{\mathrm{sparse}}^{(t)}(q)
+&=
+A_{\mathrm{sparse}}^{(t)}(q)
+\mathbf{1}[G_{\mathrm{sparse}}^{(t)}(q)>0]
+\mathbf{1}[S_{\mathrm{sparse}}^{(t)}(q)\geq\tau_P].
+\end{align}
+Here $\tau_P\in(0,1)$ is a versioned percentile threshold; the initial value is
+$\tau_P=0.75$. This value is a V1 engineering default, not a literature-derived
+constant, and must be included in sensitivity analysis.
+
+Known-Outlier Similarity uses a reference-relative gate defined in its category
+section rather than only a percentile. Model Instability, if enabled, uses the
+same positive-signal and percentile gate as Weak Group Reachability.
+
+Category $j$ has a typical case in round $t$ exactly when
+\begin{equation}
+    \operatorname{HasCase}_j^{(t)}
+    =
+    \mathbf{1}\!\left[
+        \sum_{q\in U_t}T_j^{(t)}(q)>0
+    \right].
+\end{equation}
+If this value is $0$, the category remains visible but reports ``no typical case
+in this round'' and does not call the LLM.
+
+\subsection{Score Identity}
+
+Every score artifact is identified by
+\begin{equation}
+    \Theta_t
+    =
+    (v_D,v_T,a_t,r_t,v_S),
+\end{equation}
+where $v_D$ is the dataset version, $v_T$ the preprocessing version, $a_t$ the
+analysis-run identifier, $r_t$ the active label revision, and $v_S$ the score
+policy version. The tuple, category, point ID, raw signal, priority percentile,
+and typical-case decision are included in the deterministic plan hash.
 
 \subsection{Evidence Terminology}
 
@@ -227,7 +386,7 @@ $D_C^{(t)}\setminus\{q\}$ with the smallest reachability distance to $q$. The
 score is
 \begin{equation}
     \boxed{
-    S_{\mathrm{conflict}}^{(t)}(q)
+    G_{\mathrm{conflict}}^{(t)}(q)
     =
     \frac{1}{k_q^{(t)}}
     \sum_{p\in\mathcal{N}^{r}_{k_q,t}(q)}
@@ -235,11 +394,13 @@ score is
     }.
 \end{equation}
 \paragraph{Interpretation.}
-$S_{\mathrm{conflict}}^{(t)}(q)$ is the fraction of nearby clustered records
+$G_{\mathrm{conflict}}^{(t)}(q)$ is the fraction of nearby clustered records
 that currently belong to another cluster. A value near $0$ means the local
 neighborhood largely agrees with the current assignment. A value near $1$
 means the neighborhood largely disagrees. A high value identifies an ambiguous
 local assignment; it does not prove that the current assignment is wrong.
+The displayed ranking value $S_{\mathrm{conflict}}^{(t)}(q)$ is its mid-rank
+percentile among all available conflict candidates.
 
 \paragraph{Why a label may help.}
 A human label can determine whether the point belongs with its current group,
@@ -275,60 +436,90 @@ Is record $q$ in a well-supported part of the data that has little human
 supervision?
 
 \paragraph{Availability.}
-This category requires at least one active human-labeled record and restricts
-the ranking to currently well-supported normal structure. Define the fixed
-round-level coverage set
+This category requires at least one other active semantic-class reference and
+restricts the ranking to locally supported structure. The support gate must be independent
+of existing human labels; otherwise a genuinely under-labeled region could be
+excluded merely because SSDBCODI has not yet connected it to a labeled normal
+reference.
+
+Let
 \begin{equation}
-    E_{\mathrm{coverage}}^{(t)}
+    k_{\mathrm{support}}
     =
-    U_t\cap C_{\mathrm{core}}^{(t)}.
+    \min(\MinPts,|D|-1)
 \end{equation}
+and define the model-space support radius
+\begin{equation}
+    r_{\mathrm{support},t}(q)
+    =
+    d_M\!\left(
+        q,
+        \operatorname{NN}^{M}_{k_{\mathrm{support}},t}(q)
+    \right).
+\end{equation}
+Define the empirical distribution
+\begin{equation}
+    \widehat F_{r,t}(z)
+    =
+    \frac{1}{|U_t|}
+    \sum_{u\in U_t}
+    \mathbf{1}[r_{\mathrm{support},t}(u)\leq z]
+\end{equation}
+and its left empirical quantile
+\begin{equation}
+    Q_{\gamma,t}
+    =
+    \inf\{z:\widehat F_{r,t}(z)\geq\gamma_{\mathrm{coverage}}\}.
+\end{equation}
+The V1 support gate is
+\begin{equation}
+    H_{\mathrm{coverage}}^{(t)}
+    =
+    \left\{
+        q\in U_t:
+        r_{\mathrm{support},t}(q)\leq Q_{\gamma,t}
+    \right\},
+\end{equation}
+with versioned default $\gamma_{\mathrm{coverage}}=0.90$. Thus the sparsest
+records above the empirical 90th-percentile support radius are deferred to
+Local Sparsity rather than treated as representative coverage. Ties may make
+the deferred fraction differ from exactly 10\%. The parameter is an engineering
+default and must be tested.
+
 The score is available for $q$ only when
 \begin{equation}
-    D_L^{(t)}\neq\varnothing,
+    (D_{L,\mathrm{sem}}^{(t)})_{-q}\neq\varnothing,
     \qquad
-    q\in E_{\mathrm{coverage}}^{(t)},
-    \qquad
-    |E_{\mathrm{coverage}}^{(t)}|\geq 1.
+    q\in H_{\mathrm{coverage}}^{(t)}.
 \end{equation}
-The core-record gate prevents isolated noise from being interpreted as an
-important uncovered region. The set $E_{\mathrm{coverage}}^{(t)}$ is frozen for
-the duration of round $t$ so that filtering the displayed candidate list cannot
-change the score.
+The set $H_{\mathrm{coverage}}^{(t)}$ and its quantile are frozen for the
+duration of round $t$ so that UI filtering cannot change the score.
 
 \paragraph{Formula.}
-For $u\in E_{\mathrm{coverage}}^{(t)}$, define its distance to the closest
-human-labeled record as
+For an available candidate $q$, define its distance to the closest other
+semantic reference as
 \begin{equation}
-    d_L^{(t)}(u)
+    d_{L,\mathrm{sem}}^{(t)}(q)
     =
-    \min_{\ell\in D_L^{(t)}}\rDist_t(u,\ell).
+    \min_{\ell\in(D_{L,\mathrm{sem}}^{(t)})_{-q}}\rDist_t(q,\ell).
 \end{equation}
-The empirical cumulative distribution of these distances is
-\begin{equation}
-    \widehat F_{L,t}(z)
-    =
-    \frac{1}{|E_{\mathrm{coverage}}^{(t)}|}
-    \sum_{u\in E_{\mathrm{coverage}}^{(t)}}
-    \mathbf{1}\!\left[d_L^{(t)}(u)\leq z\right].
-\end{equation}
-The coverage score is the within-round percentile
+The raw signal is
 \begin{equation}
     \boxed{
-    S_{\mathrm{coverage}}^{(t)}(q)
+    G_{\mathrm{coverage}}^{(t)}(q)
     =
-    \widehat F_{L,t}\!\left(d_L^{(t)}(q)\right)
+    d_{L,\mathrm{sem}}^{(t)}(q)
     }.
 \end{equation}
-Tied distances receive the same score; stable point ID is used only when the
-system must order tied candidates.
+The common mid-rank transformation produces
+$S_{\mathrm{coverage}}^{(t)}(q)$ over the available coverage domain.
 
 \paragraph{Interpretation.}
-A high score means that $q$ is farther from existing human supervision than
-most other well-supported candidates in the same round. It does not mean that
-$q$ is anomalous. Because $q$ must pass the core-record gate, the intended case
-is a plausible data region that is represented by the model but not yet
-represented by human labels.
+A high priority percentile means that $q$ is farther from existing semantic
+supervision than most other locally supported candidates in the same round. It
+does not mean that $q$ is anomalous. Because $q$ must pass the label-independent
+support gate, the intended case is a populated data region that is not yet
+represented by human semantic labels.
 
 \paragraph{Why a label may help.}
 A label on a representative record from an under-covered region can establish
@@ -337,11 +528,10 @@ This category prevents the system from spending its entire budget only on
 ambiguous or unusual cases.
 
 \paragraph{Formula provenance.}
-The nearest-label percentile is a project-defined coverage score. It is not a
-formula from QUIRE or core-set active learning. Its nearest-reference geometry
-is motivated by farthest-first exploration and core-set selection, while the
-percentile transformation makes its within-round interpretation independent of
-the raw distance unit.
+The nearest-semantic-label distance and its mid-rank priority percentile form a
+project-defined coverage score. They are not formulas from QUIRE or core-set
+active learning. Their nearest-reference geometry is motivated by farthest-first
+exploration and core-set selection.
 
 \paragraph{Literature support.}
 Basu et al. use farthest-first exploration to obtain supervision for previously
@@ -350,11 +540,13 @@ learning formalizes label acquisition as selecting a geometrically covering
 subset of the data \cite{sener2018coreset}. QUIRE shows that representative and
 informative query criteria can be complementary \cite{huang2014quire}. These
 works support coverage as a query objective, but none validates the exact
-percentile score and SSDBCODI core gate used here.
+nearest-reference score and local-support gate used here. Core-set results also
+come from supervised classification rather than this density-based clustering
+workflow.
 
 \paragraph{Primary limitation.}
-The result depends on the model-feature distance and the quality of the current
-core assignments. Coverage should therefore be evaluated against graph-based
+The result depends on the model-feature distance, support quantile, and semantic
+reference quality. Coverage should therefore be evaluated against graph-based
 coverage and cluster-stratified baselines.
 
 \section{Weak Group Reachability}
@@ -365,7 +557,7 @@ Is record $q$ difficult to connect to every currently known normal group?
 \paragraph{Availability.}
 The category requires at least one human-confirmed normal reference:
 \begin{equation}
-    D_N^{(t)}\neq\varnothing.
+    (D_N^{(t)})_{-q}\neq\varnothing.
 \end{equation}
 It also requires the SSDBCODI reachability expansion structure for the current
 round. If the implementation does not compute the pathwise quantity defined
@@ -373,7 +565,8 @@ below, it must report a different score name rather than silently substituting
 a direct pairwise distance.
 
 \paragraph{Pathwise reachability.}
-For each confirmed normal reference $s\in D_N^{(t)}$, let $T_{t,s}$ denote the
+For each other confirmed normal reference $s\in(D_N^{(t)})_{-q}$, let
+$T_{t,s}$ denote the
 deterministic reachability expansion structure produced by SSDBCODI when the
 expansion is rooted at $s$. For a record $q$ reached from $s$, let
 $\operatorname{path}_{T_{t,s}}(s,q)$ be the recorded expansion path and define
@@ -389,7 +582,7 @@ The minimum pathwise barrier from $q$ to any confirmed normal reference is
 \begin{equation}
     R_t(q)
     =
-    \min_{s\in D_N^{(t)}}E_{\max,t}(q,s).
+    \min_{s\in(D_N^{(t)})_{-q}}E_{\max,t}(q,s).
 \end{equation}
 SSDBCODI's reachability score is
 \begin{equation}
@@ -398,7 +591,7 @@ SSDBCODI's reachability score is
 The labeling-priority direction is
 \begin{equation}
     \boxed{
-    S_{\mathrm{far}}^{(t)}(q)
+    G_{\mathrm{far}}^{(t)}(q)
     =
     1-rScore_t(q)
     =
@@ -406,12 +599,15 @@ The labeling-priority direction is
     }.
 \end{equation}
 The convention $\exp(-\infty)=0$ gives disconnected records a score of $1$.
+The common mid-rank transformation produces the displayed priority score
+$S_{\mathrm{far}}^{(t)}(q)$.
 
 \paragraph{Interpretation.}
-A high score means that every route from $q$ to a confirmed normal reference
-contains a relatively weak reachability connection. This measures separation
-from known normal structure. It does not distinguish by itself among a new
-group, an underrepresented group, a true outlier, or an unsupported assignment.
+A high raw signal means that every route from $q$ to another confirmed normal
+reference contains a relatively weak reachability connection. This measures
+separation from known normal structure. It does not distinguish by itself among
+a new group, an underrepresented group, a true outlier, or an unsupported
+assignment.
 
 \paragraph{Why a label may help.}
 A human label can reveal whether the record extends an existing normal type,
@@ -425,8 +621,9 @@ to rank labeling candidates is a project-defined acquisition policy. It is not
 the complete SSDBCODI outlier score, which combines several signals.
 
 \paragraph{Literature support.}
-SSDBCODI provides strong evidence that pathwise reachability to labeled normal
-objects is useful for semi-supervised outlier analysis. Active constrained
+SSDBCODI defines and empirically uses pathwise reachability to labeled normal
+objects as one component of its integrated semi-supervised outlier analysis; it
+does not isolate this component as a stand-alone query-policy ablation. Active constrained
 clustering provides broader support for spending supervision on structure that
 is not yet represented by known neighborhoods \cite{basu2004active}. Evidence
 for this exact stand-alone query policy remains to be established.
@@ -467,17 +664,19 @@ SSDBCODI transforms this quantity as
 The local-sparsity ranking score is
 \begin{equation}
     \boxed{
-    S_{\mathrm{sparse}}^{(t)}(q)
+    G_{\mathrm{sparse}}^{(t)}(q)
     =
     1-lScore_t(q)
     =
     1-\exp[-LD_t(q)]
     }.
 \end{equation}
+The common mid-rank transformation produces the displayed priority score
+$S_{\mathrm{sparse}}^{(t)}(q)$.
 
 \paragraph{Interpretation.}
-A high score means that the nearest reachability neighbors of $q$ are, on
-average, relatively far away. The score measures \emph{absolute local sparsity}.
+A high raw signal means that the nearest reachability neighbors of $q$ are, on
+average, relatively far away. The signal measures \emph{absolute local sparsity}.
 It does not compare the density around $q$ with the normal density of $q$'s own
 cluster and is therefore not a relative-density score such as LOF.
 
@@ -497,8 +696,9 @@ density component used by SSDBCODI \cite{deng2022ssdbcodi}. Using that component
 alone as a labeling-priority score is a project-defined acquisition policy.
 
 \paragraph{Literature support.}
-SSDBCODI provides direct support for mean reachability distance as one of its
-outlier-analysis signals. LOF provides broader evidence that local density
+SSDBCODI defines and empirically uses mean reachability distance as one
+component of its integrated outlier analysis; it does not report a stand-alone
+active-query ablation for this component. LOF provides broader evidence that local density
 relative to neighboring density is useful for detecting local outliers
 \cite{breunig2000lof}; however, LOF does not validate this absolute-sparsity
 formula. The two approaches should be compared empirically rather than treated
@@ -520,29 +720,61 @@ The score is available only when
 \begin{equation}
     q\in U_t
     \quad\text{and}\quad
-    D_O^{(t)}\neq\varnothing.
+    (D_O^{(t)})_{-q}\neq\varnothing.
 \end{equation}
 Before the first human-confirmed outlier exists, the category returns
-$(0,\NA,\text{``no confirmed outlier reference''})$ for every eligible record.
+$(0,\NA,\NA,0,\text{``no other confirmed outlier reference''})$ for every
+eligible record.
 
 \paragraph{Formula.}
 Define the distance from $q$ to its nearest confirmed outlier as
 \begin{equation}
     O_t(q)
     =
-    \min_{o\in D_O^{(t)}}d_M(q,o).
+    \min_{o\in(D_O^{(t)})_{-q}}d_M(q,o).
 \end{equation}
-The score is
+Let $o_t^*(q)$ be the minimizing confirmed outlier, with stable point ID used
+to resolve equal distances. The raw signal is
 \begin{equation}
     \boxed{
-    S_{\mathrm{known\text{-}outlier}}^{(t)}(q)
+    G_{\mathrm{known\text{-}outlier}}^{(t)}(q)
     =
     \exp[-O_t(q)]
     }.
 \end{equation}
+The common mid-rank transformation produces the displayed priority score
+$S_{\mathrm{known\text{-}outlier}}^{(t)}(q)$.
+
+To avoid calling a record a typical match merely because it is the closest of
+several distant records, define the reference neighborhood radius
+\begin{equation}
+    r_{O,t}(o)
+    =
+    d_M\!\left(
+        o,
+        \operatorname{NN}^{M}_{k_O,t}(o)
+    \right),
+    \qquad
+    k_O=\min(\MinPts,|D|-1).
+\end{equation}
+The V1 typical-case gate is
+\begin{equation}
+    T_{\mathrm{known\text{-}outlier}}^{(t)}(q)
+    =
+    A_{\mathrm{known\text{-}outlier}}^{(t)}(q)
+    \mathbf{1}\!\left[
+        S_{\mathrm{known\text{-}outlier}}^{(t)}(q)\geq\tau_P
+    \right]
+    \mathbf{1}\!\left[
+        O_t(q)\leq\lambda_O r_{O,t}(o_t^*(q))
+    \right],
+\end{equation}
+where the versioned V1 default is $\lambda_O=1$. This is an engineering gate,
+not a claim that the reference neighborhood contains one semantic anomaly
+family.
 
 \paragraph{Interpretation.}
-A high score means that $q$ is close in model-feature space to at least one
+A high raw signal means that $q$ is close in model-feature space to at least one
 human-confirmed outlier. It does not mean that $q$ is certainly anomalous. Two
 nearby records can have different real-world meanings, and a single confirmed
 outlier may not represent a repeatable anomaly family.
@@ -560,8 +792,10 @@ uses a mixed-tabular distance, it is a declared generalization. Using the score
 alone as a query policy is project-defined.
 
 \paragraph{Literature support.}
-SSDBCODI directly supports similarity to a labeled outlier as a
-semi-supervised anomaly signal. Active Anomaly Discovery supports the broader
+SSDBCODI defines and empirically uses similarity to a labeled outlier as one
+component of its integrated semi-supervised anomaly analysis; it does not
+isolate nearest-outlier similarity as a stand-alone query-policy ablation.
+Active Anomaly Discovery supports the broader
 principle that expert feedback should guide subsequent anomaly search because
 statistical outlierness and user-relevant anomalousness are not identical
 \cite{das2016aad}. AAD does not validate nearest-confirmed-outlier similarity as
@@ -609,7 +843,7 @@ variant $m$. Define
 Using the convention $0\log 0=0$, the normalized assignment entropy is
 \begin{equation}
     \boxed{
-    S_{\mathrm{instability}}^{(t)}(q)
+    G_{\mathrm{instability}}^{(t)}(q)
     =
     -\frac{
         \sum_{c\in\mathcal{C}_t}
@@ -619,10 +853,14 @@ Using the convention $0\log 0=0$, the normalized assignment entropy is
     }
     }.
 \end{equation}
+The common mid-rank transformation produces
+$S_{\mathrm{instability}}^{(t)}(q)$. If this optional category is enabled, its
+typical-case gate requires $G_{\mathrm{instability}}^{(t)}(q)>0$ and
+$S_{\mathrm{instability}}^{(t)}(q)\geq\tau_P$.
 
 \paragraph{Interpretation.}
-A value near $0$ means that the predefined model variants assign $q$
-consistently. A high value means that plausible variants disagree. The score
+A raw value near $0$ means that the predefined model variants assign $q$
+consistently. A high value means that plausible variants disagree. The signal
 measures sensitivity to the chosen perturbation protocol, not all possible
 forms of uncertainty.
 
@@ -640,6 +878,139 @@ one-to-one alignment invalid. If variable numbers of clusters are required, a
 permutation-invariant co-assignment formulation should be designed and tested
 instead of forcing unreliable label alignment.
 
+\section{From Category Scores to a Recommendation Plan}
+
+The category scores determine point order within a category. They do not by
+themselves choose a category, construct a batch, or decide whether a point
+should be shown again. Those decisions follow the deterministic process below.
+
+\subsection{Category Selection}
+
+The user may explicitly select any category. The legacy \emph{Label Priority}
+control remains as a meta-level scheduler, not as a sixth point score. Because
+the five priority percentiles are not compared across categories, the V1
+scheduler uses coverage-balanced service:
+\begin{enumerate}[leftmargin=*]
+    \item retain only categories with
+    $\operatorname{HasCase}_j^{(t)}=1$;
+    \item choose the category that has gone the greatest number of rounds
+    without being shown, treating a never-shown category as having infinite
+    waiting time; and
+    \item break a remaining tie by the fixed order Cluster Assignment Conflict,
+    Label Coverage Gap, Weak Group Reachability, Local Sparsity, and
+    Known-Outlier Similarity.
+\end{enumerate}
+The selected category and the scheduler state are included in the plan hash.
+This policy is intentionally simple and deterministic. A learned or weighted
+category-level utility is a later research question and must not be introduced
+as an undocumented comparison of point percentiles.
+
+\subsection{Candidate Pool and Batch}
+
+Let $B\geq1$ be the requested labeling batch size and define the candidate-pool
+limit
+\begin{equation}
+    P=\max(12,3B).
+\end{equation}
+For selected category $j$, construct the plan as follows:
+\begin{enumerate}[leftmargin=*]
+    \item Start with all $q\in U_t$ satisfying $T_j^{(t)}(q)=1$.
+    \item Exclude an already-labeled point unless it has a current deterministic
+    recheck reason. Record every exclusion reason.
+    \item Sort by descending $S_j^{(t)}(q)$ and then stable point ID.
+    \item Defer a point shown in the immediately previous round unless it has a
+    new cluster movement, outlier-status movement, rule conflict, or there are
+    no fresh typical candidates. History changes eligibility order, not the
+    atomic category score.
+    \item Collapse exact model-space duplicates into one equivalence class
+    $[q]=\{u:z_v(u)=z_v(q)\}$ and retain the highest-ranked stable representative
+    from each class. This prevents redundant batches without introducing a
+    second weighted score.
+    \item Take the first $P$ remaining records as the ordered candidate pool
+    $C_{j,t}$ and the first $\min(B,|C_{j,t}|)$ as
+    \texttt{recommended\_point\_ids}. If fewer than $B$
+    nonduplicate records exist, return the smaller batch rather than weakening
+    the typical-case contract.
+\end{enumerate}
+
+Candidate-pool count, recommended-now count, and highlighted-on-plot count are
+reported separately. Highlighted IDs must exactly equal recommended IDs. If one
+point is a typical case for several categories, the point keeps one stable ID
+and the plan records all covered category questions; the system does not force
+different points merely to make categories look distinct.
+
+The category reports \texttt{no\_typical\_case} when no point satisfies its
+typical-case gate and \texttt{no\_eligible\_candidate} when typical points exist
+but all are excluded by labeling or session-state constraints.
+
+\section{Migration from the Legacy Eight-Category Interface}
+
+The five score categories replace the earlier rule-centered acquisition
+taxonomy. Legacy names may remain temporarily as compatibility aliases, but the
+system must not run two contradictory ranking systems.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{p{0.27\textwidth} p{0.31\textwidth} X}
+\toprule
+Legacy category & V1 destination & Role after migration \\
+\midrule
+Label Priority & Meta-level category scheduler & Chooses an available category;
+does not compute a point score. \\
+
+Boundary Review & Cluster Assignment Conflict & Rule-boundary proximity remains
+supporting explanation evidence. \\
+
+Overlap Merge Signal & Cluster Assignment Conflict plus comparison evidence &
+Remains a rule-relation tag; the system does not automatically recommend merge. \\
+
+Split or New Cluster Signal & Weak Group Reachability and Local Sparsity &
+Distinguishes a dense unsupported pocket from an isolated record. \\
+
+Anomaly Label Review & Local Sparsity, Weak Group Reachability, and
+Known-Outlier Similarity & Separates rarity, distance from known normal groups,
+and similarity to known anomaly patterns. \\
+
+Exception Relabel Review & Recheck reason plus rule evidence & No independent
+point score; re-enters a labeled point only through an explicit conflict. \\
+
+Feature Label Strategy & Rule explanation tag & Identifies raw fields to inspect
+after a point has been selected. \\
+
+Rule Confidence Audit & Rule Panel audit view & Audits surrogate fidelity but
+does not select points in V1. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The current weighted combination of category rank, affected-region size,
+recheck bonus, and history penalties is therefore a legacy implementation. The
+migration target is the atomic-score ordering and hard post-score constraints
+defined in this document. Both policies should be retained as named experimental
+baselines until the new policy has passed regression and effectiveness tests.
+
+\section{Feedback-Modality Transfer}
+
+The cited literature does not always ask the human the same kind of question as
+this dashboard. This difference is part of the evidence boundary:
+\begin{itemize}[leftmargin=*]
+    \item kDN studies known class labels as an instance-hardness signal, not
+    model-generated cluster assignments \cite{smith2014instance};
+    \item ACCESS and Basu et al. primarily request pairwise must-link or
+    cannot-link constraints \cite{xu2005access,basu2004active};
+    \item QUIRE and core-set active learning request supervised class labels
+    \cite{huang2014quire,sener2018coreset};
+    \item SSDBCODI uses direct normal-cluster and outlier supervision
+    \cite{deng2022ssdbcodi}; and
+    \item AAD requests anomaly/nominal judgments \cite{das2016aad}.
+\end{itemize}
+
+The dashboard's point-level semantic and outlier labels are therefore a direct
+match for only part of the cited evidence. Transferring a pairwise-constraint or
+classification query principle to this workflow is a design hypothesis that
+must be validated rather than presented as an established result.
+
 \section{Relationship to Decision-Tree Rules}
 
 Decision-tree rules remain an explanation layer in V1. They describe the
@@ -650,13 +1021,118 @@ For a point selected by one of the five categories, the Rule Panel may display
 deterministic supporting facts such as
 \begin{itemize}[leftmargin=*]
     \item whether the point satisfies its current group's surrogate rule;
-    \item which raw feature condition is closest to changing; and
-    \item whether nearby comparison records satisfy the same rule.
+    \item which raw feature condition is closest to changing, together with the
+    raw value, threshold, direction, and scale used to compute proximity;
+    \item whether nearby comparison records satisfy the same rule; and
+    \item the rule's support, coverage, purity, exception count, and stability
+    across rounds, retained under Technical Details rather than presented as
+    semantic truth.
 \end{itemize}
 These facts help explain the selected point, but rule agreement must not be
 presented as proof of semantic correctness. If a rule-based acquisition score
 is added later, it should be introduced and validated as a separate atomic
 category rather than hidden inside the existing scores.
+
+For every rule fact, the plan records the rule ID, rule-set fingerprint, target
+model assignment, raw-feature conditions, matched point IDs, exception point
+IDs, and the analysis run from which the rule was derived. A rule generated in
+round $t$ must never be combined with scores from another analysis identity.
+
+\section{Deterministic Evidence and LLM Contract}
+
+For every recommended point, deterministic code constructs a
+\texttt{ScoreEvidenceRecord} with the following fields:
+\begin{verbatim}
+point_id
+category
+score_policy_version
+availability
+raw_signal
+priority_percentile
+candidate_rank
+typical_case
+primary_label_dimension
+reference_point_ids
+neighbor_point_ids
+comparison_target_ids
+evidence_fact_ids
+recheck_reason
+plain_observation
+why_labeling_helps
+technical_details
+rule_evidence
+\end{verbatim}
+
+The reference IDs are category-specific: conflicting neighbors for Cluster
+Assignment Conflict, nearest semantic references for Label Coverage Gap,
+normal anchors and limiting expansion edges for Weak Group Reachability, local
+neighbors for Local Sparsity, and the nearest confirmed-outlier reference for
+Known-Outlier Similarity. The evidence record is part of the recommendation
+plan and is generated before any LLM call.
+
+DeepSeek receives only the selected plan, these evidence records, allowed label
+options, and relevant round delta. Its role is translational:
+\begin{itemize}[leftmargin=*]
+    \item turn deterministic observations into short, plain-language reasons;
+    \item explain what records or raw fields the user should compare; and
+    \item describe at most two supported if--then outcomes for the requested
+    label dimension.
+\end{itemize}
+
+DeepSeek cannot add, remove, reorder, or replace recommended points; change a
+category, score, rank, typical-case status, reference ID, rule ID, or allowed
+label; invent an unsupported reason; or predict a cluster merge or split as a
+fact. Every generated claim must cite deterministic evidence IDs. A schema
+failure replaces only the invalid text with deterministic fallback wording.
+Provider failure never blocks the user from viewing the scores or submitting
+labels.
+
+The interpretation artifact records prompt version, requested provider, actual
+model, finish reason, response keys, token usage, cache status, schema-repair
+status, and fallback reason. The wording may vary across successful DeepSeek
+calls, but the evidence facts, point order, score values, and allowed decisions
+must remain unchanged.
+
+The default UI shows qualitative language based on the priority percentile
+(for example, ``among the highest in this category'') and keeps exact distances,
+counts, thresholds, and raw scores in a collapsed Technical Details section.
+The LLM never decides whether a score is high or low.
+
+\section{Evidence Summary}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{p{0.23\textwidth} p{0.27\textwidth} X}
+\toprule
+Category & Signal support & Exact query-policy support \\
+\midrule
+Cluster Assignment Conflict & Adapted from kDN; boundary ambiguity is supported
+by active clustering work. & Indirect only; the reachability-neighbor fraction
+is project-specific. \\
+
+Label Coverage Gap & Farthest-first, core-set, and representative sampling
+support coverage as an objective. & Indirect and cross-task; the semantic-label
+distance plus support gate is project-specific. \\
+
+Weak Group Reachability & SSDBCODI defines and uses the reachability component
+inside its integrated detector. & Not isolated as a stand-alone acquisition
+policy in the cited work. \\
+
+Local Sparsity & SSDBCODI defines the mean-reachability component; LOF supports
+local density as an anomaly signal. & No cited work validates this exact
+absolute-sparsity query policy. \\
+
+Known-Outlier Similarity & SSDBCODI defines nearest-labeled-outlier similarity;
+AAD supports feedback-guided anomaly search. & The exact nearest-reference
+batch policy remains project-specific. \\
+
+Model Instability & Query-by-Committee and active clustering support model
+disagreement. & The bootstrap, alignment, and entropy construction remains
+project-specific. \\
+\bottomrule
+\end{tabularx}
+\end{table}
 
 \section{Validation Requirements}
 
@@ -665,12 +1141,15 @@ category rather than hidden inside the existing scores.
 For a fixed dataset version, preprocessing version, round state, and parameter
 configuration:
 \begin{enumerate}[leftmargin=*]
-    \item every $q\in U_t$ must receive an availability flag, score or $\NA$,
-    and deterministic reason for every category;
-    \item repeated execution must produce identical scores, ties, and point
-    order; and
+    \item every $q\in U_t$ must receive an availability flag, raw signal or
+    $\NA$, priority percentile or $\NA$, typical-case flag, and deterministic
+    reason for every category;
+    \item repeated execution must produce identical raw signals, percentiles,
+    typical-case decisions, ties, candidate pools, and recommended point order;
     \item changing a displayed candidate filter must not alter the frozen
-    round-level reference sets or score values.
+    round-level reference sets or score values; and
+    \item every recommended, highlighted, reference, neighbor, and rule ID must
+    belong to the same score identity $\Theta_t$.
 \end{enumerate}
 
 \subsection{Category Distinctness}
@@ -684,20 +1163,26 @@ domain as
     \{q\in U_t:A_a^{(t)}(q)=A_b^{(t)}(q)=1\}.
 \end{equation}
 Both statistics are unavailable when the common domain is too small for the
-requested calculation. Otherwise,
+requested calculation. Spearman correlation is also unavailable when either
+score vector has zero variance. Otherwise,
 \begin{equation}
-    \rho_{a,b}
+    \rho_{a,b}^{(t)}
     =
     \operatorname{Spearman}_{q\in Q_{a,b}^{(t)}}
     \!\left(S_a^{(t)}(q),S_b^{(t)}(q)\right),
 \end{equation}
 \begin{equation}
-    J_{a,b}^{(B)}
+    J_{a,b}^{(B,t)}
     =
-    \frac{|\operatorname{Top}_B(S_a)\cap\operatorname{Top}_B(S_b)|}
-    {|\operatorname{Top}_B(S_a)\cup\operatorname{Top}_B(S_b)|}.
+    \frac{
+        |\operatorname{Top}_{B,Q}^{(t)}(S_a)
+        \cap\operatorname{Top}_{B,Q}^{(t)}(S_b)|
+    }{
+        |\operatorname{Top}_{B,Q}^{(t)}(S_a)
+        \cup\operatorname{Top}_{B,Q}^{(t)}(S_b)|
+    }.
 \end{equation}
-Here $\operatorname{Top}_B(S_j)$ contains the highest-ranked
+Here $B\geq1$ and $\operatorname{Top}_{B,Q}^{(t)}(S_j)$ contains the highest-ranked
 $\min(B,|Q_{a,b}^{(t)}|)$ records from the common domain, with ties resolved by
 stable point identifier.
 High correlation alone does not require merging two categories if they answer
@@ -708,14 +1193,82 @@ overlap indicate that the product distinction may not justify its complexity.
 
 Offline evaluation may use hidden ground truth only as an oracle for measuring
 results. It must not enter score computation. Compare each category against
-random selection and relevant simple baselines using:
+random selection, the current legacy weighted heuristic, the integrated
+SSDBCODI outlier score where applicable, and relevant single-signal baselines.
+
+Each category has a primary success measure:
+\begin{table}[h]
+\centering
+\small
+\begin{tabularx}{\textwidth}{p{0.28\textwidth} X}
+\toprule
+Category & Primary offline outcome \\
+\midrule
+Cluster Assignment Conflict & Fraction of queried points whose oracle semantic
+label disagrees with the current local assignment, plus the subsequent reduction
+in unresolved local conflicts. \\
+
+Label Coverage Gap & Reduction in maximum semantic-reference distance and the
+number of previously unseen semantic classes discovered per label budget. \\
+
+Weak Group Reachability & Yield of new semantic classes, underrepresented normal
+types, and true outliers among queried points. \\
+
+Local Sparsity & Yield of true outliers and rare-but-valid records, reported
+separately so rarity is not treated as error. \\
+
+Known-Outlier Similarity & Number of additional user-relevant anomalies found
+per query and diversity of the confirmed anomaly references that produced them. \\
+
+Model Instability & Reduction in assignment disagreement after feedback relative
+to its repeated-analysis cost. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Global outcomes include:
 \begin{itemize}[leftmargin=*]
     \item label efficiency over multiple active-learning rounds;
     \item reduction in unresolved assignment conflicts;
     \item discovery of previously uncovered semantic classes;
-    \item discovery rate of user-relevant anomalies; and
-    \item stability of selected points across repeated identical runs.
+    \item discovery rate of user-relevant anomalies;
+    \item stability of selected points across repeated identical runs;
+    \item clustering quality using ARI or NMI and anomaly quality using average
+    precision or AUC when the hidden oracle supports those measures; and
+    \item computation time and DeepSeek token cost per round, reported
+    separately from deterministic scoring time.
 \end{itemize}
+
+\subsection{Experimental Protocol}
+
+Use multiple datasets, including numeric, mixed-type, missing-value, and
+different-density fixtures. For each dataset and label budget:
+\begin{enumerate}[leftmargin=*]
+    \item run at least five active-learning rounds or continue until the budget
+    is exhausted;
+    \item repeat each simulated-oracle condition over multiple initial seeds;
+    \item use paired comparisons because policies share the same dataset and
+    initial-label condition;
+    \item report means, dispersion, and bootstrap confidence intervals rather
+    than only the best run;
+    \item perform ablations for $\tau_P$, $\gamma_{\mathrm{coverage}}$,
+    $\lambda_O$, $\MinPts$, history filtering, and duplicate suppression; and
+    \item verify that hidden ground truth is accessed only by the evaluator.
+\end{enumerate}
+
+The literature-derived raw signals, the new percentile calibration, the
+typical-case gates, and the post-score plan policy must be ablated separately.
+Otherwise an observed gain cannot be attributed to the category formula.
+
+\subsection{Human-Factors Validation}
+
+Because the dashboard is intended for non-experts, a user study should measure
+whether participants can correctly state why a point was recommended, identify
+the records or fields they should compare, choose an allowed label, and
+distinguish a priority score from a probability. Report task completion time,
+answer accuracy, confidence, and perceived workload. Compare deterministic-only
+wording with validated DeepSeek wording while keeping the recommended points and
+evidence fixed.
 
 The V1 category set should be retained only if each category contributes useful
 cases that are not already supplied by the others. Model Instability should be
