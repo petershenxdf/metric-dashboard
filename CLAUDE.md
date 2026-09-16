@@ -2,78 +2,54 @@
 
 ## Product
 
-This repository contains one product workflow: a generic, persistent active-learning dashboard for structured tabular data.
+One product workflow: a generic, persistent active-learning dashboard for tabular data.
 
-The current loop is:
+DatasetAdapter → preprocessing → MDS / SSDBCODI → six-score review matrix
+→ explicit human LabelEvents → next saved round.
 
-~~~text
-DatasetAdapter -> preprocessing -> MDS -> SSDBCODI
--> decision-tree explanation rules
--> deterministic RecommendationPlanV2
--> optional DeepSeek V4 Pro translation
--> LabelEvents -> next immutable round
-~~~
+Wine is a fixture only. Never encode wine-specific assumptions in reusable services.
 
-Wine is only a test and demo fixture. Never encode wine-specific assumptions in reusable services.
+## Boundaries
+
+- data_workspace owns common dataset and matrix contracts.
+- projection owns display coordinates; distances for scores are never taken from the plot.
+- ssdbcodi owns clustering, outlier results and recorded expansion paths.
+- algorithm_adapters exposes the shared AnalysisResult boundary.
+- selection and labeling own their module-lab state.
+- scatterplot renders model truth.
+- rule_panel generates explanation-only decision-tree rules, not review priorities.
+- active_learning owns imports, sessions, rounds, six scores, eligibility and label history.
+- workflows orchestrate modules; modules must not import workflows.
+
+There is no LLM/DeepSeek integration, meta-priority score or legacy eight-category plan.
+Do not restore these paths. See docs/modules/active_learning/design.md for the current specification.
+
+## Invariants
+
+Keep scoring deterministic and network-free. Keep all six scores separate.
+Freeze eligible percentile pools within a round; filters must not recompute them.
+Use midrank ties, stable point-ID ordering, explicit NA reasons and duplicate-free batches.
+Keep raw data separate from model transforms. Never expose evaluation truth through analysis,
+score evidence, metadata shown in the plot, or model references.
+Human semantic classes and confirmed normal/outlier status are separate dimensions.
+Unsure does not become a confirmed reference.
+Keep cluster colors separate from review tile colors and selection outlines.
+Store full round/label transitions atomically; never mutate a round from GET.
 
 ## Commands
 
-~~~bash
+~~~sh
 python run.py
 python -m unittest discover -s tests
+python -m unittest discover -s tests/browser -v
 python -m compileall app tests
 git diff --check
 ~~~
 
-The default product URL is http://127.0.0.1:5001/workflows/active-learning-dashboard/.
+Browser tests require optional Playwright and Chromium; normal runtime does not.
+The product URL is http://127.0.0.1:5001/workflows/active-learning-dashboard/.
 
-## Boundaries
-
-- data_workspace owns common dataset and feature-matrix contracts.
-- projection owns display coordinates.
-- ssdbcodi owns clustering, outlier results, and analysis scores.
-- algorithm_adapters exposes the stable analysis boundary.
-- selection owns transient point selection.
-- labeling owns module-lab annotations.
-- scatterplot renders state and does not own analysis truth.
-- rule_panel generates explanation-only rules and deterministic recommendations.
-- active_learning owns dataset versions, sessions, rounds, LabelEvents, history-aware plans, and LLM translation.
-- workflows orchestrate modules but modules must never import from app/workflows.
-
-DeepSeek never selects points and never changes clustering, outlier status, rules, or labels. Its output must preserve plan_id, focus_category, target_rule_ids, and ordered recommended_point_ids.
-
-## Flask Structure
-
-app/__init__.py creates the app and registers lazy module/workflow blueprints from app/module_registry.py.
-
-Retained module labs are available under /modules/<slug>/. The only registered workflow is active-learning-dashboard.
-
-JSON APIs use:
-
-~~~json
-{"ok": true, "data": {}, "error": null, "diagnostics": {}}
-~~~
-
-## Engineering Rules
-
-- Keep deterministic analysis and recommendation logic in pure services.
-- Keep API/network code outside ranking logic.
-- Preserve stable IDs and deterministic tie-breaking.
-- Store raw values separately from transformed model features.
-- Never expose ground-truth columns to analysis, recommendations, plots, or TranslationPacket.
-- Add tests whenever a schema, round transition, ranking rule, or provider contract changes.
-- Keep module debug pages useful, but do not create additional product workflows for module combinations.
-- Update current docs instead of adding historical Step documents.
-
-## Environment
-
-Only the active DeepSeek and persistence settings belong in .env.example:
-
-~~~text
-METRIC_DASHBOARD_DEEPSEEK_BASE_URL
-METRIC_DASHBOARD_DEEPSEEK_API_KEY
-METRIC_DASHBOARD_LLM_TIMEOUT_SECONDS
-METRIC_DASHBOARD_ACTIVE_LEARNING_DB_PATH
-~~~
-
-Do not commit .env, runtime_data, SQLite files, generated caches, or local API keys.
+JSON APIs use {"ok": true, "data": {}, "error": null, "diagnostics": {}}.
+Add tests for scoring, round transitions and changed API contracts. Update current docs.
+Do not commit .env, runtime_data, generated caches, SQLite files or credentials.
+Only METRIC_DASHBOARD_ACTIVE_LEARNING_DB_PATH is needed in .env.example.

@@ -225,6 +225,10 @@ def prepare_records(
     if point_id_column:
         excluded.add(point_id_column)
     selected_features = tuple(feature_columns or (column for column in columns if column not in excluded))
+    if set(selected_features) & excluded or set(metadata_columns) & set(ground_truth_columns):
+        raise ValueError("feature, metadata, point ID and ground-truth roles must not overlap")
+    if point_id_column in set(ground_truth_columns) | set(metadata_columns):
+        raise ValueError("point ID must not be a metadata or ground-truth column")
     if not selected_features:
         raise ValueError("at least one feature column is required")
     unknown = set(selected_features) - set(columns)

@@ -1,134 +1,114 @@
 # Metric Dashboard
 
-Metric Dashboard is a local Flask application for rule-guided, multi-round active learning on structured tabular data.
+A local Flask dashboard for six-score, multi-round human review of structured tabular data.
+CSV, JSON and MAT imports share preprocessing, SSDBCODI, MDS, explanation-only decision trees and SQLite history.
 
-The final product path combines:
+## Current workflow
 
-- CSV, JSON, and MAT dataset import;
-- deterministic preprocessing and stable point IDs;
-- MDS projection and interactive point selection;
-- SSDBCODI clustering with integrated outlier detection;
-- shallow decision-tree rules that explain SSDBCODI output;
-- deterministic next-point recommendations;
-- deterministic category evidence in ordinary language;
-- optional DeepSeek V4 Pro wording improvements;
-- human label commits, round history, and SQLite persistence.
+Import → SSDBCODI → six independent review scores → linked matrix / scatterplot → explicit human labels → next saved round.
 
-Wine is a regression fixture and demo dataset. It is not part of the recommendation logic, and its ground truth is never sent to the model or used to choose points.
+The six categories are Cluster Assignment Conflict, Label Coverage Gap, Weak Group Reachability,
+Local Sparsity, Known-Outlier Similarity and Model Instability.
+The old eight-category plans, history-weighted meta-ranking, evidence checklists, DeepSeek client,
+prompt and interpretation endpoint have been removed. No API key or external service is required.
 
-## Core Loop
-
-~~~text
-import tabular data
-  -> preprocess and project
-  -> run SSDBCODI
-  -> generate explanation-only rules
-  -> build deterministic recommendation plans
-  -> build fixed evidence checks and comparison records
-  -> optionally rewrite that evidence with DeepSeek V4 Pro
-  -> user labels recommended or selected records
-  -> persist label events and create the next round
-  -> rerun analysis and compare round changes
-~~~
-
-The same dataset version, configuration, label revision, and focus category
-must produce the same ordered recommendation points and evidence statuses.
-DeepSeek may vary the wording, but validation prevents it from changing the
-points, evidence checks, statuses, fact references, or comparison records.
-
-## Setup On macOS
-
-~~~bash
-conda create -n metric-dashboard python=3.9 -y
-conda activate metric-dashboard
-python -m pip install -r requirements.txt
-cp .env.example .env
-~~~
-
-Set the DeepSeek key in .env when generated explanations are needed:
-
-~~~text
-METRIC_DASHBOARD_DEEPSEEK_API_KEY=your-key
-~~~
-
-The deterministic recommendation and labeling loop works without a key by using plain-language fallback guidance.
+Scores use model-space distances, not 2D coordinates. Midrank percentiles are frozen for each round.
+They are neither probabilities nor a cross-category utility score. Missing scores display patterned NA.
+See [the scoring design](docs/modules/active_learning/design.md) and [API contracts](docs/state_and_api_contracts.md).
 
 ## Run
 
-~~~bash
+Use Python 3.9–3.11 with the current dependency ranges:
+
+~~~sh
+python -m pip install -r requirements.txt
 python run.py
 ~~~
 
-Open http://127.0.0.1:5001. Port 5001 avoids the macOS services that commonly occupy port 5000. Override it when needed:
+Open http://127.0.0.1:5001/workflows/active-learning-dashboard/.
+HOST and PORT can override the server defaults. Retained engineering labs live under /modules/.
 
-~~~bash
-PORT=5002 python run.py
+### Windows / PowerShell
+
+Use a project-local environment to avoid mixing Conda numerical-library DLLs:
+
+~~~powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe run.py
 ~~~
 
-The product entry is:
+On the session index, choose **Load Wine Dataset**; no upload is needed. The bundled
+wine.mat contains 129 records with 13 features. Initially, Coverage, Reachability and
+Known-Outlier Similarity may be NA because they require explicit human references.
+This does not indicate a failed dataset load.
+
+If an existing Conda environment terminates during NumPy matrix operations, use the
+project-local environment above, or launch with the environment properly activated.
+Changing dataset scores cannot fix a native numerical-library loading failure.
+
+For an existing Conda environment, use `conda run` so its numerical-library DLLs
+are resolved from that environment (rather than invoking its python.exe alone):
+
+~~~powershell
+conda run -n dev --no-capture-output python run.py
+~~~
+
+The only application-specific environment setting is optional:
 
 ~~~text
-/workflows/active-learning-dashboard/
+METRIC_DASHBOARD_ACTIVE_LEARNING_DB_PATH=runtime_data/active_learning/active_learning.sqlite3
 ~~~
 
-The root route and /workflows/ redirect there. /modules/ exposes isolated engineering labs for retained modules.
+Never commit runtime_data, SQLite files or .env. Ground-truth columns are evaluation-only and
+cannot overlap feature, metadata or point-ID roles. Wine is only a demo/regression fixture.
 
-## Supported Data
+## Review
 
-The first product version accepts structured tabular data:
+- Choose a category to sort descending; reverse order with its header or direction button.
+- Filter by review status, model group, point ID, numeric score conditions or NA.
+- Match ALL / Match ANY combines score conditions; other filters always restrict the result.
+- Recommendable-only applies the category's actual gates, not merely a high percentile.
+- Click a tile, point-ID button or plot point to inspect evidence and comparison records.
+- Check a duplicate-free recommended batch, or label manually selected records.
+- Submit semantic type, Normal, Outlier or Unsure. Unsure defers for one round, never becoming a reference.
+- Review and revert round history. Old rounds offer an explicit upgrade button; loading them does not rerun the model.
 
-- numeric and categorical feature columns;
-- missing values;
-- optional point-ID and metadata columns;
-- optional ground-truth columns isolated for offline evaluation.
+Default MinPts is 3, recommendation percentile threshold 75, batch size 4, optional label budget,
+and an exact-analysis limit of 2,000 records. MinPts must be smaller than the record count.
+Instability runs the full pipeline at every valid distinct setting in MinPts−1, MinPts, MinPts+1.
+This adds compute cost. Empty queues are not filled with unrelated points.
 
-Built-in adapters support CSV, JSON, and MAT. Preprocessing stores both the model matrix and a transformation map so rule cards can use original field names and units.
+## Validation
 
-## Model Responsibilities
-
-SSDBCODI owns cluster assignments, outlier flags, and per-point analysis scores.
-
-The decision tree is a read-only surrogate. It converts current SSDBCODI output into feature rules but never performs clustering or outlier detection.
-
-The recommendation engine owns candidate generation, ranking, filtering, history penalties, tie-breaking, and final ordered point IDs.
-
-The deterministic Category Evidence Matrix owns the user-visible reasons for
-each point. It checks a fixed category-specific checklist in the complete
-feature space and exposes exact calculations only under `Technical details`.
-
-DeepSeek V4 Pro receives a compact TranslationPacket and only rewrites supplied
-facts into clearer language. A response is accepted only when the returned
-model and immutable recommendation/evidence contract pass validation. A bad
-bullet falls back locally; an API failure never blocks labeling.
-
-## Persistence
-
-SQLite stores dataset metadata, sessions, immutable rounds, label events, recommendation plans, and interpretation diagnostics. Larger raw and matrix artifacts are stored under runtime_data and referenced by fingerprint.
-
-Label changes create superseding LabelEvents. Stale round, revision, or plan submissions return a conflict instead of overwriting current state.
-
-## Tests
-
-~~~bash
+~~~sh
 python -m unittest discover -s tests
 python -m compileall app tests
 git diff --check
 ~~~
 
-Tests cover all retained module boundaries, generic dataset adapters,
-multi-round state, deterministic recommendations and fixed evidence dimensions
-across all categories, DeepSeek contract validation, and the integrated
-workflow.
+Optional real-browser checks (test dependencies only):
 
-## Repository Map
-
-~~~text
-app/modules/active_learning/    session, round, data, persistence, translation
-app/modules/rule_panel/         decision-tree rules and deterministic plans
-app/modules/ssdbcodi/           clustering and integrated outlier detection
-app/workflows/                  final active-learning dashboard
-app/shared/                     cross-module schemas and DeepSeek client
-prompts/active_learning/        constrained explanation prompt
-docs/                           current architecture and contracts
-tests/                          module and workflow regression coverage
+~~~sh
+python -m pip install playwright
+python -m playwright install --with-deps chromium
+python -m unittest discover -s tests/browser -v
 ~~~
+
+These check exact color boundaries, ties and NA ordering, ALL/ANY filters, keyboard and plot/table
+linking, selected-point visibility, label refresh, request failures and responsive matrix scrolling.
+
+## Code map
+
+- app/modules/active_learning/review.py: six raw scores, fixed percentile pools, recommendation gates.
+- app/modules/active_learning/service.py: label feedback, complete reruns, frozen round snapshots.
+- app/modules/ssdbcodi/algorithm.py: model calculations and recorded full-path expansion.
+- app/modules/rule_panel/: explanation-only tree rules.
+- app/workflows/active_learning_dashboard.py: HTTP workflow.
+- app/static/review_matrix.js and review_matrix.css: linked matrix and point review.
+
+The implementation follows Dashboard_Active_Learning_LaTeX.zip supplied for this change.
+Existing category-guide PDFs and literature_grounded_category_scores_report.tex predate this
+implementation and are retained as historical documents, not current specifications.
+Equal-budget policy benchmarking and a human usability study remain future evaluation work;
+unit and browser tests do not establish improved labeling efficiency.

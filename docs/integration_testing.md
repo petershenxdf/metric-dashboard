@@ -1,94 +1,43 @@
-# Integration Testing
+# Integration testing
 
-## Test Layers
+## Standard suite
 
-### Pure services
-
-Test preprocessing, projection, SSDBCODI, rule extraction, recommendation ranking, translation validation, round transitions, and persistence without Flask where possible.
-
-### Module routes
-
-Every retained module lab must load, expose health/state, and preserve its ownership boundary. Module tests must not depend on deleted workflows.
-
-### Product workflow
-
-The active-learning workflow tests cover import, Wine fixture creation through the generic path, session rendering, state API, category switching, labels, history, revert, and interpretation.
-
-## Required Determinism Tests
-
-For fixed dataset version, config, label revision, and category:
-
-- analysis identity is stable;
-- RuleSet identity is stable;
-- plan_id is stable;
-- candidate and recommended order is stable;
-- highlighted IDs equal recommended IDs;
-- every recommended point has a profile and ranking explanation;
-- tie-breaking is stable by point ID after evidence and diversity terms.
-
-Run these checks across all eight categories.
-
-## Multi-Round Tests
-
-Exercise at least five rounds and verify:
-
-- labels accumulate correctly;
-- corrections supersede old events;
-- uncertain labels are not seeds;
-- SSDBCODI reruns each round;
-- lineage keeps group identity stable where possible;
-- RoundDelta reflects changed groups, outliers, and rules;
-- recent points are not repeated without a recheck reason;
-- stale submissions fail;
-- restart recovers the same session;
-- revert restores effective state.
-
-## Data Adapter Tests
-
-Use numeric CSV, mixed CSV, missing values, custom JSON, and MAT. Verify:
-
-- stable generated IDs;
-- isolated ground truth;
-- finite matrix values;
-- categorical missing token behavior;
-- raw/model transformation map;
-- readable rule conditions;
-- explicit capability errors for oversized data.
-
-## DeepSeek Tests
-
-Automated tests do not call the network or consume tokens. Patch the shared DeepSeek client and verify:
-
-- model request is deepseek-v4-pro;
-- temperature is zero;
-- thinking is disabled;
-- JSON response mode is used;
-- response model and finish diagnostics are recorded;
-- changed, missing, added, or reordered point IDs are rejected;
-- unsupported technical prose is rejected;
-- one repair attempt is allowed;
-- fallback leaves the round usable;
-- categories without a typical case skip the call.
-
-## Manual Browser Check
-
-Run python run.py, then inspect:
-
-1. import/session index;
-2. one Wine fixture session;
-3. category availability and ordinary-language descriptions;
-4. recommendation chips and numbered scatterplot callouts;
-5. hover/click focus without selection mutation;
-6. label commit and next-round timeline;
-7. DeepSeek success and fallback status;
-8. mobile layout without overlap.
-
-## Commands
-
-~~~bash
+~~~sh
 python -m unittest discover -s tests
 python -m compileall app tests
 git diff --check
 ~~~
 
-Warnings from locally old Flask/Jinja dependencies should be distinguished from product failures. Dependency upgrades belong in a separate compatibility change.
+The suite covers import/preprocessing and role isolation, retained module labs, SSDBCODI,
+expansion-tree bottlenecks (including zero-distance edges), six score formulas, exact midrank ties,
+coverage support quantiles, self/reference exclusions, known-outlier local gates, member-set
+instability under renamed/split/merged/outlier outputs, incomplete runs, eligibility and duplicate-free
+batches. Service tests cover complete fixed-input reruns, atomic failures, corrections, stale
+submissions, budgets, empty queues, restart, history/revert and explicit legacy upgrade.
+
+## Optional real browser suite
+
+~~~sh
+python -m pip install playwright
+python -m playwright install --with-deps chromium
+python -m unittest discover -s tests/browser -v
+~~~
+
+A local temporary Flask server and temporary SQLite database are created per test.
+Checks include ALL/ANY/NA semantics, stable unrounded sorting and color bands, unchanged scores
+after filters, keyboard/plot/table selection, hidden-selection notice, label refresh with retained
+point ID, request errors and responsive horizontal scrolling. No production dataset is touched.
+
+Feedback regressions also cover propagation of Normal support without assigning a semantic type,
+replacement of rejected bootstrap anchors, fewer-than-K candidates, no automatic candidates,
+all-confirmed-outlier results, and correction/revert of those results. Browser checks cover explicit
+single/batch mode, cancellation/confirmation, plot batch rings, NA/Reviewed evidence, zero-instability
+wording, malformed saved views and full filter restoration across submission and reload.
+
+To use an already-installed Chrome instead of Playwright's downloaded Chromium, set
+METRIC_TEST_BROWSER_PATH to its full executable path before running the browser suite.
+On Windows use the activated Conda environment described in README; direct invocation without
+activation may fail to load the numerical library DLLs. Test databases and screenshots are temporary.
+
+No test result establishes improved labeling efficiency. Equal-label-budget comparisons with random
+review and human usability studies from the design document remain separate evaluation tasks.

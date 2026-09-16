@@ -3,9 +3,10 @@ from __future__ import annotations
 import gzip
 import json
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Tuple
+from typing import Any, Iterable, Iterator, Mapping, Tuple
 
 import numpy as np
 
@@ -83,28 +84,6 @@ class ActiveLearningStore:
                 CREATE INDEX IF NOT EXISTS idx_active_labels
                     ON active_learning_label_events(session_id, point_id, label_dimension, status);
 
-                CREATE TABLE IF NOT EXISTS active_learning_interpretations (
-                    session_id TEXT NOT NULL,
-                    round_id TEXT NOT NULL,
-                    plan_id TEXT NOT NULL,
-                    provider_kind TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    diagnostics_json TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    PRIMARY KEY(round_id, plan_id, provider_kind)
-                );
-
-                CREATE TABLE IF NOT EXISTS active_learning_recommendation_events (
-                    session_id TEXT NOT NULL,
-                    round_id TEXT NOT NULL,
-                    plan_id TEXT NOT NULL,
-                    point_id TEXT NOT NULL,
-                    event_kind TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    PRIMARY KEY(round_id, plan_id, point_id, event_kind),
-                    FOREIGN KEY(session_id)
-                        REFERENCES active_learning_sessions(session_id)
-                );
                 """
             )
 
@@ -290,6 +269,7 @@ class ActiveLearningStore:
         *,
         updated_at: str,
         label_vocabulary: Mapping[str, str],
+        allow_legacy_upgrade: bool = False,
     ) -> Tuple[Tuple[LabelEvent, ...], ActiveLearningSession]:
         """Commit the complete label-to-next-round transition atomically."""
 
@@ -319,7 +299,7 @@ class ActiveLearningStore:
                 raise ValueError(
                     "active-learning session changed before the round transition"
                 )
-            if current["status"] != "active":
+            if current["status"] != "active" and not (allow_legacy_upgrade and not current_round.review and current["status"] == "stopped"):
                 raise ValueError(
                     "active-learning session is not ready for a round transition"
                 )
@@ -486,7 +466,9 @@ class ActiveLearningStore:
             )
         return tuple(reversed(ancestry))
 
-    def revert_events_to_round(self, session_id: str, round_id: str) -> None:
+    def revert_events_to_round(
+        self, session_id: str, round_id: str, *, expected_round_id: str, updated_at: str
+    ) -> None:
         ancestry = self.round_ancestry(
             session_id,
             round_id,
@@ -501,6 +483,12 @@ class ActiveLearningStore:
         }
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            head = connection.execute(
+                "SELECT current_round_id FROM active_learning_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if head is None or head["current_round_id"] != expected_round_id:
+                raise ValueError("active-learning session changed before reverting")
             rows = connection.execute(
                 """
                 SELECT event_id, round_id, provenance_json
@@ -564,122 +552,24 @@ class ActiveLearningStore:
                         """,
                         ("active" if index == 0 else "superseded", candidate["event_id"]),
                     )
-
-    def record_recommendation_shown(
-        self,
-        *,
-        session_id: str,
-        round_id: str,
-        plan_id: str,
-        point_ids: Iterable[str],
-        created_at: str,
-    ) -> None:
-        materialized = tuple(dict.fromkeys(str(item) for item in point_ids))
-        if not materialized:
-            return
-        with self._connect() as connection:
-            connection.executemany(
-                """
-                INSERT OR IGNORE INTO active_learning_recommendation_events (
-                    session_id, round_id, plan_id, point_id,
-                    event_kind, created_at
-                ) VALUES (?, ?, ?, ?, 'shown', ?)
-                """,
-                [
-                    (
-                        session_id,
-                        round_id,
-                        plan_id,
-                        point_id,
-                        created_at,
-                    )
-                    for point_id in materialized
-                ],
-            )
-
-    def recommendation_events(
-        self,
-        session_id: str,
-        round_ids: Iterable[str],
-    ) -> Tuple[Mapping[str, Any], ...]:
-        materialized = tuple(dict.fromkeys(str(item) for item in round_ids))
-        if not materialized:
-            return ()
-        placeholders = ",".join("?" for _ in materialized)
-        with self._connect() as connection:
-            rows = connection.execute(
-                f"""
-                SELECT round_id, plan_id, point_id, event_kind, created_at
-                FROM active_learning_recommendation_events
-                WHERE session_id = ? AND round_id IN ({placeholders})
-                ORDER BY created_at, point_id
-                """,
-                (session_id, *materialized),
-            ).fetchall()
-        return tuple(dict(row) for row in rows)
-
-    def save_interpretation(
-        self,
-        *,
-        session_id: str,
-        round_id: str,
-        plan_id: str,
-        provider_kind: str,
-        payload: Mapping[str, Any],
-        diagnostics: Mapping[str, Any],
-        updated_at: str,
-    ) -> None:
-        with self._connect() as connection:
+            target = ancestry[-1]
             connection.execute(
-                """
-                INSERT INTO active_learning_interpretations (
-                    session_id, round_id, plan_id, provider_kind,
-                    payload_json, diagnostics_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(round_id, plan_id, provider_kind) DO UPDATE SET
-                    payload_json=excluded.payload_json,
-                    diagnostics_json=excluded.diagnostics_json,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    session_id,
-                    round_id,
-                    plan_id,
-                    provider_kind,
-                    _dump(dict(payload)),
-                    _dump(dict(diagnostics)),
-                    updated_at,
-                ),
+                "UPDATE active_learning_sessions SET current_round_id = ?, status = ?, updated_at = ? WHERE session_id = ?",
+                (round_id, "stopped" if target.status == "stopped" else "active", updated_at, session_id),
             )
 
-    def get_interpretation(
-        self,
-        round_id: str,
-        plan_id: str,
-        provider_kind: str,
-    ) -> Mapping[str, Any] | None:
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT payload_json, diagnostics_json
-                FROM active_learning_interpretations
-                WHERE round_id = ? AND plan_id = ? AND provider_kind = ?
-                """,
-                (round_id, plan_id, provider_kind),
-            ).fetchone()
-        if row is None:
-            return None
-        return {
-            "guidance": _load(row["payload_json"]),
-            "diagnostics": _load(row["diagnostics_json"]),
-            "cache_hit": True,
-        }
-
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(str(self.db_path))
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON")
+            # SQLite's own context manager commits/rolls back but does not close
+            # the handle. Close explicitly so Windows does not retain file locks.
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
 
 def _session_from_row(row: sqlite3.Row) -> ActiveLearningSession:
@@ -707,7 +597,7 @@ def _round_from_payload(payload: Mapping[str, Any]) -> ActiveLearningRound:
         rule_set=payload.get("rule_set", {}),
         display_rule_set=payload.get("display_rule_set", payload.get("rule_set", {})),
         projection=payload.get("projection", {}),
-        recommendation_plans=payload.get("recommendation_plans", {}),
+        review=payload.get("review", {}),
         delta=payload.get("delta", {}),
         cluster_lineage=payload.get("cluster_lineage", {}),
         created_at=payload["created_at"],

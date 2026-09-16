@@ -17,13 +17,33 @@ FeatureMatrix
   -> integrated cluster and outlier result
 ~~~
 
-The implementation persists rScore, lScore, simScore, and tScore diagnostics. These values may support deterministic recommendation ranking and technical audit but should be translated into qualitative facts before appearing in primary user guidance.
+The implementation exposes rScore, lScore, simScore and tScore diagnostics. Full-path reachability
+uses a deterministic Prim expansion tree on the mutual-reachability graph, with recorded edges
+exported through AnalysisResult diagnostics. Tree paths preserve minimax barriers. This replaces
+the previous direct-to-seed rScore calculation. The current feedback contract is versioned as
+expansion_normal_feedback_v2 (historical expansion_minimax_v1 snapshots are unchanged).
+The six-score review layer uses only human-supported references on those paths, not bootstrap
+anchors. Raw review values and precise percentiles are available alongside plain-language reasons.
 
 ## Labels
 
 Active semantic-class labels become stable human seeds through the active-learning service. True-outlier and normal labels constrain outlier interpretation. Uncertain labels remain historical evidence and are not seeds.
 
 Bootstrap anchors provide a baseline. Explicit human labels take precedence for labeled points.
+
+Normal feedback is a normal reachability reference, not a semantic class seed. Core rScore uses
+the union of cluster seeds and explicit Normal references on the recorded tree. This can change
+neighboring rScore/tScore values without inventing a class. Confirmed normals are excluded from
+automatic outlier selection and receive the same weighted-distance group assignment as other
+normal records. Human semantic seeds likewise supply normal support unless explicitly Outlier.
+
+Bootstrap runs on eligible records after excluding confirmed outliers, including before density
+candidate selection. It deterministically chooses replacement anchors if old anchors are rejected,
+and reduces bootstrap K when fewer than K candidates remain. If every record is confirmed Outlier,
+the result has no seeds or normal assignments: rScore is zero and e_max is null (no normal path).
+No synthetic normal reference or infinite JSON value is introduced. Correcting one record back
+to Normal permits bootstrap and normal assignment again. An empty automatic candidate set produces
+no automatic outliers; it must never fall back to reclassifying protected normal references.
 
 ## Outputs
 

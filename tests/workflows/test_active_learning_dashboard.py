@@ -1,33 +1,33 @@
-import json
-import sqlite3
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 from app import create_app
+from app.modules.active_learning import ActiveLearningStore
 
 
 def records():
     return [
         {
-            "id": f"p{index:02d}",
-            "x": (index // 8) * 6 + index % 4,
-            "y": (index // 8) * 2 + index % 3,
-            "kind": "left" if index < 12 else "right",
-            "truth": "private",
+            "id": f"p{i:02d}",
+            "x": (i // 8) * 6 + i % 4,
+            "y": i % 3,
+            "truth": "PRIVATE_GROUND_TRUTH",
         }
-        for index in range(24)
+        for i in range(24)
     ]
 
 
 class ActiveLearningDashboardWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
-        self.db_path = str(Path(self.tempdir.name) / "active.sqlite3")
         self.app = create_app()
-        self.app.config["TESTING"] = True
-        self.app.config["ACTIVE_LEARNING_DB_PATH"] = self.db_path
+        self.app.config.update(
+            TESTING=True,
+            ACTIVE_LEARNING_DB_PATH=str(Path(self.tempdir.name) / "test.sqlite3"),
+        )
         self.client = self.app.test_client()
 
     def tearDown(self):
@@ -37,267 +37,187 @@ class ActiveLearningDashboardWorkflowTests(unittest.TestCase):
         dataset = self.client.post(
             "/api/datasets",
             json={
-                "dataset_id": "workflow_demo",
-                "entity_name": "item",
                 "records": records(),
                 "point_id_column": "id",
-                "feature_columns": ["x", "y", "kind"],
                 "ground_truth_columns": ["truth"],
             },
         )
-        dataset_version_id = dataset.json["data"]["dataset_version_id"]
-        session = self.client.post(
+        self.assertEqual(dataset.status_code, 201)
+        version = dataset.get_json()["data"]["dataset_version_id"]
+        response = self.client.post(
             "/api/active-learning/sessions",
-            json={
-                "dataset_version_id": dataset_version_id,
-                "config": {"n_clusters": 3, "batch_size": 3},
-            },
+            json={"dataset_version_id": version, "config": {"n_clusters": 3}},
         )
-        return session.json["data"]
+        self.assertEqual(response.status_code, 201)
+        return response.get_json()["data"]["state"]
 
-    def test_index_and_generic_session_page_load(self):
-        self.assertEqual(
-            self.client.get("/workflows/active-learning-dashboard/").status_code,
-            200,
-        )
-        created = self.create_session()
-        session_id = created["session"]["session_id"]
-        page = self.client.get(
-            f"/workflows/active-learning-dashboard/{session_id}/"
+    def label_url(self, state):
+        return (
+            "/api/active-learning/sessions/"
+            + state["session"]["session_id"]
+            + "/rounds/"
+            + state["round"]["round_id"]
+            + "/labels"
         )
 
-        self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Generic Active Learning Dashboard", self.client.get("/workflows/active-learning-dashboard/").data)
-        self.assertIn(b"Commit The Next Batch", page.data)
-        self.assertIn(b"Learning Rounds", page.data)
-        self.assertIn(b"Explain With DeepSeek V4 Pro", page.data)
-        self.assertNotIn(b"encoded::", page.data)
-        self.assertNotIn(b"private", page.data)
-        self.assertNotIn(b"wine sample", page.data.lower())
-        self.assertIn(b"Why this category", page.data)
-        self.assertIn(b"Why this record was recommended", page.data)
-        self.assertIn(b'class="evidence-question"', page.data)
-        self.assertIn(b"What we see:", page.data)
-        self.assertIn(b"Why label this record:", page.data)
-        self.assertIn(b"How to label it", page.data)
-        self.assertIn(b"What your answer would tell us", page.data)
-        self.assertIn(b"Technical details", page.data)
-        self.assertIn(b"Compare with", page.data)
-        self.assertIn(b"data-comparison-point-id", page.data)
-        self.assertIn(b"data-feature-name", page.data)
-        self.assertIn(b"data-rule-feature", page.data)
-        self.assertIn(b'evidence-status', page.data)
-        self.assertNotIn(b">Observed<", page.data)
-        self.assertIn(b"data-generate-explanation", page.data)
-        self.assertIn(b"data-guide-point-id", page.data)
-        self.assertIn(b"data-clear-guidance-focus", page.data)
-        self.assertIn(b"guidance-callout-line", page.data)
-        self.assertNotIn(b"category evidence", page.data.lower())
-        self.assertNotIn(b"affected-region score", page.data.lower())
-        self.assertNotIn(b"SSDBCODI seed", page.data)
-        self.assertNotIn(b"generate=1", page.data)
-
-    def test_state_exposes_round_plan_delta_and_no_ground_truth(self):
-        created = self.create_session()
-        session_id = created["session"]["session_id"]
-        response = self.client.get(
-            f"/api/active-learning/sessions/{session_id}/state"
-        )
-
-        self.assertEqual(response.status_code, 200)
-        state = response.json["data"]
-        self.assertEqual(state["round"]["round_index"], 0)
-        self.assertIn("recommendation_plan", state)
-        self.assertIn("candidate_rankings", state["recommendation_plan"])
-        self.assertIn(
-            "category_evidence_cards",
-            state["recommendation_plan"],
-        )
-        self.assertTrue(
-            state["recommendation_plan"]["category_evidence_cards"]
-        )
-        self.assertIn("delta", state["round"])
-        self.assertEqual(len(state["round"]["recommendation_plans"]), 8)
-        self.assertTrue(
-            all(
-                plan["evidence_policy_version"]
-                == "category_evidence_v2"
-                for plan in state["round"][
-                    "recommendation_plans"
-                ].values()
-            )
-        )
-        self.assertNotIn("ground_truth", str(state["plot_points"]))
-
-    def test_label_commit_advances_round_and_stale_commit_is_rejected(self):
-        created = self.create_session()
-        session_id = created["session"]["session_id"]
-        state = created["state"]
-        plan = state["recommendation_plan"]
-        point_id = plan["recommended_point_ids"][0]
-        endpoint = (
-            f"/api/active-learning/sessions/{session_id}/rounds/"
-            f"{state['round']['round_id']}/labels"
-        )
-        payload = {
+    def payload(self, state):
+        return {
             "expected_round_id": state["round"]["round_id"],
             "expected_label_revision": state["round"]["label_revision"],
-            "plan_id": plan["plan_id"],
-            "category": state["focus_category"],
+            "category": "local_sparsity",
             "labels": [
                 {
-                    "point_id": point_id,
-                    "label_dimension": "semantic_class",
-                    "label_value": "domain_a",
+                    "point_id": "p00",
+                    "label_dimension": "outlier_status",
+                    "label_value": True,
                 }
             ],
         }
-        committed = self.client.post(endpoint, json=payload)
-        stale = self.client.post(endpoint, json=payload)
 
-        self.assertEqual(committed.status_code, 200)
+    def test_index_and_six_column_dashboard(self):
         self.assertEqual(
-            committed.json["data"]["round"]["round_index"],
-            1,
+            self.client.get("/workflows/active-learning-dashboard/").status_code, 200
         )
-        self.assertEqual(stale.status_code, 409)
-        self.assertEqual(stale.json["error"]["code"], "stale_round")
-
-    def test_mismatched_expected_round_id_is_rejected(self):
-        created = self.create_session()
-        session_id = created["session"]["session_id"]
-        state = created["state"]
-        plan = state["recommendation_plan"]
-        response = self.client.post(
-            (
-                f"/api/active-learning/sessions/{session_id}/rounds/"
-                f"{state['round']['round_id']}/labels"
-            ),
-            json={
-                "expected_round_id": "older_round",
-                "expected_label_revision": state["round"]["label_revision"],
-                "plan_id": plan["plan_id"],
-                "category": state["focus_category"],
-                "labels": [
-                    {
-                        "point_id": plan["recommended_point_ids"][0],
-                        "label_dimension": "uncertain",
-                        "label_value": True,
-                    }
-                ],
-            },
-        )
-
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json["error"]["code"], "stale_round")
-
-    def test_mock_interpretation_is_cached_and_keeps_plan_ids(self):
-        created = self.create_session()
-        session_id = created["session"]["session_id"]
-        state = created["state"]
-        category = state["focus_category"]
-        endpoint = (
-            f"/api/active-learning/sessions/{session_id}/rounds/"
-            f"{state['round']['round_id']}/categories/{category}/interpret"
-        )
-        first = self.client.post(endpoint, json={"provider_kind": "mock"})
-        second = self.client.post(endpoint, json={"provider_kind": "mock"})
-
-        self.assertEqual(first.status_code, 200)
-        self.assertEqual(
-            first.json["data"]["guidance"]["recommended_point_ids"],
-            state["recommendation_plan"]["recommended_point_ids"],
-        )
-        self.assertTrue(second.json["data"]["cache_hit"])
-
-    @patch(
-        "app.modules.active_learning.service."
-        "ActiveLearningService.interpret_category"
-    )
-    def test_dashboard_get_never_triggers_an_interpretation_call(
-        self,
-        interpret,
-    ):
-        created = self.create_session()
-        session_id = created["session"]["session_id"]
-
+        state = self.create_session()
         response = self.client.get(
-            f"/workflows/active-learning-dashboard/{session_id}/"
-            "?provider_kind=deepseek&generate=1"
+            "/workflows/active-learning-dashboard/"
+            + state["session"]["session_id"]
+            + "/"
         )
-
         self.assertEqual(response.status_code, 200)
-        interpret.assert_not_called()
+        html = response.get_data(as_text=True)
+        for text in (
+            "Review priority matrix",
+            "Match ALL",
+            "Match ANY",
+            "No percentile (NA / Reviewed / Deferred)",
+            'id="label-scope"',
+            'id="review-guidance"',
+            'class="batch-ring"',
+            "Normal",
+            "Unsure",
+            "Model Instability",
+        ):
+            self.assertIn(text, html)
+        self.assertNotIn("DeepSeek", html)
+        self.assertNotIn("PRIVATE_GROUND_TRUTH", html)
+        self.assertEqual(html.count("data-category-heading="), 6)
 
-    def test_dashboard_records_each_shown_recommendation_only_once(self):
-        created = self.create_session()
-        session_id = created["session"]["session_id"]
-        path = f"/workflows/active-learning-dashboard/{session_id}/"
+    def test_labels_need_round_and_revision_but_not_old_plan(self):
+        state = self.create_session()
+        response = self.client.post(self.label_url(state), json=self.payload(state))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["data"]["round"]["round_index"], 1)
+        stale = self.client.post(self.label_url(state), json=self.payload(state))
+        self.assertEqual(stale.status_code, 409)
 
-        self.client.get(path)
-        self.client.get(path)
-
-        with sqlite3.connect(self.db_path) as connection:
-            count = connection.execute(
-                """
-                SELECT COUNT(*)
-                FROM active_learning_recommendation_events
-                WHERE session_id = ? AND event_kind = 'shown'
-                """,
-                (session_id,),
-            ).fetchone()[0]
-        self.assertEqual(
-            count,
-            len(created["state"]["recommendation_plan"]["recommended_point_ids"]),
+    def test_old_interpret_endpoint_removed(self):
+        state = self.create_session()
+        response = self.client.post(
+            self.label_url(state).replace(
+                "/labels", "/categories/label_priority/interpret"
+            ),
+            json={"provider_kind": "deepseek"},
         )
+        self.assertEqual(response.status_code, 404)
 
-    def test_dashboard_ignores_interpretation_from_an_old_prompt_contract(self):
-        created = self.create_session()
-        session_id = created["session"]["session_id"]
-        state = created["state"]
-        category = state["focus_category"]
-        endpoint = (
-            f"/api/active-learning/sessions/{session_id}/rounds/"
-            f"{state['round']['round_id']}/categories/{category}/interpret"
-        )
-        self.client.post(endpoint, json={"provider_kind": "mock"})
-        with sqlite3.connect(self.db_path) as connection:
-            connection.execute(
-                """
-                UPDATE active_learning_interpretations
-                SET diagnostics_json = ?
-                WHERE round_id = ? AND plan_id = ? AND provider_kind = 'mock'
-                """,
-                (
-                    json.dumps({"prompt_template_version": "old_contract"}),
-                    state["round"]["round_id"],
-                    state["recommendation_plan"]["plan_id"],
-                ),
+    def test_get_never_runs_model_or_network(self):
+        state = self.create_session()
+        sid = state["session"]["session_id"]
+        with (
+            patch(
+                "app.modules.active_learning.service.run_default_analysis",
+                side_effect=AssertionError("unexpected rerun"),
+            ),
+            patch(
+                "urllib.request.urlopen",
+                side_effect=AssertionError("unexpected network"),
+            ),
+        ):
+            response = self.client.get(
+                "/api/active-learning/sessions/"
+                + sid
+                + "/state?focus_category=label_priority"
             )
-
-        page = self.client.get(
-            f"/workflows/active-learning-dashboard/{session_id}/"
-            "?provider_kind=mock&show_interpretation=1"
-        )
-
-        self.assertEqual(page.status_code, 200)
-        self.assertNotIn(b"cache hit", page.data)
-
-    def test_session_survives_app_recreation(self):
-        created = self.create_session()
-        session_id = created["session"]["session_id"]
-        second_app = create_app()
-        second_app.config["TESTING"] = True
-        second_app.config["ACTIVE_LEARNING_DB_PATH"] = self.db_path
-        response = second_app.test_client().get(
-            f"/api/active-learning/sessions/{session_id}/state"
-        )
-
+            page = self.client.get(
+                "/workflows/active-learning-dashboard/"
+                + sid
+                + "/?show_interpretation=1"
+            )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json["data"]["session"]["session_id"],
-            session_id,
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(response.get_json()["data"]["review"], state["review"])
+
+    def test_history_revert_and_restart(self):
+        state = self.create_session()
+        self.client.post(self.label_url(state), json=self.payload(state))
+        sid = state["session"]["session_id"]
+        history = self.client.get(
+            "/api/active-learning/sessions/" + sid + "/history"
+        ).get_json()["data"]
+        self.assertEqual(len(history["rounds"]), 2)
+        self.assertEqual(len(history["label_events"]), 1)
+        response = self.client.post(self.label_url(state).replace("/labels", "/revert"))
+        self.assertEqual(response.status_code, 200)
+        app = create_app()
+        app.config.update(self.app.config)
+        resumed = (
+            app.test_client()
+            .get("/api/active-learning/sessions/" + sid + "/state")
+            .get_json()["data"]
         )
+        self.assertEqual(resumed["review"], state["review"])
+        self.assertEqual(resumed["active_labels"], [])
+
+    def test_invalid_labels_return_structured_errors(self):
+        state = self.create_session()
+        for payload in (
+            ["not an object"],
+            {},
+            {
+                "expected_round_id": state["round"]["round_id"],
+                "expected_label_revision": "not-int",
+            },
+            {**self.payload(state), "category": "label_priority"},
+            {**self.payload(state), "labels": [None]},
+        ):
+            response = self.client.post(self.label_url(state), json=payload)
+            self.assertEqual(response.status_code, 400)
+            self.assertFalse(response.get_json()["ok"])
+
+    def test_unknown_session_returns_404(self):
+        response = self.client.get("/api/active-learning/sessions/missing/state")
+        self.assertEqual(response.status_code, 404)
+
+    def test_static_matrix_resources_available(self):
+        for path in ("/static/review_matrix.js", "/static/review_matrix.css"):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200)
+            response.close()
+
+    def test_wine_fixture_uses_the_same_six_score_workflow(self):
+        response = self.client.post(
+            "/workflows/active-learning-dashboard/wine-fixture", follow_redirects=True
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("wine_mat", response.get_data(as_text=True))
+        self.assertEqual(response.get_data(as_text=True).count("data-category-heading="), 6)
+
+    def test_legacy_dashboard_and_explicit_upgrade_endpoint(self):
+        state = self.create_session()
+        store = ActiveLearningStore(self.app.config["ACTIVE_LEARNING_DB_PATH"])
+        old = store.get_round(state["round"]["round_id"])
+        store.save_round(replace(old, review={}))
+        sid = state["session"]["session_id"]
+        page = self.client.get("/workflows/active-learning-dashboard/" + sid + "/")
+        self.assertIn("Start six-score review", page.get_data(as_text=True))
+        response = self.client.post(
+            "/api/active-learning/sessions/" + sid + "/upgrade",
+            json={"expected_round_id": old.round_id},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.get_json()["data"]["round"]["review"]["categories"]), 6)
+        self.assertEqual(store.get_round(old.round_id).analysis, old.analysis)
 
 
 if __name__ == "__main__":

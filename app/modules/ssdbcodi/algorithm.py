@@ -23,6 +23,52 @@ def reachability_matrix(distances: np.ndarray, c_dist: np.ndarray) -> np.ndarray
     return np.maximum(np.maximum(distances, c_dist[:, None]), c_dist[None, :])
 
 
+def expansion_tree(r_dist: np.ndarray) -> Tuple[Tuple[int, int, float], ...]:
+    """Deterministic Prim expansion; tree paths minimize the largest crossed edge.
+
+    Record the actual expansion edges, not a direct distance to a seed. A
+    minimum spanning tree preserves every pair's minimax reachability barrier.
+    Dense Prim takes O(n²) time and O(n) additional memory, including zero edges.
+    """
+    count = len(r_dist)
+    if not count or not np.isfinite(r_dist).all():
+        raise ValueError("expansion requires complete finite reachability distances")
+    visited = np.zeros(count, dtype=bool)
+    best = np.full(count, np.inf)
+    parent = np.full(count, -1, dtype=int)
+    best[0] = 0.0
+    edges = []
+    for _ in range(count):
+        vertex = int(np.argmin(np.where(visited, np.inf, best)))
+        visited[vertex] = True
+        if parent[vertex] >= 0:
+            edges.append((int(parent[vertex]), vertex, float(best[vertex])))
+        improve = (~visited) & (r_dist[vertex] < best)
+        best[improve] = r_dist[vertex, improve]
+        parent[improve] = vertex
+    return tuple(edges)
+
+
+def expansion_reachability(count, edges, references, *, exclude_self=False):
+    """Return best full-path barriers and reference origins on a recorded tree."""
+    adjacency = [[] for _ in range(count)]
+    for left, right, weight in edges:
+        adjacency[left].append((right, weight))
+        adjacency[right].append((left, weight))
+    barriers = np.full(count, np.inf)
+    origins = np.full(count, -1, dtype=int)
+    for source in sorted(set(references)):
+        stack = [(source, -1, 0.0)]
+        while stack:
+            vertex, parent, barrier = stack.pop()
+            if not (exclude_self and vertex == source) and barrier < barriers[vertex]:
+                barriers[vertex], origins[vertex] = barrier, source
+            for neighbor, weight in adjacency[vertex]:
+                if neighbor != parent:
+                    stack.append((neighbor, vertex, max(barrier, weight)))
+    return barriers, origins
+
+
 def compute_local_density_score(
     r_dist: np.ndarray,
     min_pts: int,
@@ -86,7 +132,7 @@ def select_outliers_from_candidates(
     n_outliers = max(1, int(np.ceil(n_points * contamination)))
     candidate_indices = np.flatnonzero(candidate_mask)
     if candidate_indices.shape[0] == 0:
-        return select_outliers_by_score(t_score, contamination)
+        return ()
     ranked = candidate_indices[np.argsort(-t_score[candidate_indices])]
     return tuple(int(index) for index in ranked[:n_outliers])
 
@@ -222,11 +268,20 @@ def run_ssdbcodi_core(
     beta: float = 0.3,
     contamination: float = 0.13,
     rscore_weight: float = 0.5,
+    labeled_normal_indices: Iterable[int] | None = None,
 ) -> Dict[str, object]:
     matrix = np.asarray(values, dtype=float)
     labeled_outliers = tuple(sorted(set(labeled_outlier_indices or ())))
     validate_inputs(matrix, min_pts, alpha, beta, contamination, rscore_weight, labeled_outliers)
-    if not seeds:
+    labeled_normals = tuple(sorted(set(labeled_normal_indices or ())))
+    for index in labeled_normals:
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(matrix):
+            raise ValueError("labeled normal indices must be valid point indices")
+    if set(labeled_normals) & set(labeled_outliers):
+        raise ValueError("a point cannot be both confirmed normal and outlier")
+    if set(seeds) & set(labeled_outliers):
+        raise ValueError("confirmed outliers cannot be cluster seeds")
+    if not seeds and len(labeled_outliers) != len(matrix):
         raise ValueError("seeds must contain at least one labeled point")
 
     distances = pairwise_euclidean(matrix)
@@ -235,40 +290,46 @@ def run_ssdbcodi_core(
 
     n_points = matrix.shape[0]
 
-    # r_score per point: exp(-min rDist to any seed). Seeds get r_score = 1.
-    seed_indices = np.asarray(sorted(seeds.keys()), dtype=int)
-    seed_r_dist = r_dist[:, seed_indices]
-    e_max = np.min(seed_r_dist, axis=1)
-    e_max[seed_indices] = 0.0
+    # Full expansion-path bottlenecks, shared with the review-score layer.
+    # Normal status supports density reachability without inventing a class label.
+    normal_references = sorted(set(seeds) | set(labeled_normals))
+    tree = expansion_tree(r_dist)
+    e_max, _ = expansion_reachability(n_points, tree, normal_references)
     r_score = np.exp(-e_max)
     l_score = compute_local_density_score(r_dist, min_pts)
     sim_score = compute_similarity_score(distances, labeled_outliers)
     t_score = combined_outlier_score(r_score, l_score, sim_score, alpha, beta)
 
-    # Outlier candidates: any point that is not a labeled cluster seed.
+    # Human confirmations and cluster anchors cannot be reclassified by the quota.
     seed_set = set(int(index) for index in seeds.keys())
+    protected_normal = seed_set | set(labeled_normals)
     candidate_mask = np.ones(n_points, dtype=bool)
-    for index in seed_set:
+    for index in protected_normal:
         candidate_mask[index] = False
     auto_outliers = set(
         select_outliers_from_candidates(t_score, contamination, candidate_mask)
     )
-    outlier_indices_set = (auto_outliers | set(labeled_outliers)) - seed_set
+    outlier_indices_set = (auto_outliers | set(labeled_outliers)) - protected_normal
     excluded_for_assignment = outlier_indices_set
 
-    assigned_label, seed_origin = assign_classes_by_weighted_distance(
-        distances=distances,
-        r_dist=r_dist,
-        seeds=seeds,
-        rscore_weight=rscore_weight,
-        excluded_indices=excluded_for_assignment,
-    )
+    if seeds:
+        assigned_label, seed_origin = assign_classes_by_weighted_distance(
+            distances=distances,
+            r_dist=r_dist,
+            seeds=seeds,
+            rscore_weight=rscore_weight,
+            excluded_indices=excluded_for_assignment,
+        )
+    else:
+        # All points were explicitly confirmed outliers: no normal group exists.
+        assigned_label, seed_origin = [None] * n_points, [None] * n_points
 
     outlier_indices = tuple(sorted(outlier_indices_set))
 
     return {
         "assigned_label": tuple(assigned_label),
-        "e_max": tuple(float(value) for value in e_max),
+        "e_max": tuple(float(value) if np.isfinite(value) else None for value in e_max),
+        "expansion_tree": tree,
         "r_score": tuple(float(value) for value in r_score),
         "l_score": tuple(float(value) for value in l_score),
         "sim_score": tuple(float(value) for value in sim_score),

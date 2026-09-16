@@ -44,6 +44,7 @@ def bootstrap_seeds_from_kmeans(
     feature_matrix: FeatureMatrix,
     n_clusters: int = DEFAULT_BOOTSTRAP_K,
     min_pts: int = DEFAULT_MIN_PTS,
+    excluded_indices: Iterable[int] = (),
 ) -> Dict[int, str]:
     """Run kmeans on dense candidates, then return centroid-nearest seed points."""
     if not isinstance(feature_matrix, FeatureMatrix):
@@ -58,7 +59,14 @@ def bootstrap_seeds_from_kmeans(
         raise ValueError("min_pts must be a positive integer")
 
     matrix = np.asarray(feature_matrix.values, dtype=float)
-    candidate_indices = _dense_candidate_indices(matrix, n_clusters, min_pts)
+    excluded = set(excluded_indices)
+    if any(isinstance(i, bool) or not isinstance(i, int) or not 0 <= i < len(matrix) for i in excluded):
+        raise ValueError("excluded indices must be valid point indices")
+    eligible = np.asarray([i for i in range(len(matrix)) if i not in excluded], dtype=int)
+    if not len(eligible):
+        return {}
+    n_clusters = min(n_clusters, len(eligible))
+    candidate_indices = eligible[_dense_candidate_indices(matrix[eligible], n_clusters, min_pts)]
     candidate_matrix = matrix[candidate_indices]
     labels = kmeans(candidate_matrix, n_clusters=n_clusters)
     labels_array = np.asarray(labels, dtype=int)
@@ -205,6 +213,9 @@ def run_ssdbcodi(
     labeled_outlier_indices = {
         index for index, is_outlier in outlier_overrides.items() if is_outlier
     }
+    labeled_normal_indices = {
+        index for index, is_outlier in outlier_overrides.items() if not is_outlier
+    }
     manual_seeds = {
         index: label
         for index, label in manual_seeds.items()
@@ -214,12 +225,9 @@ def run_ssdbcodi(
     bootstrap_seeds: Dict[int, str] = {}
     used_bootstrap = False
     if bootstrap:
-        bootstrap_seeds = bootstrap_seeds_from_kmeans(feature_matrix, n_clusters, min_pts)
-        bootstrap_seeds = {
-            index: label
-            for index, label in bootstrap_seeds.items()
-            if index not in labeled_outlier_indices
-        }
+        bootstrap_seeds = bootstrap_seeds_from_kmeans(
+            feature_matrix, n_clusters, min_pts, excluded_indices=labeled_outlier_indices
+        )
         used_bootstrap = True
 
     manual_seeds, semantic_seed_mapping = align_semantic_seeds_to_bootstrap(
@@ -228,7 +236,7 @@ def run_ssdbcodi(
         bootstrap_seeds,
     )
     combined_seeds = merge_seeds(bootstrap_seeds, manual_seeds)
-    if not combined_seeds:
+    if not combined_seeds and len(labeled_outlier_indices) != len(feature_matrix.point_ids):
         raise ValueError(
             "no seeds available: provide manual labels or enable bootstrap"
         )
@@ -237,6 +245,7 @@ def run_ssdbcodi(
         values=feature_matrix.values,
         seeds=combined_seeds,
         labeled_outlier_indices=labeled_outlier_indices,
+        labeled_normal_indices=labeled_normal_indices,
         min_pts=min_pts,
         alpha=alpha,
         beta=beta,
@@ -271,6 +280,8 @@ def run_ssdbcodi(
     n_unique_clusters = len(cluster_id_set) if cluster_id_set else 1
 
     parameters = {
+        "reachability_version": "expansion_normal_feedback_v2",
+        "confirmed_normal_count": len(labeled_normal_indices),
         "n_clusters_bootstrap": n_clusters,
         "min_pts": min_pts,
         "alpha": alpha,
@@ -377,13 +388,13 @@ def run_ssdbcodi(
             sim_score=float(core["sim_score"][index]),
             t_score=float(core["t_score"][index]),
             c_dist=float(core["c_dist"][index]),
-            e_max=float(core["e_max"][index]),
+            e_max=core["e_max"][index],
             seed_origin_point_id=(
                 point_ids[core["seed_origin"][index]]
                 if core["seed_origin"][index] is not None
                 else None
             ),
-            is_reliable_normal=False,
+            is_reliable_normal=index in (set(manual_seeds) | labeled_normal_indices),
             is_uncertain=False,
         )
         for index in range(len(point_ids))
@@ -399,8 +410,14 @@ def run_ssdbcodi(
         parameters=parameters,
         diagnostics={
             "provider": PROVIDER_NAME,
+            "expansion_tree": [
+                {"from": point_ids[left], "to": point_ids[right], "distance": weight}
+                for left, right, weight in core["expansion_tree"]
+            ],
             "bootstrap_used": used_bootstrap,
             "manual_seed_count": len(manual_seeds),
+            "confirmed_normal_point_ids": sorted(point_ids[i] for i in labeled_normal_indices),
+            "normal_reference_point_ids": sorted(point_ids[i] for i in set(combined_seeds) | labeled_normal_indices),
             "bootstrap_seed_count": len(bootstrap_seeds),
             "outlier_override_count": len(outlier_overrides),
             "labeled_outlier_count": len(labeled_outlier_indices),

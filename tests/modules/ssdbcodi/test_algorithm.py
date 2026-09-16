@@ -172,6 +172,7 @@ class SsdbcodiAlgorithmTests(unittest.TestCase):
 
         self.assertEqual(set(result.keys()), {
             "assigned_label",
+            "expansion_tree",
             "e_max", "r_score", "l_score", "sim_score", "t_score", "c_dist",
             "outlier_indices", "seed_origin",
             "labeled_outlier_indices", "min_pts", "alpha", "beta",

@@ -1,43 +1,14 @@
-# Workflows
+# Product workflow
 
-## Product Workflow
+The only product workflow is active-learning-dashboard under /workflows/active-learning-dashboard/.
+The index imports CSV/JSON/MAT, creates sessions, offers the Wine fixture and resumes saved work.
 
-The repository has one registered workflow:
+The session page contains model projection, linked point evidence and explicit labeling controls,
+a six-column review matrix, explanation-only tree rules and round history.
+Default sorting is Model Instability descending; default visibility is unlabeled records.
+Select a category header to sort and a score tile to inspect that reason. ALL/ANY conditions,
+NA filters, recommendability gates and batch selection work on the round's frozen scores.
 
-~~~text
-/workflows/active-learning-dashboard/
-~~~
-
-It provides dataset import, session creation, scatterplot selection, label submission, SSDBCODI output, rule cards, deterministic recommendations, optional DeepSeek explanations, and round history.
-
-A session dashboard is available at:
-
-~~~text
-/workflows/active-learning-dashboard/<session_id>/
-~~~
-
-The root route and /workflows/ redirect to the product entry.
-
-## Dataset Entry
-
-Users may upload CSV, JSON, or MAT data. The Wine button creates a session through the same generic import and persistence contracts and exists only as a repeatable fixture.
-
-## Round Interaction
-
-Within a session the user:
-
-1. chooses a recommendation category;
-2. reviews the fixed candidate and recommended counts;
-3. links numbered recommendation chips to scatterplot points;
-4. optionally generates a DeepSeek explanation;
-5. selects or accepts points and submits labels;
-6. receives a new round with updated analysis, rules, delta, and plans;
-7. can inspect history or revert to a prior round.
-
-## Module Labs
-
-/modules/ lists isolated pages for data contracts, projection, adapters, selection, labeling, scatterplot, SSDBCODI, and rule generation. These pages are diagnostic surfaces. They do not form separate user workflows and should not own persistent active-learning state.
-
-## Registration Rule
-
-app/module_registry.py must contain exactly the retained modules and the active-learning-dashboard workflow. Adding another workflow requires a genuinely distinct product need, not merely a convenient integration test.
+Old sessions display preserved model results and an explicit six-score upgrade button.
+No DeepSeek control or interpretation endpoint remains.
+Module labs remain independent debugging surfaces, not separate product workflows.

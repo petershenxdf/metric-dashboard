@@ -1,0 +1,56 @@
+.review-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); gap: 20px; }
+.review-layout > *, .review-table-scroll { min-width: 0; }
+.review-plot { width: 100%; height: auto; }
+.review-plot-point { cursor: pointer; }
+.review-plot-point .selection-ring, .review-plot-point .comparison-ring, .review-plot-point .recommendation-ring { fill: none; opacity: 0; pointer-events: none; }
+.review-plot-point.selected .selection-ring, .review-plot-point:focus .selection-ring { stroke: #172b3a; stroke-width: 3; opacity: 1; }
+.review-plot-point.comparison .comparison-ring { stroke: #9c6500; stroke-width: 3; opacity: 1; }
+.review-plot-point.recommended .recommendation-ring { stroke: #555; stroke-width: 2; stroke-dasharray: 3 2; opacity: 1; }
+.review-plot-point .batch-ring { fill: none; opacity: 0; pointer-events: none; }
+.review-plot-point.batch-selected .batch-ring { stroke: #69359c; stroke-width: 2; opacity: 1; }
+.review-matrix tr.batch-selected td:first-child { border-left: 4px double #69359c; }
+.score-tile .score-reason { display: block; font-size: 11px; font-weight: normal; padding: 3px; }
+.band-reviewed { background: #f5f5f5; color: #343a40; }
+.review-guidance { background: #f0f5fa; border-left: 3px solid #173c51; padding: 10px; }
+#label-targets { font-weight: 600; }
+#label-scope-warning { color: #973100; }
+.review-controls, .review-thresholds, .review-actions, .review-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.review-controls label, .review-thresholds label { display: grid; gap: 5px; }
+.review-controls input[type=checkbox] { width: auto; }
+.review-thresholds input { max-width: 110px; }
+.review-table-scroll { overflow-x: auto; max-height: 620px; }
+.review-matrix { width: 100%; border-collapse: separate; border-spacing: 0 5px; }
+.review-matrix caption { text-align: left; padding: 10px 0; }
+.review-matrix th { position: sticky; top: 0; background: #fff; z-index: 1; }
+.review-matrix th, .review-matrix td { padding: 7px; text-align: center; }
+.review-matrix th small { display: block; font-weight: normal; font-size: 11px; }
+.review-matrix tr.selected { outline: 3px solid #173c51; outline-offset: -3px; }
+.review-matrix tbody tr { cursor: pointer; }
+.review-matrix td:nth-child(2) { text-align: left; white-space: nowrap; }
+.review-matrix td small { display: block; }
+.score-tile { width: 100%; min-width: 66px; min-height: 42px; border: 1px solid #567; border-radius: 5px; font-weight: 700; font-size: 16px; cursor: pointer; }
+.score-band { padding: 5px 9px; border: 1px solid #567; border-radius: 4px; }
+.band-0 { background: #EFF3FF; color: #000; }
+.band-1 { background: #BDD7E7; color: #000; }
+.band-2 { background: #6BAED6; color: #000; }
+.band-3 { background: #3182BD; color: #000; }
+.band-4 { background: #08519C; color: #fff; }
+.band-na { background: repeating-linear-gradient(135deg, #F1F2F3, #F1F2F3 6px, #d4d7da 6px, #d4d7da 8px); color: #000; }
+.review-details { overflow-wrap: anywhere; }
+.review-details pre { white-space: pre-wrap; max-height: 240px; overflow: auto; font-size: 12px; }
+.review-details details { margin: 12px 0; }
+.review-details fieldset { margin-top: 20px; }
+.review-details input { display: block; width: 100%; box-sizing: border-box; margin: 8px 0; }
+#selected-hidden, #action-message.error { color: #973100; }
+#filter-chips button { border-radius: 20px; }
+button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid #173c51; outline-offset: 3px; }
+.review-legend .cluster-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+@media (max-width: 900px) { .review-layout { grid-template-columns: 1fr; } .review-matrix { min-width: 710px; } }
+.review-page > section { margin-bottom: 20px; }
+.review-page button:not(.score-tile) { border: 1px solid #9baab5; border-radius: 5px; background: #f6f8fa; color: #173c51; padding: 7px 10px; cursor: pointer; font: inherit; font-size: 13px; }
+.review-page button:not(.score-tile):hover { background: #e9eff3; }
+.review-page button:disabled { opacity: .55; cursor: wait; }
+.review-page select, .review-page input:not([type=checkbox]) { border: 1px solid #9baab5; border-radius: 4px; padding: 7px; font: inherit; font-size: 13px; }
+.review-page fieldset { border: 1px solid #cad3da; border-radius: 6px; padding: 12px; }
+.review-page .metric-strip { align-items: center; }
+.review-page time { font-size: 12px; color: #52616b; overflow-wrap: anywhere; }

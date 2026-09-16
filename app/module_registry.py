@@ -104,7 +104,7 @@ WORKFLOWS: Tuple[WorkflowInfo, ...] = (
         title="Active Learning Dashboard",
         purpose=(
             "Persistent multi-round active learning with deterministic "
-            "recommendations, rule evidence, and constrained DeepSeek explanations."
+            "six-score review priorities, linked point evidence, and human feedback."
         ),
         modules=tuple(module.slug for module in MODULES),
         blueprint_factory=_lazy_blueprint(

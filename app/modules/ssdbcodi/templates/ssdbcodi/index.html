@@ -295,7 +295,7 @@
                 <td>{{ "%.4f"|format(point.scores.sim_score) }}</td>
                 <td>{{ "%.4f"|format(point.scores.t_score) }}</td>
                 <td>{{ "%.4f"|format(point.scores.c_dist) }}</td>
-                <td>{{ "%.4f"|format(point.scores.e_max) }}</td>
+                <td>{{ "%.4f"|format(point.scores.e_max) if point.scores.e_max is not none else "NA — no normal reference" }}</td>
                 <td>{{ point.scores.seed_origin_point_id or "-" }}</td>
               </tr>
             {% endfor %}

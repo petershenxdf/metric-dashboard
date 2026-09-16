@@ -1,163 +1,125 @@
-# Active Learning Design
+# Six-score active learning
 
-## Role
+The current implementation follows the supplied Dashboard_Active_Learning_LaTeX design.
+The previous eight-category RecommendationPlanV2 / DeepSeek system is removed.
 
-active_learning owns the generic, persistent, multi-round product loop. It coordinates existing deterministic services while keeping their ownership boundaries intact.
+## Ownership and loop
 
-~~~text
-DatasetVersion -> Round 0 -> RecommendationPlanV2
--> LabelEvents -> Round 1 -> RoundDelta -> next plan
-~~~
+active_learning owns dataset versions, preprocessing, sessions, effective human labels,
+saved rounds and the six-score snapshot. SSDBCODI remains model truth; tree rules only explain it.
+Each new round runs SSDBCODI with all effective labels, records model changes, reuses the parent
+projection, calculates the six scores and saves them with the analysis. GET never recomputes scores.
 
-Wine uses the same adapter, store, analysis, recommendation, and UI contracts as uploaded data.
+## Definitions
 
-## Generic Data Layer
+Let h = MinPts, d = ordinary Euclidean model-feature distance, r = mutual reachability distance,
+and L = human semantic references. Exclude the candidate itself from every reference/neighborhood.
+Human-confirmed normal references include semantic examples and explicit Normal feedback,
+excluding explicitly confirmed outliers. Predicted outliers and bootstrap anchors are not human references.
 
-DatasetAdapter implementations support CSV, JSON, and MAT. import_dataset_bytes and import_records produce PreparedDataset with:
+| Category ID | Raw score (larger means more reason to review) | Availability / initial recommendation gate |
+| --- | --- | --- |
+| cluster_assignment_conflict | fraction of nearest normal neighbors in a different normal group | normal candidate, at least one comparison, up to h normal neighbors; G > 0 |
+| label_coverage_gap | minimum r to another human semantic example | at least one reference, support check passes; P ≥ 75 |
+| weak_group_reachability | 1 − exp(−minimum full expansion-path bottleneck to another human normal reference) | complete path and reference; G > 0 and P ≥ 75 |
+| local_sparsity | 1 − exp(−mean r to h nearest other records) | at least h other records, including predicted outliers; G > 0 and P ≥ 75 |
+| known_outlier_similarity | exp(−minimum d to another human-confirmed outlier) | reference exists; P ≥ 75 and distance ≤ reference's local radius |
+| model_instability | mean pairwise 1 − Jaccard(normal-group member sets) | at least two complete nearby-setting runs; G > 0 and P ≥ 75 |
 
-- immutable DatasetVersion and fingerprints;
-- raw records and isolated optional ground truth;
-- finite model FeatureMatrix;
-- feature-role schema;
-- transformation map and compressed artifact references.
+Coverage support radius is the distance to the min(h, n−1)th other data point, using all records.
+The cutoff is the eligible radius at ceil(0.90 × eligible count), with boundary ties included.
+A failed coverage support check means no calculable coverage score for that pool.
+The known-outlier local radius uses the same ordinary-distance neighborhood at its reference.
+A failed local match excludes recommendation but preserves the similarity raw score and percentile.
 
-Numeric missing values use median imputation and robust scaling. Categorical values use a visible missing token and deterministic one-hot encoding. Source point IDs remain stable across preprocessing-version changes.
+For each category's eligible, calculable pool:
+P = 100 × (number lower + 0.5 × number equal) / pool size.
+All exact ties get the same value; an all-tied pool gets 50. All tied is explicitly displayed.
+No other category, browser sort or visible-row filter changes this pool.
+No aggregate score or cross-category comparison of expected benefit is implied.
 
-## Session And Rounds
+## Full expansion and instability
 
-ActiveLearningSession binds one dataset version to configuration, vocabulary, budget, current round, and label revision.
+The previous rScore used direct distance to a seed. It is now based on recorded full expansion
+paths. SSDBCODI records a deterministic Prim minimum-spanning expansion tree on the complete
+mutual-reachability graph. Its paths preserve minimax bottlenecks. The core rScore uses model
+seeds plus explicit Normal feedback, while review G3 uses only human-supported normal references
+on that same recorded tree. Normal feedback does not create a semantic class seed.
+This is an explicit implementation choice for the document's previously missing expansion-path
+support; the updated model feedback contract is expansion_normal_feedback_v2. Existing saved
+analyses are not rewritten; subsequent rounds use the updated model.
+Point details reconstruct the complete selected path and show its bottleneck.
 
-Round 0 is the baseline. Every successful label batch creates a new ActiveLearningRound using all current effective labels. SSDBCODI is rerun rather than incrementally updated.
+Instability fixes input data, preprocessing, labels, all other settings and deterministic
+bootstrap behavior, then runs the complete SSDBCODI pipeline at h−1, h and h+1 within [1,n−1].
+The current h result is reused. Group member sets include the candidate. Outliers have empty
+sets: two empties disagree by zero, one empty by one. Group names never affect the score.
+Splits and merges are detected by member overlap. Missing outputs or failed runs yield NA,
+not a silently reduced ensemble. Run settings, exact group memberships and errors are stored.
 
-Round states are computing, ready_for_labeling, labels_committed, failed, and
-stopped. Stale writes are rejected using expected round, revision, and plan
-IDs. A label submission first computes a provisional next round, then commits
-label events, the parent status, next-round snapshot, vocabulary, and session
-head in one SQLite transaction. Failed analysis leaves the current round
-unchanged.
+## Eligibility, feedback and stopping
 
-## Label Model
+Normally only unlabeled points enter percentile pools. Previously confirmed points may re-enter
+when their normal-group member set or outlier status changes relative to the parent round.
+Immediately submitted confirmations are not instantly requested again for that same transition.
+The re-review reason is shown. Semantic and outlier labels remain separate dimensions.
 
-Persistent dimensions are semantic_class, outlier_status, and uncertain.
+Unsure saves an uncertain LabelEvent, excludes the point for one subsequent round and never
+enters any confirmed reference set. Later rounds can include it again as unlabeled.
+An existing confirmed label is not erased merely by an unsure answer.
 
-Human semantic labels are stable and separate from changing cluster IDs. Corrections create superseding LabelEvents. Uncertain events are recorded but never become SSDBCODI seeds.
+Recommendations use their individual category gate, descending unrounded percentile and stable
+point ID. Batches keep one representative per identical transformed feature vector.
+Default batch size is 4. Default numeric percentile threshold is 75 and is session-configurable.
+Empty queues are legitimate; manual labeling remains possible. Only the configured effective
+label-dimension budget automatically stops a session. The 2,000-point exact-analysis limit remains.
 
-Already-labeled records are excluded by default. A labeled record may return only after group movement, outlier-status movement, or a current rule conflict, and the plan must provide a recheck_reason.
+Label commits validate current round and label revision, compute the next snapshot, then atomically
+save superseding events, the next round and the new session head. Failed analysis commits nothing.
+Corrections, lineage alignment, history and branch-aware revert are retained.
 
-Before an SSDBCODI rerun, equal semantic labels are compiled into a must-link
-seed relation. Different semantic labels are mapped to distinct existing
-bootstrap groups when possible. The mapping is deterministic and recorded in
-analysis diagnostics; the user-facing semantic vocabulary never becomes a
-volatile cluster ID.
+## Persistence and legacy sessions
 
-## History-Aware Recommendation
+New round JSON contains review with version six_scores_expansion_v1, rows, categories, parameters,
+recorded expansion tree and instability group evidence. It no longer contains recommendation_plans.
+Old round payloads load with an empty review field. The dashboard asks for an explicit POST upgrade,
+which adds a new round from existing labels. It never reruns the legacy model during GET.
+Existing legacy interpretation/recommendation tables, if present, are left untouched and unused.
+New databases do not create these tables. No existing dataset or label history is deleted.
 
-Each round starts with deterministic category plans from rule_panel and then applies:
+## UI
 
-- complete point profiles before ranking;
-- active-label and history exclusions;
-- category evidence;
-- estimated affected scope;
-- batch diversity;
-- recent and all-history repetition penalties;
-- justified rechecks;
-- stable point-ID tie-breaking;
-- cross-category coverage;
-- previous-plan differences.
+One point per row and six fixed columns; ColorBrewer Blues bands use the unrounded percentile:
+[0,25), [25,50), [50,75), [75,90), [90,100]. Fills are #EFF3FF, #BDD7E7, #6BAED6,
+#3182BD, #08519C; text is black except white on the last band. NA uses gray diagonal stripes.
+Numbers, full-name hover details, focus states and keyboard controls supplement color.
 
-Default recommendation batch size is four. Candidate pool size is max(12, batch_size times 3); overlap and exception categories may recommend up to six.
+Sort keeps NA last in both directions and ties by point ID. Status, group and ID filters always
+restrict results; numeric and explicit NA conditions can use Match ALL or Match ANY.
+Recommendable-only additionally enforces the chosen category's gates.
+Filters have removable chips, visible counts, reset and empty-state messaging.
+Selecting a row/tile/plot point links both views without changing cluster colors. Hidden selection
+is explicitly announced. Raw scores, precise percentiles, full paths, neighbors and alternate
+member sets are available in details. Explicit labels refresh plot, scores and queue together.
 
-label_priority is a deterministic meta-ranker over unresolved category plans. It never delegates priority or point choice to DeepSeek.
+Labeling mode is explicit: Single targets the focused point; checking records enters Batch mode.
+Purple double rings show every checked target in the plot, independently of the solid focused-point
+outline. Batch submission lists the exact IDs and requires confirmation. An empty batch never falls
+back to the focused point. Switching to Single clears the batch; successful submissions clear batch
+targets so that a later action cannot silently reuse them. Request failures preserve the batch.
 
-Recommendation history distinguishes:
+Null percentile with a finite raw value and ineligible status is shown as Reviewed / Deferred,
+with the raw evidence visible in details. Missing evidence remains patterned NA with a visible reason.
+Per-column reference guidance explains cold start without substituting model predictions for human
+labels. Zero instability explicitly says that the nearby model settings agree.
 
-- computed: a plan included the record;
-- shown: the user opened a category that displayed the record;
-- selected: the record was included in a submitted selection;
-- labeled: the submission supplied a non-uncertain label.
+Search, group/status, recommendation filter, sort column/direction and ALL/ANY score conditions
+are serialized in the page URL's validated view parameter. They survive reload, label submission
+and revert without affecting frozen scores. A group absent in a later round is retained as an
+explicit no-match filter rather than silently broadened. Selected point/category remain independent
+of the sort column. No labels or ground truth are stored in the view parameter.
 
-Shown events are idempotent per round/plan/record. Ranking repetition penalties
-use shown history, not every plan computed in the background.
+## Evidence boundary
 
-After the ordered points are fixed, `category_evidence_v2` builds one
-CategoryEvidenceCard per recommended record. It calculates full-feature-space
-neighbors, own-group position, rule-line proximity, comparison exemplars,
-human-label agreement, data-quality checks, rule exceptions, and round
-stability. All required category dimensions remain visible, including an
-explicit insufficient state when evidence is unavailable.
-
-Every evidence dimension separates four deterministic fields: the fixed
-question, its direct answer, the connection between that finding and this
-specific record, and what a human label would clarify. Negative findings are
-kept as counterevidence instead of being rewritten as reasons for attention.
-Stored rounds using the earlier evidence contract are refreshed in memory
-before rendering or translation, without changing their recommendation IDs.
-
-## RoundDelta And Lineage
-
-Cluster lineage aligns groups between rounds by maximum member overlap so display identities do not swap merely because internal ordering changed.
-
-RoundDelta summarizes group membership changes, outlier changes, rule changes, resolved issues, and recommendation changes. This context explains why a record appears again or why the next batch differs.
-
-Rule changes compare condition/threshold fingerprints, not only rule IDs.
-Revert reconstructs effective labels from the selected round's parent ancestry.
-Events record the resulting child round so two branches created from the same
-parent remain distinguishable.
-
-## DeepSeek Translation
-
-The shared DeepSeekClient is configured for deepseek-v4-pro, temperature zero, direct JSON, and thinking disabled.
-
-TranslationPacket contains only the fixed plan, relevant rules, recommended profiles, CategoryEvidenceCards without folded technical numbers, allowed labels, prior label context, and RoundDelta. It excludes full datasets, unrelated rows, ground truth, and non-recommended candidate rows.
-
-DeepSeek writes one PointGuidance per recommended record. Every evidence bullet
-must preserve its dimension ID, status, fact IDs, order, and comparison target
-IDs. Prompt version `active_learning_round_translation_v5` requires three
-non-overlapping outputs for each fixed question: a direct answer, one
-supporting observation, and a point-specific explanation of what the human
-label would clarify. The model cannot rewrite the fixed question or category
-explanation.
-Validation rejects changed IDs/order/rules/category, invented evidence,
-unsupported direct analysis changes, and technical user-facing prose. A
-failed bullet falls back locally to deterministic wording; immutable-contract
-or provider failure falls back for the whole response and never blocks the
-round.
-
-Only a validated response whose returned model is deepseek-v4-pro is shown as DeepSeek-generated.
-
-The dashboard requests interpretation only through the explicit POST action.
-Page GETs never spend tokens, and cached interpretation is accepted only when
-its prompt-template version matches the current contract.
-
-## Persistence
-
-SQLite stores dataset metadata, sessions, rounds, LabelEvents, plan snapshots, and interpretation diagnostics. Raw tables and model matrices use compressed artifacts referenced by fingerprint.
-
-Service restart must recover the current session head and complete history.
-
-MDS coordinates are cached by immutable FeatureMatrix. The full-feature
-distance/neighbor graph is cached by dataset and preprocessing version.
-Comparison exemplars are selected from that cached graph using current labels,
-so label-dependent meaning is never stale.
-
-## Stop Behavior
-
-The session stops automatically only when the label budget is reached or no eligible candidate remains. Stable analysis produces a stop suggestion but allows the user to continue.
-
-## Public Routes
-
-~~~text
-/workflows/active-learning-dashboard/
-/workflows/active-learning-dashboard/<session_id>/
-/api/datasets
-/api/active-learning/sessions
-/api/active-learning/sessions/<session_id>/state
-/api/active-learning/sessions/<session_id>/history
-/api/active-learning/sessions/<session_id>/rounds/<round_id>/labels
-/api/active-learning/sessions/<session_id>/rounds/<round_id>/revert
-/api/active-learning/sessions/<session_id>/rounds/<round_id>/categories/<category>/interpret
-~~~
-
-## Tests
-
-Tests cover mixed data import, versioning, ground-truth isolation, five-round behavior, stable plan identity, history exclusions, rechecks, superseding events, stale conflicts, revert, restart recovery, TranslationPacket minimization, model/schema validation, fallback, and final workflow routes.
+Tests verify formulas and implementation behavior, not policy effectiveness. The specification's
+equal-budget random-review comparison and human usability/color study remain unperformed research.

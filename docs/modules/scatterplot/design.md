@@ -17,15 +17,17 @@ Each rendered point may include:
 - recommendation state;
 - numbered guidance-callout geometry.
 
-Recommended points retain orange/yellow emphasis. Numbered badges and leader lines disambiguate dense areas. Chip hover/click isolates one recommended point by dimming the others without changing selection.
+The product uses dashed recommendation rings, solid selection outlines and amber comparison rings.
+Cluster colors and diamond outlier markers remain unchanged. The six-score table uses its own
+sequential blue scale. Plot and table selection work by pointer or keyboard.
 
 ## Invariants
 
 - every rendered point maps to one source point ID;
 - selected state comes from selection;
 - groups/outliers come from the current analysis;
-- recommendation order comes from RecommendationPlanV2;
-- highlighted IDs equal the fixed recommended IDs;
+- recommendation order comes from the selected six-score category and visible-row gates;
+- highlighted IDs equal that category's visible recommended batch;
 - plot linking is visual only;
 - labels and callouts must remain readable at desktop and mobile widths.
 

@@ -7,8 +7,9 @@
     <p class="eyebrow">Integrated Dashboard</p>
     <h1>Generic Active Learning Dashboard</h1>
     <p>
-      Import a structured dataset, inspect the SSDBCODI result, label a small
-      deterministic batch, and continue through reproducible learning rounds.
+      Import a structured dataset, inspect the SSDBCODI result, review points in the
+      score matrix, and continue through reproducible learning rounds. Six independent
+      scores explain review priorities; no API key or language model is required.
     </p>
   </section>
 
@@ -61,6 +62,14 @@
           <input name="n_clusters" type="number" min="1" value="3">
         </label>
         <label>
+          MinPts (must be less than record count)
+          <input name="min_pts" type="number" min="1" value="3">
+        </label>
+        <label>
+          Recommendation percentile threshold
+          <input name="review_percentile_threshold" type="number" min="0" max="100" value="75">
+        </label>
+        <label>
           Recommendation batch
           <input name="batch_size" type="number" min="1" value="4">
         </label>
@@ -73,11 +82,12 @@
     </article>
 
     <aside class="panel">
-      <p class="eyebrow">Regression Fixture</p>
-      <h2>Start With Wine</h2>
+      <p class="eyebrow">Built-in Example</p>
+      <h2>Load Wine Dataset</h2>
       <p>
-        The wine dataset is a test fixture for the same generic dataset and
-        active-learning contracts used by uploaded data.
+        Load the included wine.mat directly — no file upload is needed.
+        This creates a new session with the projection and all six review columns.
+        Categories that need human labels show NA until you provide those labels.
       </p>
       <form
         class="debug-form"
@@ -96,7 +106,7 @@
           Label budget
           <input name="label_budget" type="number" min="1" placeholder="optional">
         </label>
-        <button class="button" type="submit">Create Wine Test Session</button>
+        <button class="button" type="submit">Load Wine Dataset</button>
       </form>
     </aside>
   </section>

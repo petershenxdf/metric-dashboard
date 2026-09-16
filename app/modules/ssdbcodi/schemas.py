@@ -17,7 +17,7 @@ class PointScores:
     sim_score: float
     t_score: float
     c_dist: float
-    e_max: float
+    e_max: float | None
     seed_origin_point_id: str | None = None
     is_reliable_normal: bool = False
     is_uncertain: bool = False
@@ -31,8 +31,10 @@ class PointScores:
             raise ValueError("is_reliable_normal must be a boolean")
         if not isinstance(self.is_uncertain, bool):
             raise ValueError("is_uncertain must be a boolean")
-        for name in ("r_score", "l_score", "sim_score", "t_score", "c_dist", "e_max"):
+        for name in ("r_score", "l_score", "sim_score", "t_score", "c_dist"):
             object.__setattr__(self, name, clean_number(getattr(self, name), name))
+        if self.e_max is not None:
+            object.__setattr__(self, "e_max", clean_number(self.e_max, "e_max"))
         if self.seed_origin_point_id is not None:
             object.__setattr__(
                 self,

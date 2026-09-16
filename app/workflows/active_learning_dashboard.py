@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -21,9 +20,6 @@ from app.modules.active_learning import (
     SessionConfig,
 )
 from app.modules.active_learning.service import ActiveLearningConflict
-from app.modules.active_learning.translation import (
-    PROMPT_VERSION as TRANSLATION_PROMPT_VERSION,
-)
 from app.shared.env import env_text, repo_root
 from app.shared.flask_helpers import api_error, api_success
 from app.shared.wine_dataset import WINE_FEATURE_NAMES, wine_raw_points
@@ -96,52 +92,16 @@ def create_blueprint() -> Blueprint:
 
     @blueprint.get("/workflows/active-learning-dashboard/<session_id>/")
     def dashboard(session_id: str):
-        focus_category = request.args.get("focus_category", "label_priority")
-        provider_kind = request.args.get("provider_kind", "mock").strip().lower()
-        if provider_kind not in {"mock", "deepseek"}:
-            provider_kind = "mock"
+        focus_category = request.args.get("focus_category", "model_instability")
         try:
             service = _service()
             state = service.session_state(
                 session_id,
                 focus_category=focus_category,
             )
-            service.store.record_recommendation_shown(
-                session_id=session_id,
-                round_id=state["round"]["round_id"],
-                plan_id=state["recommendation_plan"]["plan_id"],
-                point_ids=state["recommendation_plan"].get(
-                    "recommended_point_ids",
-                    (),
-                ),
-                created_at=datetime.now(timezone.utc).isoformat(),
-            )
-            interpretation = None
-            if request.args.get("show_interpretation") == "1":
-                cached_interpretation = service.store.get_interpretation(
-                    state["round"]["round_id"],
-                    state["recommendation_plan"]["plan_id"],
-                    provider_kind,
-                )
-                if (
-                    cached_interpretation is not None
-                    and cached_interpretation.get("diagnostics", {}).get(
-                        "prompt_template_version"
-                    )
-                    == TRANSLATION_PROMPT_VERSION
-                ):
-                    interpretation = cached_interpretation
-            guidance = (
-                interpretation["guidance"]
-                if interpretation is not None
-                else state["guidance"]
-            )
             return render_template(
                 "workflows/active_learning_dashboard.html",
                 state=state,
-                guidance=guidance,
-                interpretation=interpretation,
-                provider_kind=provider_kind,
             )
         except ValueError as exc:
             return render_template(
@@ -170,12 +130,14 @@ def create_blueprint() -> Blueprint:
     def create_session_api():
         payload = request.get_json(silent=True) or {}
         try:
+            if not isinstance(payload, Mapping):
+                raise ValueError("request must be a JSON object")
             session = _service().create_session(
                 str(payload.get("dataset_version_id", "")),
                 SessionConfig.from_dict(payload.get("config")),
             )
             state = _service().session_state(session.session_id)
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             return jsonify(api_error("invalid_session", str(exc))), 400
         return jsonify(
             api_success(
@@ -192,7 +154,7 @@ def create_blueprint() -> Blueprint:
             state = _service().session_state(
                 session_id,
                 focus_category=request.args.get(
-                    "focus_category", "label_priority"
+                    "focus_category", "model_instability"
                 ),
             )
         except ValueError as exc:
@@ -205,6 +167,8 @@ def create_blueprint() -> Blueprint:
     def labels_api(session_id: str, round_id: str):
         payload = request.get_json(silent=True) or {}
         try:
+            if not isinstance(payload, Mapping):
+                raise ValueError("request must be a JSON object")
             if not payload.get("expected_round_id"):
                 raise ValueError("expected_round_id is required")
             result = _service().commit_labels(
@@ -214,8 +178,7 @@ def create_blueprint() -> Blueprint:
                 expected_label_revision=int(
                     payload.get("expected_label_revision", -1)
                 ),
-                plan_id=str(payload.get("plan_id", "")),
-                category=str(payload.get("category", "label_priority")),
+                category=str(payload.get("category", "model_instability")),
                 labels=payload.get("labels", ()),
             )
         except ActiveLearningConflict as exc:
@@ -230,25 +193,23 @@ def create_blueprint() -> Blueprint:
     def revert_api(session_id: str, round_id: str):
         try:
             result = _service().revert_to_round(session_id, round_id)
+        except ActiveLearningConflict as exc:
+            return jsonify(api_error("stale_round", str(exc))), 409
         except ValueError as exc:
             return jsonify(api_error("invalid_round", str(exc))), 400
         return jsonify(api_success(result))
 
-    @blueprint.post(
-        "/api/active-learning/sessions/<session_id>/rounds/<round_id>"
-        "/categories/<category>/interpret"
-    )
-    def interpret_api(session_id: str, round_id: str, category: str):
+    @blueprint.post("/api/active-learning/sessions/<session_id>/upgrade")
+    def upgrade_api(session_id):
         payload = request.get_json(silent=True) or {}
         try:
-            result = _service().interpret_category(
-                session_id,
-                round_id=round_id,
-                category=category,
-                provider_kind=str(payload.get("provider_kind", "deepseek")),
-            )
+            if not isinstance(payload, Mapping):
+                raise ValueError("request must be a JSON object")
+            result = _service().upgrade_round(session_id, payload.get("expected_round_id"))
+        except ActiveLearningConflict as exc:
+            return jsonify(api_error("stale_round", str(exc))), 409
         except ValueError as exc:
-            return jsonify(api_error("invalid_interpretation", str(exc))), 400
+            return jsonify(api_error("invalid_upgrade", str(exc))), 400
         return jsonify(api_success(result))
 
     @blueprint.get("/api/active-learning/sessions/<session_id>/history")
@@ -296,6 +257,8 @@ def _import_dataset_from_request(service: ActiveLearningService):
     options = _dataset_options()
     if request.is_json:
         payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, Mapping):
+            raise ValueError("request must be a JSON object")
         records = payload.get("records")
         if records is None:
             raise ValueError("JSON request must include records")
@@ -362,6 +325,8 @@ def _session_config_from_request() -> SessionConfig:
     return SessionConfig.from_dict(
         {
             "n_clusters": values.get("n_clusters", 3),
+            "min_pts": values.get("min_pts", 3),
+            "review_percentile_threshold": values.get("review_percentile_threshold", 75),
             "max_depth": values.get("max_depth", 3),
             "min_samples_leaf": values.get("min_samples_leaf", 1),
             "batch_size": values.get("batch_size", 4),
